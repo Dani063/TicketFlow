@@ -1,0 +1,11 @@
+<h1>Lista de Tickets</h1>
+<ul>
+    {% for ticket in tickets %}
+    <li>
+        <a href="{% url 'ticket_detail' ticket.id %}">
+            {{ ticket.title }}
+        </a>
+    </li>
+    {% endfor %}
+</ul>
+<a href="{% url 'create_ticket' %}">Crear Nuevo Ticket</a>
