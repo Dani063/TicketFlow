@@ -8,6 +8,8 @@ from django.contrib import admin
 from django.contrib.auth.views import LoginView, LogoutView
 from app import forms, views
 
+# -*- coding: utf-8 -*-
+
 urlpatterns = [
     path('', views.home, name='home'),  # Página principal
     # Funcionalidades de Ticket

@@ -1,7 +1,7 @@
 """
 Definition of views.
 """
-
+# -*- coding: utf-8 -*-
 from datetime import datetime
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
@@ -16,7 +16,7 @@ def home(request):
 
 def tickets_list(request):
     tickets = Ticket.objects.all()
-    return render(request, 'tickets/tickets_list.html', {'tickets': tickets})
+    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/tickets_list.html', {'tickets': tickets})
 
 def ticket_detail(request, pk):
     ticket = get_object_or_404(Ticket, pk=pk)

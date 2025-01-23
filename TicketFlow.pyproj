@@ -60,6 +60,7 @@
     <Folder Include="TicketFlow\" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="app\static\tickets\logo.png" />
     <Content Include="app\static\tickets\style.css" />
     <Content Include="app\templates\tickets\create_ticket.html" />
     <Content Include="app\templates\tickets\home.html" />
