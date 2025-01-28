@@ -18,6 +18,16 @@ def tickets_list(request):
     tickets = Ticket.objects.all()
     return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/tickets_list.html', {'tickets': tickets})
 
+def customers_list(request):
+    customers = User.objects.all()
+    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/customers_list.html', {'customers': customers})
+
+def reporting(request):
+    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/reporting.html')
+
+def settings(request):
+    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/settings.html')
+
 def ticket_detail(request, pk):
     ticket = get_object_or_404(Ticket, pk=pk)
     return render(request, 'tickets/ticket_detail.html', {'ticket': ticket})

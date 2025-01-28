@@ -61,9 +61,14 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="app\static\tickets\logo.png" />
+    <Content Include="app\static\tickets\profile-pic.png" />
     <Content Include="app\static\tickets\style.css" />
     <Content Include="app\templates\tickets\create_ticket.html" />
+    <Content Include="app\templates\tickets\customers_list.html" />
     <Content Include="app\templates\tickets\home.html" />
+    <Content Include="app\templates\tickets\navbar_sidebar.html" />
+    <Content Include="app\templates\tickets\reporting.html" />
+    <Content Include="app\templates\tickets\settings.html" />
     <Content Include="app\templates\tickets\tickets_list.html" />
     <Content Include="app\templates\tickets\ticket_detail.html" />
     <Content Include="requirements.txt" />

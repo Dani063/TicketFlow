@@ -14,6 +14,7 @@ urlpatterns = [
     path('', views.home, name='home'),  # Página principal
     # Funcionalidades de Ticket
     path('tickets/', views.tickets_list, name='tickets_list'),  # Listar tickets
+    path('tickets/create/undefined', views.tickets_list, name='tickets_list'),
     path('tickets/create/', views.create_ticket, name='create_ticket'),
     path('tickets/<int:pk>/assign/', views.assign_agent, name='assign_agent'),
     path('tickets/<int:pk>/update/', views.update_ticket, name='update_ticket'),
@@ -25,7 +26,15 @@ urlpatterns = [
     
     # Funcionalidades de Gestión de Usuarios
     path('users/create/', views.create_user, name='create_user'),
-    path('admin/', admin.site.urls)
+    path('admin/', admin.site.urls),
 
-    # Puedes añadir más rutas aquí para las funcionalidades restantes como reportes, búsquedas, etc.
+    # Customers
+    path('customers/', views.customers_list, name='customers_list'),  # Pagina de clientes
+    path('customers/undefined', views.tickets_list, name='tickets_list'),
+    #Reporting
+    path('reporting/', views.reporting, name='reporting'),  # Página con datos y reportes
+    path('reporting/undefined', views.tickets_list, name='tickets_list'),
+    #Admin
+    path('settings/', views.settings, name='settings'),  # Página de ajustes
+    path('settings/undefined', views.tickets_list, name='tickets_list'),
 ]

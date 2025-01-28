@@ -1,4 +1,4 @@
-﻿<!-- templates/tickets/crete_ticket.html -->
+<!-- templates/tickets/tickets_list.html -->
 {% load static %}
 <!DOCTYPE html>
 <html lang="es">
@@ -24,7 +24,7 @@
                     <span class="tooltip">Views</span>
                 </a>
             </li>
-            <li>
+            <li class="active">
                 <a href="{% url 'customers_list' %}">
                     <i class="fas fa-users"></i>
                     <span class="tooltip">Customers</span>
@@ -151,11 +151,6 @@
                 const nextTab = tab.nextElementSibling || tab.previousElementSibling;
                 tab.remove();
                 saveTabs();
-                if (nextTab) {
-                    window.location.href = nextTab.dataset.url;
-                } else {
-                    window.location.href = '{% url "tickets_list" %}';
-                }
             });
 
             tab.appendChild(img);
@@ -206,12 +201,7 @@
     </script>
 
     <div class="content">
-        <h1>Crear Nuevo Ticket</h1>
-        <form method="post">
-            {% csrf_token %}
-            <!-- Campos del formulario -->
-            <button type="submit">Crear</button>
-        </form>
+        <h1>Usuarios</h1>
     </div>
 </body>
 </html>
