@@ -6,6 +6,7 @@
     <meta charset="UTF-8">
     <title>TicketFlow</title>
     <link rel="stylesheet" type="text/css" href="{% static 'tickets/style.css' %}">
+    <link rel="stylesheet" type="text/css" href="{% static 'tickets/create_ticket.css' %}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 </head>
 <body>
@@ -74,10 +75,55 @@
             </ul>
         </div>
     </div>
+    <div class="user-popup" id="userPopup" style="display: none;">
+        <div class="popup-header">
+            <div class="user-info">
+                <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="profile-picture">
+                <span class="username">Usuario</span>
+                <a href="{% url 'profile' %}" class="view-profile">Ver perfil</a>
+            </div>
+        </div>
+        <div class="popup-content">
+            <button class="logout-button" id="logoutButton">Desloguearse</button>
+        </div>
+    </div>
+
+    <script>
+        document.querySelector('.user-profile').addEventListener('click', () => {
+            const userPopup = document.getElementById('userPopup');
+            const notificationsPopup = document.getElementById('notificationsPopup');
+            const userProfileIcon = document.querySelector('.user-profile');
+            const notificationsIcon = document.querySelector('.notifications');
+
+            if (userPopup.style.display === 'block') {
+                userPopup.style.display = 'none';
+                userProfileIcon.classList.remove('active');
+            } else {
+                userPopup.style.display = 'block';
+                userProfileIcon.classList.add('active');
+
+                // Cerrar la ventana de notificaciones si está abierta
+                if (notificationsPopup.style.display === 'block') {
+                    notificationsPopup.style.display = 'none';
+                    notificationsIcon.classList.remove('active');
+                }
+            }
+        });
+
+        document.getElementById('logoutButton').addEventListener('click', () => {
+            // Aquí puedes añadir la lógica para desloguearse, por ejemplo, redirigir a la página de logout
+            window.location.href = '{% url "login" %}';
+        });
+
+    </script>
+
     <script>
         document.querySelector('.notifications').addEventListener('click', () => {
             const notificationsPopup = document.getElementById('notificationsPopup');
+            const userPopup = document.getElementById('userPopup');
             const notificationsIcon = document.querySelector('.notifications');
+            const userProfileIcon = document.querySelector('.user-profile');
+
             if (notificationsPopup.style.display === 'block') {
                 notificationsPopup.style.display = 'none';
                 notificationsIcon.classList.remove('active');
@@ -85,6 +131,12 @@
                 notificationsPopup.style.display = 'block';
                 notificationsIcon.classList.add('active');
                 loadNotifications();
+
+                // Cerrar la ventana de usuario si está abierta
+                if (userPopup.style.display === 'block') {
+                    userPopup.style.display = 'none';
+                    userProfileIcon.classList.remove('active');
+                }
             }
         });
 
@@ -204,14 +256,111 @@
             highlightActiveTab();
         });
     </script>
+    <script>
+        // Ejemplo de inicialización de un desplegable con búsqueda
+        document.addEventListener('DOMContentLoaded', () => {
+            const selectElements = document.querySelectorAll('select');
+            selectElements.forEach(select => {
+                // Inicializa el desplegable con búsqueda (puedes usar una librería como Select2)
+                $(select).select2();
+            });
+        });
 
-    <div class="content">
-        <h1>Crear Nuevo Ticket</h1>
-        <form method="post">
-            {% csrf_token %}
-            <!-- Campos del formulario -->
-            <button type="submit">Crear</button>
-        </form>
+        // Ejemplo de manejo de creación de nuevos usuarios/tags
+        document.getElementById('ccs').addEventListener('input', (event) => {
+            const value = event.target.value;
+            if (value.endsWith(',')) {
+                // Lógica para crear un nuevo usuario
+                const newUser = value.slice(0, -1);
+                console.log('Crear nuevo usuario:', newUser);
+                // Añadir el nuevo usuario a la lista de CCs
+            }
+        });
+
+        document.getElementById('tags').addEventListener('change', (event) => {
+            const value = event.target.value;
+            if (value === 'create_new_tag') {
+                // Lógica para crear un nuevo tag
+                const newTag = prompt('Introduce el nuevo tag:');
+                if (newTag) {
+                    console.log('Crear nuevo tag:', newTag);
+                    // Añadir el nuevo tag a la lista de tags
+                }
+            }
+        });
+    </script>
+    <div class="title-bar">
+        <h1>Nuevo Ticket</h1>
+    </div>
+    <div class="ticket-form">
+        <div class="column">
+            <h2>Crear Ticket</h2>
+            <div class="form-group">
+                <label for="empresa">Empresa</label>
+                <select id="empresa">
+                    <option value="">Selecciona una empresa</option>
+                    <option value="empresa1">Empresa 1</option>
+                    <option value="empresa2">Empresa 2</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="solicitante">Solicitante</label>
+                <input type="text" id="solicitante" placeholder="Buscar solicitante...">
+            </div>
+
+            <div class="form-group">
+                <label for="asignado">Asignado</label>
+                <input type="text" id="asignado" placeholder="Buscar agente...">
+            </div>
+
+            <div class="form-group">
+                <label for="ccs">CCs</label>
+                <input type="text" id="ccs" placeholder="Añadir usuarios...">
+            </div>
+
+            <div class="form-group">
+                <label for="tags">Tags</label>
+                <input type="text" id="tags" placeholder="Buscar o crear nuevo tag...">
+            </div>
+
+            <div class="form-group">
+                <label for="tipo">Tipo</label>
+                <select id="tipo">
+                    <option value="soporte">Soporte</option>
+                    <option value="incidencia">Incidencia</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="prioridad">Prioridad</label>
+                <select id="prioridad">
+                    <option value="baja">Baja</option>
+                    <option value="media">Media</option>
+                    <option value="alta">Alta</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="servicio">Servicio</label>
+                <input type="text" id="servicio" placeholder="Buscar servicio...">
+            </div>
+
+            <div class="form-group">
+                <label for="canal">Canal</label>
+                <input type="text" id="canal" placeholder="Buscar canal...">
+            </div>
+
+            <div class="form-group">
+                <label for="idioma">Idioma</label>
+                <input type="text" id="idioma" placeholder="Buscar idioma...">
+            </div>
+
+            <div class="form-group">
+                <label for="categoria">Categoría</label>
+                <input type="text" id="categoria" placeholder="Buscar categoría...">
+            </div>
+        </div>
     </div>
 </body>
 </html>

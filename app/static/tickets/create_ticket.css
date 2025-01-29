@@ -1,0 +1,78 @@
+/* Title Bar Styles */
+.title-bar {
+    background-color: #f8f9f9;
+    padding: 15px 85px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin-bottom: 0.5px;
+}
+
+    .title-bar h1 {
+        font-size: 15px;
+        color: #000;
+        font-weight: 600;
+    }
+.ticket-form {
+    display: flex;
+    height: 100vh; /* Ocupa toda la altura de la ventana */
+    gap: 10px;
+    padding: 20px;
+    background-color: #f8f9f9;
+}
+
+.column {
+    flex: 1;
+    max-width: 350px;
+    min-width: 280px;
+    background-color: #ffffff;
+    padding: 15px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border-radius: 5px;
+    /* Scroll en la columna */
+    overflow-y: auto;
+    height: calc(100vh - 40px); /* Ajuste de altura dinámico */
+}
+
+    /* Asegurar que la columna pueda desplazarse */
+    .column > div {
+        min-height: 120%;
+    }
+
+    /* Personalización de la barra de desplazamiento */
+    .column::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    .column::-webkit-scrollbar-thumb {
+        background-color: #ccc;
+        border-radius: 4px;
+    }
+
+        .column::-webkit-scrollbar-thumb:hover {
+            background-color: #999;
+        }
+
+h2 {
+    font-size: 18px;
+    margin-bottom: 10px;
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+label {
+    font-weight: bold;
+    display: block;
+    margin-bottom: 5px;
+}
+
+input, select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+    input::placeholder {
+        color: #aaa;
+    }

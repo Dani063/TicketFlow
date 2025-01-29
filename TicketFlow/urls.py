@@ -37,4 +37,10 @@ urlpatterns = [
     #Admin
     path('settings/', views.settings, name='settings'),  # Página de ajustes
     path('settings/undefined', views.tickets_list, name='tickets_list'),
+    #Profile
+    path('profile/', views.profile, name='profile'),  # Página de perfil
+    path('profile/undefined', views.tickets_list, name='tickets_list'),
+    #Login
+    path('login/', views.login, name='login'),  # Página de inicio de sesión
+    path('login/undefined', views.tickets_list, name='tickets_list'),
 ]

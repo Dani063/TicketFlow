@@ -74,10 +74,55 @@
             </ul>
         </div>
     </div>
+    <div class="user-popup" id="userPopup" style="display: none;">
+        <div class="popup-header">
+            <div class="user-info">
+                <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="profile-picture">
+                <span class="username">Usuario</span>
+                <a href="{% url 'profile' %}" class="view-profile">Ver perfil</a>
+            </div>
+        </div>
+        <div class="popup-content">
+            <button class="logout-button" id="logoutButton">Desloguearse</button>
+        </div>
+    </div>
+
+    <script>
+        document.querySelector('.user-profile').addEventListener('click', () => {
+            const userPopup = document.getElementById('userPopup');
+            const notificationsPopup = document.getElementById('notificationsPopup');
+            const userProfileIcon = document.querySelector('.user-profile');
+            const notificationsIcon = document.querySelector('.notifications');
+
+            if (userPopup.style.display === 'block') {
+                userPopup.style.display = 'none';
+                userProfileIcon.classList.remove('active');
+            } else {
+                userPopup.style.display = 'block';
+                userProfileIcon.classList.add('active');
+
+                // Cerrar la ventana de notificaciones si está abierta
+                if (notificationsPopup.style.display === 'block') {
+                    notificationsPopup.style.display = 'none';
+                    notificationsIcon.classList.remove('active');
+                }
+            }
+        });
+
+        document.getElementById('logoutButton').addEventListener('click', () => {
+            // Aquí puedes añadir la lógica para desloguearse, por ejemplo, redirigir a la página de logout
+            window.location.href = '{% url "login" %}';
+        });
+
+    </script>
+
     <script>
         document.querySelector('.notifications').addEventListener('click', () => {
             const notificationsPopup = document.getElementById('notificationsPopup');
+            const userPopup = document.getElementById('userPopup');
             const notificationsIcon = document.querySelector('.notifications');
+            const userProfileIcon = document.querySelector('.user-profile');
+
             if (notificationsPopup.style.display === 'block') {
                 notificationsPopup.style.display = 'none';
                 notificationsIcon.classList.remove('active');
@@ -85,6 +130,12 @@
                 notificationsPopup.style.display = 'block';
                 notificationsIcon.classList.add('active');
                 loadNotifications();
+
+                // Cerrar la ventana de usuario si está abierta
+                if (userPopup.style.display === 'block') {
+                    userPopup.style.display = 'none';
+                    userProfileIcon.classList.remove('active');
+                }
             }
         });
 

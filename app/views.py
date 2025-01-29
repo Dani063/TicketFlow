@@ -28,6 +28,12 @@ def reporting(request):
 def settings(request):
     return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/settings.html')
 
+def profile(request):
+    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/profile.html')
+
+def login(request):
+    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/login.html')
+
 def ticket_detail(request, pk):
     ticket = get_object_or_404(Ticket, pk=pk)
     return render(request, 'tickets/ticket_detail.html', {'ticket': ticket})

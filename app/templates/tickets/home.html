@@ -6,6 +6,7 @@
     <meta charset="UTF-8">
     <title>TicketFlow</title>
     <link rel="stylesheet" type="text/css" href="{% static 'tickets/style.css' %}">
+    <link rel="stylesheet" type="text/css" href="{% static 'tickets/home.css' %}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 </head>
 <body>
@@ -75,10 +76,55 @@
             </ul>
         </div>
     </div>
+
+    <div class="user-popup" id="userPopup" style="display: none;">
+        <div class="popup-header">
+            <div class="user-info">
+                <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="profile-picture">
+                <span class="username">Usuario</span>
+                <a href="{% url 'profile' %}" class="view-profile">Ver perfil</a>
+            </div>
+        </div>
+        <div class="popup-content">
+            <button class="logout-button" id="logoutButton">Desloguearse</button>
+        </div>
+    </div>
+
+    <script>
+        document.querySelector('.user-profile').addEventListener('click', () => {
+            const userPopup = document.getElementById('userPopup');
+            const notificationsPopup = document.getElementById('notificationsPopup');
+            const userProfileIcon = document.querySelector('.user-profile');
+            const notificationsIcon = document.querySelector('.notifications');
+
+            if (userPopup.style.display === 'block') {
+                userPopup.style.display = 'none';
+                userProfileIcon.classList.remove('active');
+            } else {
+                userPopup.style.display = 'block';
+                userProfileIcon.classList.add('active');
+
+                // Cerrar la ventana de notificaciones si está abierta
+                if (notificationsPopup.style.display === 'block') {
+                    notificationsPopup.style.display = 'none';
+                    notificationsIcon.classList.remove('active');
+                }
+            }
+        });
+
+        document.getElementById('logoutButton').addEventListener('click', () => {
+            // Aquí puedes añadir la lógica para desloguearse, por ejemplo, redirigir a la página de logout
+            window.location.href = '{% url "login" %}';
+        });
+
+    </script>
     <script>
         document.querySelector('.notifications').addEventListener('click', () => {
             const notificationsPopup = document.getElementById('notificationsPopup');
+            const userPopup = document.getElementById('userPopup');
             const notificationsIcon = document.querySelector('.notifications');
+            const userProfileIcon = document.querySelector('.user-profile');
+
             if (notificationsPopup.style.display === 'block') {
                 notificationsPopup.style.display = 'none';
                 notificationsIcon.classList.remove('active');
@@ -86,6 +132,12 @@
                 notificationsPopup.style.display = 'block';
                 notificationsIcon.classList.add('active');
                 loadNotifications();
+
+                // Cerrar la ventana de usuario si está abierta
+                if (userPopup.style.display === 'block') {
+                    userPopup.style.display = 'none';
+                    userProfileIcon.classList.remove('active');
+                }
             }
         });
 
@@ -186,9 +238,9 @@
             if (activeTabId) {
                 document.querySelectorAll('.navbar-left .tab').forEach(tab => {
                     if (tab.dataset.url.includes(`id=${activeTabId}`)) {
-                        tab.classList.add('active'); // Marca la pestaña activa
+                        tab.classList.add('active');
                     } else {
-                        tab.classList.remove('active'); // Quita la clase de las demás
+                        tab.classList.remove('active');
                     }
                 });
             }
@@ -200,15 +252,137 @@
             highlightActiveTab();
         });
     </script>
+    <script>
+        document.querySelectorAll('.stat').forEach(stat => {
+            stat.addEventListener('click', () => {
+                const filter = stat.getAttribute('data-filter');
+                filterTable(filter);
+            });
+        });
 
+        function filterTable(filter) {
+            const rows = document.querySelectorAll('.tabla tbody tr');
+            rows.forEach(row => {
+                row.style.display = 'table-row'; // Mostrar todas las filas por defecto
+                if (filter === 'you' && !row.innerHTML.includes('YOU')) {
+                    row.style.display = 'none';
+                } else if (filter === 'groups' && !row.innerHTML.includes('GROUPS')) {
+                    row.style.display = 'none';
+                } else if (filter === 'bien' && !row.innerHTML.includes('BIEN')) {
+                    row.style.display = 'none';
+                } else if (filter === 'mal' && !row.innerHTML.includes('MAL')) {
+                    row.style.display = 'none';
+                } else if (filter === 'solventado' && !row.innerHTML.includes('SOLVENTADO')) {
+                    row.style.display = 'none';
+                } else if (filter === 'satisfaccion' && !row.innerHTML.includes('SATISFACCIÓN')) {
+                    row.style.display = 'none';
+                }
+            });
+        }
+    </script>
 
-    <div class="content">
-        <h1>Bienvenido a TicketFlow</h1>
+    <div class="title-bar">
+        <h1>Dashboard</h1>
+    </div>
+    <div class="left-column">
+        <h2>Actualizaciones de Tickets</h2>
         <ul>
-            {% for ticket in tickets %}
-            <li><a href="{% url 'ticket_detail' ticket.pk %}">{{ ticket.subject }}</a></li>
+            {% if ticket_updates %}
+            {% for update in ticket_updates %}
+            <li>{{ update }}</li>
             {% endfor %}
+            {% else %}
+            <p>Sin actualizaciones recientes.</p>
+            {% endif %}
         </ul>
+    </div>
+    <div class="stats-bar">
+        <div class="stats-group">
+            <h2>Tickets Abiertos</h2>
+            <div class="stats-box">
+                <div class="stat" data-filter="you">
+                    <div class="stat-content">
+                        <span class="stat-number">10</span>
+                        <span class="stat-label">YOU</span>
+                    </div>
+                </div>
+                <div class="stat" data-filter="groups">
+                    <div class="stat-content">
+                        <span class="stat-number">20</span>
+                        <span class="stat-label">GROUPS</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="stats-group">
+            <h2>Estadísticas de Tickets</h2>
+            <div class="stats-box">
+                <div class="stat" data-filter="bien">
+                    <div class="stat-content">
+                        <span class="stat-number">5</span>
+                        <span class="stat-label">BIEN</span>
+                    </div>
+                </div>
+                <div class="stat" data-filter="mal">
+                    <div class="stat-content">
+                        <span class="stat-number">3</span>
+                        <span class="stat-label">MAL</span>
+                    </div>
+                </div>
+                <div class="stat" data-filter="solventado">
+                    <div class="stat-content">
+                        <span class="stat-number">2</span>
+                        <span class="stat-label">SOLVENTADO</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="stats-group">
+            <h2>Porcentaje de Satisfacción</h2>
+            <div class="stats-box">
+                <div class="stat" data-filter="satisfaccion">
+                    <div class="stat-content">
+                        <span class="stat-number">85%</span>
+                        <span class="stat-label">SATISFACCIÓN</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="pending-tickets">
+        <h2>Tickets que requieren tu atención (0)</h2>
+    </div>
+    <div class="tabla">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Asunto</th>
+                    <th>Solicitante</th>
+                    <th>Solicitante actualizado</th>
+                    <th>Grupo</th>
+                    <th>Asignado</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if pending_tickets %}
+                {% for ticket in pending_tickets %}
+                <tr>
+                    <td>{{ ticket.id }}</td>
+                    <td>{{ ticket.subject }}</td>
+                    <td>{{ ticket.requester }}</td>
+                    <td>{{ ticket.updated_at }}</td>
+                    <td>{{ ticket.group }}</td>
+                    <td>{{ ticket.assigned_to }}</td>
+                </tr>
+                {% endfor %}
+                {% else %}
+                <tr>
+                    <td colspan="6">No hay tickets pendientes.</td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
     </div>
 </body>
 </html>
