@@ -11,13 +11,15 @@
         color: #000;
         font-weight: 600;
     }
+
 .ticket-form {
     display: flex;
     height: 100vh; /* Ocupa toda la altura de la ventana */
     gap: 10px;
-    padding: 20px;
+    padding: 0px;
     background-color: #f8f9f9;
 }
+
 
 .column {
     flex: 1;
@@ -34,7 +36,8 @@
 
     /* Asegurar que la columna pueda desplazarse */
     .column > div {
-        min-height: 120%;
+        min-height: 7%;
+        margin-bottom: 10px; /* Añadir margen inferior para espacio en blanco */
     }
 
     /* Personalización de la barra de desplazamiento */
@@ -51,11 +54,6 @@
             background-color: #999;
         }
 
-h2 {
-    font-size: 18px;
-    margin-bottom: 10px;
-}
-
 .form-group {
     margin-bottom: 15px;
 }
@@ -64,6 +62,7 @@ label {
     font-weight: bold;
     display: block;
     margin-bottom: 5px;
+    font-size: 12px;
 }
 
 input, select {
@@ -76,3 +75,118 @@ input, select {
     input::placeholder {
         color: #aaa;
     }
+
+/* Estilos para el botón de añadir tag en Select2 */
+.select2-container--default .select2-results__option.add-tag-button {
+    background-color: #007bff;
+    color: white;
+    text-align: center;
+    padding: 10px;
+    cursor: pointer;
+}
+
+    .select2-container--default .select2-results__option.add-tag-button:hover {
+        background-color: #0056b3;
+    }
+
+/* Estilos para los campos "Tipo" y "Prioridad" */
+.form-row {
+    display: flex;
+    justify-content: space-between;
+}
+
+    .form-row .form-group {
+        flex: 1;
+        margin-right: 10px;
+    }
+
+        .form-row .form-group:last-child {
+            margin-right: 0;
+        }
+.margin-bottom-large {
+    margin-bottom: 300px;
+}
+
+/* Estilos para la segunda columna */
+.column2 {
+    flex: 1;
+    max-width: 1000px;
+    min-width: 450px;
+    background-color: #ffffff;
+    padding: 15px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border-radius: 5px;
+    overflow-y: auto;
+    height: calc(100vh - 40px); /* Ajuste de altura dinámico */
+}
+
+/* Barra de Subject */
+.subject-bar {
+    margin-bottom: 15px;
+}
+
+    .subject-bar input {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+/* Cuadro de mensajes */
+.messages-box {
+    flex: 1;
+    background-color: #f8f9f9;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-bottom: 15px;
+    overflow-y: auto;
+    height: calc(100vh - 500px); /* Ajuste de altura dinámico */
+}
+
+.message {
+    margin-bottom: 10px;
+}
+
+    .message p {
+        margin: 0;
+    }
+
+    .message .timestamp {
+        font-size: 12px;
+        color: #999;
+    }
+
+/* Sección para escribir mensajes */
+.message-input {
+    position: relative;
+    display: flex;
+    align-items: end;
+}
+
+    .message-input textarea {
+        flex: 1;
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        resize: none;
+        height: 200px;
+        padding-right: 40px; /* Espacio para el botón de enviar */
+    }
+
+    .message-input button {
+        position: absolute;
+        right: 10px;
+        background-color: transparent;
+        border: none;
+        cursor: pointer;
+        bottom: 10px;
+        font-size: 20px;
+        color: #007bff;
+        transition: color 0.3s;
+    }
+
+        .message-input button:hover {
+            color: #0056b3;
+        }

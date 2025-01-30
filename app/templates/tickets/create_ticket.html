@@ -8,6 +8,12 @@
     <link rel="stylesheet" type="text/css" href="{% static 'tickets/style.css' %}">
     <link rel="stylesheet" type="text/css" href="{% static 'tickets/create_ticket.css' %}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <!-- CSS de Select2 -->
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/css/select2.min.css" rel="stylesheet" />
+
+    <!-- JS de Select2 -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
 </head>
 <body>
     <div class="sidebar-navigation">
@@ -289,76 +295,242 @@
             }
         });
     </script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Obtener el ID del ticket de la URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const ticketId = urlParams.get('id');
+
+            // Inicializa Select2 para todos los campos de selección
+            const selectElements = document.querySelectorAll('select');
+            selectElements.forEach(select => {
+                $(select).select2();
+            });
+
+            // Inicializa Select2 con la funcionalidad de creación de tags solo para el campo de "Tags"
+            $('#tags').select2({
+                tags: true,
+                createTag: function (params) {
+                    return {
+                        id: 'create_new_tag',
+                        text: 'Añadir tag: ' + params.term,
+                        newTag: true // add additional parameters
+                    };
+                },
+                templateResult: function (data) {
+                    if (data.newTag) {
+                        return $('<span class="add-tag-button">' + data.text + '</span>');
+                    }
+                    return data.text;
+                }
+            });
+
+            // Manejo de creación de nuevos tags
+            $('#tags').on('select2:select', function (e) {
+                const data = e.params.data;
+                if (data.id === 'create_new_tag') {
+                    const newTag = data.text.replace('Añadir tag: ', '');
+                    const isValidTag = /^[a-zA-Z0-9]+$/.test(newTag); // Verificar si el tag es válido
+                    if (newTag && isValidTag) {
+                        // Verificar si el tag ya existe en la lista
+                        let exists = false;
+                        $('#tags option').each(function () {
+                            if ($(this).val() === newTag) {
+                                exists = true;
+                                return false; // salir del bucle
+                            }
+                        });
+
+                        // Añadir el nuevo tag a la lista de tags si no existe
+                        if (!exists) {
+                            const newOption = new Option(newTag, newTag, true, true);
+                            $('#tags').append(newOption).trigger('change');
+                        }
+
+                        // Eliminar la opción temporal "Añadir tag: ejemplo"
+                        $('#tags').find('option[value="create_new_tag"]').remove();
+                    } else {
+                        alert('El tag solo puede contener letras y números, sin espacios en blanco.');
+                        $('#tags').find('option[value="create_new_tag"]').remove();
+                    }
+                }
+            });
+
+            // Función para guardar los datos del formulario en localStorage
+            function saveFormData() {
+                const formData = {};
+                selectElements.forEach(select => {
+                    formData[select.id] = $(select).val();
+                });
+                localStorage.setItem(`ticketFormData_${ticketId}`, JSON.stringify(formData));
+            }
+
+            // Función para cargar los datos del formulario desde localStorage
+            function loadFormData() {
+                const formData = JSON.parse(localStorage.getItem(`ticketFormData_${ticketId}`));
+                if (formData) {
+                    selectElements.forEach(select => {
+                        if (formData[select.id]) {
+                            $(select).val(formData[select.id]).trigger('change');
+                        }
+                    });
+                }
+            }
+
+            // Guardar los datos del formulario cuando se cambian
+            selectElements.forEach(select => {
+                $(select).on('change', saveFormData);
+            });
+
+            // Cargar los datos del formulario al cargar la página
+            loadFormData();
+        });
+    </script>
+
     <div class="title-bar">
         <h1>Nuevo Ticket</h1>
     </div>
     <div class="ticket-form">
         <div class="column">
-            <h2>Crear Ticket</h2>
             <div class="form-group">
                 <label for="empresa">Empresa</label>
-                <select id="empresa">
-                    <option value="">Selecciona una empresa</option>
-                    <option value="empresa1">Empresa 1</option>
-                    <option value="empresa2">Empresa 2</option>
+                <select id="empresa" class="select2">
+                    <option value="" disabled selected>-</option>
+                    <option value="empresa1">Audio Simple Notification Service</option>
+                    <option value="empresa2">Comunycarse Helpdesk</option>
+                    <option value="empresa3">EcomFax</option>
+                    <option value="empresa4">Recordia</option>
                 </select>
             </div>
-
             <div class="form-group">
                 <label for="solicitante">Solicitante</label>
-                <input type="text" id="solicitante" placeholder="Buscar solicitante...">
+                <select id="solicitante" class="select2">
+                    <option value="" disabled selected>-</option>
+                    {% for user in usuarios %}
+                    <option value="{{ user.id }}">{{ user.name }}</option>
+                    {% endfor %}
+                </select>
             </div>
-
             <div class="form-group">
                 <label for="asignado">Asignado</label>
-                <input type="text" id="asignado" placeholder="Buscar agente...">
+                <select id="asignado" class="select2">
+                    <option value="" disabled selected>-</option>
+                    {% for user in agentes %}
+                    <option value="{{ user.id }}">{{ user.name }}</option>
+                    {% endfor %}
+                </select>
             </div>
-
             <div class="form-group">
                 <label for="ccs">CCs</label>
-                <input type="text" id="ccs" placeholder="Añadir usuarios...">
+                <select id="ccs" class="select2" multiple>
+                    {% for user in todos %}
+                    <option value="{{ user.id }}">{{ user.name }}</option>
+                    {% endfor %}
+                </select>
             </div>
-
             <div class="form-group">
                 <label for="tags">Tags</label>
-                <input type="text" id="tags" placeholder="Buscar o crear nuevo tag...">
-            </div>
-
-            <div class="form-group">
-                <label for="tipo">Tipo</label>
-                <select id="tipo">
-                    <option value="soporte">Soporte</option>
-                    <option value="incidencia">Incidencia</option>
+                <select id="tags" class="select2" multiple>
+                    {% for tag in tags %}
+                    <option value="{{ tag.id }}">{{ tag.name }}</option>
+                    {% endfor %}
                 </select>
             </div>
-
-            <div class="form-group">
-                <label for="prioridad">Prioridad</label>
-                <select id="prioridad">
-                    <option value="baja">Baja</option>
-                    <option value="media">Media</option>
-                    <option value="alta">Alta</option>
-                </select>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="tipo">Tipo</label>
+                    <select id="tipo" class="select2">
+                        <option value="-" selected>-</option>
+                        <option value="incidencia">Incidencia</option>
+                        <option value="consulta">Consulta</option>
+                        <option value="mejora">Problema</option>
+                        <option value="tarea">Tarea</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="prioridad">Prioridad</label>
+                    <select id="prioridad" class="select2">
+                        <option value="-" selected>-</option>
+                        <option value="baja">Baja</option>
+                        <option value="media">Media</option>
+                        <option value="alta">Alta</option>
+                        <option value="urgente">Urgente</option>
+                    </select>
+                </div>
             </div>
-
             <div class="form-group">
                 <label for="servicio">Servicio</label>
-                <input type="text" id="servicio" placeholder="Buscar servicio...">
+                <select id="servicio" class="select2">
+                    <option value="-">-</option>
+                    <option value="ecomfax">EcomFax</option>
+                    <option value="ecomfaxpro">EcomFaxPro</option>
+                    <option value="recordia">Recordia</option>
+                    <option value="aplicateca">Aplicateca</option>
+                    <option value="audiolog">Audiolog</option>
+                    <option value="cisco_telefonia">Cisco Telefonia</option>
+                    <option value="rightfax">Rightfax</option>
+                    <option value="internocomuny">InternoComuny</option>
+                    <option value="rts">RTS</option>
+                    <option value="otros" selected>Otros</option>
+                    <option value="cognitia">Cognitia</option>
+                </select>
             </div>
-
             <div class="form-group">
                 <label for="canal">Canal</label>
-                <input type="text" id="canal" placeholder="Buscar canal...">
+                <select id="canal" class="select2">
+                    <option value="-" selected>-</option>
+                    <option value="email">Email</option>
+                    <option value="telefono">Teléfono</option>
+                    <option value="web">Web</option>
+                    <option value="api">API</option>
+                </select>
             </div>
-
             <div class="form-group">
                 <label for="idioma">Idioma</label>
-                <input type="text" id="idioma" placeholder="Buscar idioma...">
+                <select id="idioma" class="select2">
+                    <option value="es">Español</option>
+                    <option value="en">Inglés</option>
+                </select>
+            </div>
+            <div class="margin-bottom-large">
+                <label for="categoria">Categoría</label>
+                <select id="categoria" class="select2">
+                    <option value="-" selected>-</option>
+                    <option value="communication">Communication</option>
+                    <option value="hardware">Hardware</option>
+                    <option value="base_software">Base software</option>
+                    <option value="app_functionality">App Functionality</option>
+                    <option value="database">Database</option>
+                    <option value="api">App Program Interface (API)</option>
+                    <option value="webservice">WebService</option>
+                    <option value="configuration">Configuration</option>
+                    <option value="others">Others</option>
+                    <option value="information">Information</option>
+                </select>
+            </div>
+            <hr class="margin-bottom-large">
+        </div>
+
+        <div class="column2">
+            <!-- Barra de Subject -->
+            <div class="subject-bar">
+                <h1>Subject</h1>
             </div>
 
-            <div class="form-group">
-                <label for="categoria">Categoría</label>
-                <input type="text" id="categoria" placeholder="Buscar categoría...">
+            <!-- Cuadro de mensajes -->
+            <div class="messages-box">
+                <!-- Aquí se mostrarán los mensajes del ticket -->
+                <div class="message">
+                    <p><strong>Usuario:</strong> Mensaje de ejemplo</p>
+                    <span class="timestamp">2023-10-01 12:00</span>
+                </div>
+            </div>
+
+            <div class="message-input">
+                <textarea id="new-message" placeholder="Escribe un mensaje..."></textarea>
+                <button id="send-message">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
             </div>
         </div>
     </div>

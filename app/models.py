@@ -45,6 +45,8 @@ class Comment(models.Model):
 
 class TicketTag(models.Model):
     name = models.CharField(max_length=255, unique=True, null=False, help_text='Label for categorizing tickets')
+    def __str__(self):
+        return self.name
 
 class TicketTagAssignment(models.Model):
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE)

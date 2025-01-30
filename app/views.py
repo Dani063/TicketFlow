@@ -5,7 +5,7 @@ Definition of views.
 from datetime import datetime
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import Ticket, Comment, User
+from .models import Ticket, Comment, User, TicketTag
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.decorators import login_required
 
@@ -38,18 +38,52 @@ def ticket_detail(request, pk):
     ticket = get_object_or_404(Ticket, pk=pk)
     return render(request, 'tickets/ticket_detail.html', {'ticket': ticket})
 
-@login_required
 def create_ticket(request):
     if request.method == 'POST':
-        form = TicketForm(request.POST)
-        if form.is_valid():
-            ticket = form.save(commit=False)
-            ticket.creator = request.user
-            ticket.save()
-            return redirect('ticket_detail', pk=ticket.pk)
-    else:
-        form = TicketForm()
-    return render(request, 'tickets/create_ticket.html', {'form': form})
+        # Obtener los datos del formulario
+        empresa = request.POST.get('empresa')
+        solicitante = request.POST.get('solicitante')
+        asignado = request.POST.get('asignado')
+        ccs = request.POST.getlist('ccs')
+        tags = request.POST.getlist('tags')
+        servicio = request.POST.get('servicio')
+        canal = request.POST.get('canal')
+        idioma = request.POST.get('idioma')
+        categoria = request.POST.get('categoria')
+
+        # Crear nuevos tags si no existen
+        tag_objects = []
+        for tag_name in tags:
+            tag, created = TicketTag.objects.get_or_create(name=tag_name)
+            tag_objects.append(tag)
+
+        # Crear el ticket (asumiendo que tienes un modelo Ticket)
+        ticket = Ticket.objects.create(
+            empresa=empresa,
+            solicitante_id=solicitante,
+            asignado_id=asignado,
+            servicio=servicio,
+            canal=canal,
+            idioma=idioma,
+            categoria=categoria
+        )
+        ticket.tags.set(tag_objects)
+        ticket.ccs.set(ccs)
+        ticket.save()
+
+        return redirect('tickets_list')
+
+    usuarios = User.objects.filter(group=1)
+    agentes = User.objects.filter(group=2)
+    tags = TicketTag.objects.all()
+    todos = User.objects.all()
+    context = {
+        'usuarios': usuarios,
+        'agentes': agentes,
+        'tags': tags,
+        'todos': todos,
+    }
+    return render(request, 'tickets/create_ticket.html', context)
 
 @login_required
 def assign_agent(request, pk):
