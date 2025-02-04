@@ -25,7 +25,6 @@ urlpatterns = [
     path('tickets/<int:ticket_pk>/comments/add/', views.add_comment, name='add_comment'),
     
     # Funcionalidades de Gestión de Usuarios
-    path('users/create/', views.create_user, name='create_user'),
     path('admin/', admin.site.urls),
 
     # Customers
@@ -43,4 +42,7 @@ urlpatterns = [
     #Login
     path('login/', views.login, name='login'),  # Página de inicio de sesión
     path('login/undefined', views.tickets_list, name='tickets_list'),
+
+    path('api/register/', views.register, name='register'),
+    path('api/login/', views.user_login, name='login'),
 ]

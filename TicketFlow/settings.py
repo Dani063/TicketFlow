@@ -22,6 +22,14 @@ STATICFILES_DIRS = [
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+AUTH_USER_MODEL = 'app.User'
+
+AUTHENTICATION_BACKENDS = [
+    'app.backends.EmailBackend',  # Backend personalizado
+    'django.contrib.auth.backends.ModelBackend',  # Backend por defecto de Django
+]
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/2.1/howto/deployment/checklist/
 

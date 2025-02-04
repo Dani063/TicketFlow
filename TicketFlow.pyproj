@@ -32,6 +32,7 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="app\backends.py" />
     <Compile Include="app\forms.py" />
     <Compile Include="app\models.py" />
     <Compile Include="app\admin.py" />
@@ -62,6 +63,7 @@
   <ItemGroup>
     <Content Include="app\static\tickets\create_ticket.css" />
     <Content Include="app\static\tickets\home.css" />
+    <Content Include="app\static\tickets\login.css" />
     <Content Include="app\static\tickets\logo.png" />
     <Content Include="app\static\tickets\notification.js" />
     <Content Include="app\static\tickets\profile-pic.png" />

@@ -8,6 +8,9 @@ from django.http import JsonResponse
 from .models import Ticket, Comment, User, TicketTag
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth import authenticate, login
+from django.views.decorators.csrf import csrf_exempt
+import json
 
 # Funcionalidades de Ticket
 
@@ -33,6 +36,39 @@ def profile(request):
 
 def login(request):
     return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/login.html')
+
+@csrf_exempt
+def register(request):
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        email = data.get('email')
+        name = data.get('name')
+        password = data.get('password')
+        if User.objects.filter(email=email).exists():
+            return JsonResponse({'error': 'El usuario ya existe'}, status=400)
+        user = User(email=email, name=name)
+        user.set_password(password)  # Hashear la contraseña
+        user.save()
+        return JsonResponse({'message': 'Usuario registrado correctamente'})
+
+@csrf_exempt
+def user_login(request):
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            email = data.get('email')
+            password = data.get('password')
+
+            # Verifica si el usuario existe
+            user = User.objects.filter(email=email).first()
+
+            if user and check_password(password, user.password):  # Usar check_password para verificar
+                login(request, user)
+                return JsonResponse({'message': 'Inicio de sesion exitoso'})
+            else:
+                return JsonResponse({'error': 'Credenciales invalidas'}, status=400)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
 
 def ticket_detail(request, pk):
     ticket = get_object_or_404(Ticket, pk=pk)
@@ -68,7 +104,7 @@ def create_ticket(request):
             categoria=categoria
         )
         ticket.tags.set(tag_objects)
-        ticket.ccs.set(ccs)
+        ticket.ccs = ",".join(ccs)
         ticket.save()
 
         return redirect('tickets_list')
@@ -93,7 +129,7 @@ def assign_agent(request, pk):
         ticket.assigned_to_id = agent_id
         ticket.save()
         return redirect('ticket_detail', pk=pk)
-    agents = User.objects.filter(role='agent')
+    agents = User.objects.filter(role__role_name='agent')
     return render(request, 'tickets/assign_agent.html', {'ticket': ticket, 'agents': agents})
 
 @login_required
@@ -142,20 +178,11 @@ def add_comment(request, ticket_pk):
 
 # Funcionalidades de Gestión de Usuarios
 
-@login_required
-def create_user(request):
-    if request.method == 'POST':
-        form = UserForm(request.POST)
-        if form.is_valid():
-            form.save()
-            return redirect('user_list')
-    else:
-        form = UserForm()
-    return render(request, 'users/create_user.html', {'form': form})
-
 # Funcionalidades de Notificaciones, Reportes, Búsquedas y Etiquetas
 
 # Las notificaciones y reportes suelen implementarse como funciones que se ejecutan en segundo plano o como vistas especializadas que generan y muestran los resultados.
 # La búsqueda y filtrado pueden implementarse como vistas que procesan las consultas del usuario y devuelven los resultados en la misma plantilla.
 
 # Nota: Estas vistas son básicas y necesitarán plantillas HTML para funcionar correctamente.
+
+
