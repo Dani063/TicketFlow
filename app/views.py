@@ -7,6 +7,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
 from .models import Ticket, Comment, User, TicketTag
 from .forms import TicketForm, CommentForm, UserForm
+from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import authenticate, login
 from django.views.decorators.csrf import csrf_exempt
@@ -59,16 +60,20 @@ def user_login(request):
             email = data.get('email')
             password = data.get('password')
 
-            # Verifica si el usuario existe
+            # Buscar usuario en la base de datos
             user = User.objects.filter(email=email).first()
 
-            if user and check_password(password, user.password):  # Usar check_password para verificar
-                login(request, user)
+            if user and check_password(password, user.password):  # Verifica la contraseña
+                # Guardamos el usuario en la sesión manualmente
+                request.session['user_id'] = user.id
+                request.session['user_email'] = user.email
+                
                 return JsonResponse({'message': 'Inicio de sesion exitoso'})
             else:
                 return JsonResponse({'error': 'Credenciales invalidas'}, status=400)
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
+
 
 def ticket_detail(request, pk):
     ticket = get_object_or_404(Ticket, pk=pk)

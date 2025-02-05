@@ -117,8 +117,7 @@
 
             const data = await response.json();
             if (response.ok) {
-                alert(data.message);
-                window.location.href = '/home/';
+                window.location.href = '/';
             } else {
                 alert(data.error);
             }
