@@ -94,6 +94,8 @@ class Ticket(models.Model):
     type = models.CharField(max_length=255, null=True)
     ccs = models.TextField(null=True, help_text='Comma-separated list of user emails to CC')
     channel = models.CharField(max_length=255, null=True)
+    service = models.CharField(max_length=255, null=True)
+    language = models.CharField(max_length=255, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now_add=True)
     closed_at = models.DateTimeField(null=True, blank=True)

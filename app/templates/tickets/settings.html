@@ -58,7 +58,7 @@
             </button>
             <div class="user-profile">
                 <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="profile-picture">
-                <span class="username">Usuario</span>
+                <span class="username">{{ username }}</span>
             </div>
         </div>
     </nav>
@@ -78,7 +78,7 @@
         <div class="popup-header">
             <div class="user-info">
                 <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="profile-picture">
-                <span class="username">Usuario</span>
+                <span class="username">{{ username }}</span>
                 <a href="{% url 'profile' %}" class="view-profile">Ver perfil</a>
             </div>
         </div>

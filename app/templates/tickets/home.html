@@ -59,7 +59,7 @@
             </button>
             <div class="user-profile">
                 <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="profile-picture">
-                <span class="username">Usuario</span>
+                <span class="username">{{ username }}</span>
             </div>
         </div>
     </nav>
@@ -81,7 +81,8 @@
         <div class="popup-header">
             <div class="user-info">
                 <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="profile-picture">
-                <span class="username">Usuario</span>
+                <span class="username">{{ username }}</span>
+                <span class="username">{{ email }}</span>
                 <a href="{% url 'profile' %}" class="view-profile">Ver perfil</a>
             </div>
         </div>
@@ -113,8 +114,7 @@
         });
 
         document.getElementById('logoutButton').addEventListener('click', () => {
-            // Aquí puedes añadir la lógica para desloguearse, por ejemplo, redirigir a la página de logout
-            window.location.href = '{% url "login" %}';
+           window.location.href = '{% url "logout" %}';
         });
 
     </script>
