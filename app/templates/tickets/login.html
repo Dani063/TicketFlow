@@ -6,10 +6,12 @@
     <title>Login - TicketFlow</title>
     <link rel="stylesheet" type="text/css" href="{% static 'tickets/login.css' %}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.7.6/lottie.min.js"></script>
 </head>
 <body>
     <section class="forms-section">
         <h1 class="section-title">TicketFlow</h1>
+        <div id="lottie-animation" style="width: 300px; height: 300px; margin: 0 auto;"></div>
         <div class="forms">
             <div class="form-wrapper is-active">
                 <button type="button" class="switcher switcher-login">
@@ -137,6 +139,14 @@
             }
             return cookieValue;
         }
+        // Inicializar la animación de Lottie
+        const animation = lottie.loadAnimation({
+            container: document.getElementById('lottie-animation'),
+            renderer: 'svg',
+            loop: true,
+            autoplay: true,
+            path: '{% static "C:/Users/molqueda/source/repos/TicketFlow/app/static/tickets/Animation - 1738849719549.json" %}' // Reemplaza con la ruta a tu archivo JSON
+        });
     </script>
 </body>
 </html>

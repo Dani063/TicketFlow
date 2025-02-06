@@ -65,7 +65,7 @@
             </button>
             <div class="user-profile">
                 <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="profile-picture">
-                <span class="username">Usuario</span>
+                <span class="username">{{ username }}</span>
             </div>
         </div>
     </nav>
@@ -85,7 +85,8 @@
         <div class="popup-header">
             <div class="user-info">
                 <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="profile-picture">
-                <span class="username">Usuario</span>
+                <span class="username">{{ username }}</span>
+                <span class="username">{{ email }}</span>
                 <a href="{% url 'profile' %}" class="view-profile">Ver perfil</a>
             </div>
         </div>
@@ -534,5 +535,46 @@
             </div>
         </div>
     </div>
+    <div class="footer-bar">
+        <div class="footer-right">
+            <button id="publish-button" class="main-btn">Publicar como <span id="selected-status"> New</span></button>
+            <button id="dropdown-button" class="dropdown-btn"><i class="fas fa-caret-down"></i></button>
+            <div id="dropdown-content" class="dropdown-content">
+                <a href="#" data-status="New"> New</a>
+                <a href="#" data-status="Open">Open</a>
+                <a href="#" data-status="Pending">Pending</a>
+                <a href="#" data-status="On-hold">On-hold</a>
+                <a href="#" data-status="Solved">Solved</a>
+            </div>
+        </div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const publishButton = document.getElementById('publish-button');
+            const dropdownButton = document.getElementById('dropdown-button');
+            const dropdownContent = document.getElementById('dropdown-content');
+            const selectedStatus = document.getElementById('selected-status');
+
+            dropdownContent.addEventListener('click', (event) => {
+                if (event.target.tagName === 'A') {
+                    const status = event.target.getAttribute('data-status');
+                    selectedStatus.textContent = status;
+                    dropdownContent.classList.remove('show');
+                    console.log('Publicar ticket con estado:', status);
+                    // Aquí puedes añadir la lógica para publicar el ticket con el estado seleccionado
+                }
+            });
+
+            dropdownButton.addEventListener('click', () => {
+                dropdownContent.classList.toggle('show');
+            });
+
+            window.addEventListener('click', (event) => {
+                if (!event.target.matches('.dropdown-btn')) {
+                    dropdownContent.classList.remove('show');
+                }
+            });
+        });
+    </script>
 </body>
 </html>

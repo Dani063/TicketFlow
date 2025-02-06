@@ -16,6 +16,7 @@ import json
 
 # Funcionalidades de Ticket
 
+@login_required
 def home(request):
     context = {
         'username': request.user.name,
@@ -23,20 +24,37 @@ def home(request):
     }
     return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/home.html', context)
 
+@login_required
 def tickets_list(request):
+    context = {
+        'username': request.user.name,
+        'email': request.user.email,
+    }
     tickets = Ticket.objects.all()
-    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/tickets_list.html', {'tickets': tickets})
+    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/tickets_list.html', context)
 
+@login_required
 def customers_list(request):
+    context = {
+        'username': request.user.name,
+        'email': request.user.email,
+    }
     customers = User.objects.all()
-    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/customers_list.html', {'customers': customers})
+    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/customers_list.html', context)
 
+@login_required
 def reporting(request):
-    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/reporting.html')
+    context = {
+        'username': request.user.name,
+        'email': request.user.email,
+    }
+    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/reporting.html', context)
 
+@login_required
 def settings(request):
     context = {
         'username': request.user.name,
+        'email': request.user.email,
     }
     return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/settings.html', context)
    
@@ -130,7 +148,9 @@ def create_ticket(request):
         'usuarios': usuarios,
         'agentes': agentes,
         'tags': tags,
-        'todos': todos,
+        'todos': todos, 
+        'username': request.user.name,
+        'email': request.user.email,
     }
     return render(request, 'tickets/create_ticket.html', context)
 

@@ -133,5 +133,5 @@ STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 LOGIN_URL = '/login/'
 
 # Configuración de la URL de redirección después del inicio de sesión
-LOGIN_REDIRECT_URL = '/settings/'
+LOGIN_REDIRECT_URL = '/'
    
