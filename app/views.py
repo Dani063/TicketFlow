@@ -3,6 +3,7 @@ Definition of views.
 """
 # -*- coding: utf-8 -*-
 from datetime import datetime
+from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
 from .models import Ticket, Comment, User, TicketTag
@@ -13,14 +14,20 @@ from django.contrib.auth import authenticate, login as auth_login
 from django.contrib.auth import logout
 from django.views.decorators.csrf import csrf_exempt
 import json
+from django.views.decorators.http import require_POST
+from django.utils import timezone
 
 # Funcionalidades de Ticket
 
 @login_required
 def home(request):
+    tickets = Ticket.objects.all()
+    users = User.objects.all()
     context = {
         'username': request.user.name,
         'email': request.user.email,
+        'tickets': tickets,
+        'users': users,
     }
     return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/home.html', context)
 
@@ -105,40 +112,70 @@ def ticket_detail(request, pk):
     ticket = get_object_or_404(Ticket, pk=pk)
     return render(request, 'tickets/ticket_detail.html', {'ticket': ticket})
 
+import random
+
+import random
+from django.utils import timezone
+
+import random
+from django.utils import timezone
+
+import random
+from django.utils import timezone
+
 def create_ticket(request):
     if request.method == 'POST':
         # Obtener los datos del formulario
         empresa = request.POST.get('empresa')
-        solicitante = request.POST.get('solicitante')
-        asignado = request.POST.get('asignado')
-        ccs = request.POST.getlist('ccs')
-        tags = request.POST.getlist('tags')
-        servicio = request.POST.get('servicio')
-        canal = request.POST.get('canal')
-        idioma = request.POST.get('idioma')
-        categoria = request.POST.get('categoria')
+        subject = request.POST.get('subject')
+        content = request.POST.get('content')
+        language = request.POST.get('idioma')
+        category = request.POST.get('categoria')
+        channel = request.POST.get('canal')
+        service = request.POST.get('servicio')
+        type = request.POST.get('tipo')
+        priority = request.POST.get('prioridad')
+        status = request.POST.get('status')
+        solicitante_id = request.POST.get('solicitante')
+        asignado_id = request.POST.get('asignado')
 
-        # Crear nuevos tags si no existen
-        tag_objects = []
-        for tag_name in tags:
-            tag, created = TicketTag.objects.get_or_create(name=tag_name)
-            tag_objects.append(tag)
+        # Obtener el usuario logueado
+        requester_id = request.user.id
+        
+         # Si no se selecciona un solicitante, usar el usuario logueado
+        if solicitante_id == '':
+            solicitante_id = requester_id
+        
+        # Si no se selecciona un agente, asignar uno aleatorio
+        if asignado_id == '':
+            agentes = User.objects.filter(group_id='2')
+            asignado_id = random.choice(agentes).id if agentes.exists() else None
 
-        # Crear el ticket (asumiendo que tienes un modelo Ticket)
+        # Crear el ticket
         ticket = Ticket.objects.create(
-            empresa=empresa,
-            solicitante_id=solicitante,
-            asignado_id=asignado,
-            servicio=servicio,
-            canal=canal,
-            idioma=idioma,
-            categoria=categoria
+            subject=subject,
+            description=content,
+            requester_id=solicitante_id,
+            assignee_id=asignado_id,
+            created_by_id=requester_id,
+            brand=empresa,
+            type=type,
+            channel=channel,
+            service=service,
+            language=language,
+            created_at=timezone.now(),
+            category=category,
+            priority=priority,
+            status=status
         )
-        ticket.tags.set(tag_objects)
-        ticket.ccs = ",".join(ccs)
-        ticket.save()
 
-        return redirect('tickets_list')
+        # Crear el comentario
+        Comment.objects.create(
+            ticket_id=ticket.id,
+            user_id=requester_id,
+            content=content,
+            created_at=timezone.now()
+        )
 
     usuarios = User.objects.filter(group=1)
     agentes = User.objects.filter(group=2)
@@ -195,26 +232,39 @@ def reopen_ticket(request, pk):
 # Funcionalidades de Comentarios
 
 @login_required
-def add_comment(request, ticket_pk):
-    ticket = get_object_or_404(Ticket, pk=ticket_pk)
-    if request.method == 'POST':
-        form = CommentForm(request.POST, request.FILES)
-        if form.is_valid():
-            comment = form.save(commit=False)
-            comment.ticket = ticket
-            comment.user = request.user
-            comment.save()
-            return redirect('ticket_detail', pk=ticket.pk)
-    else:
-        form = CommentForm()
-    return render(request, 'comments/add_comment.html', {'form': form, 'ticket': ticket})
+@require_POST
+def add_comment(request):
+    data = json.loads(request.body)
+    ticket_id = data.get('ticket_id')
+    content = data.get('content')
+    user = request.user
 
-# Funcionalidades de Gesti�n de Usuarios
+    if not content:
+        return JsonResponse({'error': 'El contenido no puede estar vacío.'}, status=400)
 
-# Funcionalidades de Notificaciones, Reportes, B�squedas y Etiquetas
+    ticket = get_object_or_404(Ticket, id=ticket_id)
+
+    comment = Comment.objects.create(
+        ticket=ticket,
+        user=user,
+        content=content,
+        created_at=timezone.now()
+    )
+
+    return JsonResponse({
+        'id': comment.id,
+        'content': comment.content,
+        'created_at': comment.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'ticket_id': comment.ticket.id,
+        'user_id': comment.user.id,
+        'username': comment.user.name
+    })
+# Funcionalidades de Gestion de Usuarios
+
+# Funcionalidades de Notificaciones, Reportes, Busquedas y Etiquetas
 
 # Las notificaciones y reportes suelen implementarse como funciones que se ejecutan en segundo plano o como vistas especializadas que generan y muestran los resultados.
-# La b�squeda y filtrado pueden implementarse como vistas que procesan las consultas del usuario y devuelven los resultados en la misma plantilla.
+# La busqueda y filtrado pueden implementarse como vistas que procesan las consultas del usuario y devuelven los resultados en la misma plantilla.
 
 # Nota: Estas vistas son b�sicas y necesitar�n plantillas HTML para funcionar correctamente.
 

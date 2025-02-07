@@ -2,6 +2,7 @@
 Definition of models.
 """
 
+from unicodedata import category
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 
@@ -89,7 +90,7 @@ class Ticket(models.Model):
     priority = models.CharField(max_length=255, choices=[('low', 'Low'), ('normal', 'Normal'), ('high', 'High'), ('urgent', 'Urgent')])
     requester = models.ForeignKey(User, on_delete=models.CASCADE, related_name='requested_tickets')
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='assigned_tickets')
-    group = models.ForeignKey(Group, on_delete=models.SET_NULL, null=True)
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_tickets')
     brand = models.CharField(max_length=255, null=True)
     type = models.CharField(max_length=255, null=True)
     ccs = models.TextField(null=True, help_text='Comma-separated list of user emails to CC')
@@ -99,6 +100,7 @@ class Ticket(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now_add=True)
     closed_at = models.DateTimeField(null=True, blank=True)
+    category = models.CharField(max_length=255, null=True)
 
 class Comment(models.Model):
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE)

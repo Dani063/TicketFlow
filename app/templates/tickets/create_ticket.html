@@ -391,163 +391,267 @@
     <div class="title-bar">
         <h1>Nuevo Ticket</h1>
     </div>
-    <div class="ticket-form">
-        <div class="column">
-            <div class="form-group">
-                <label for="empresa">Empresa</label>
-                <select id="empresa" class="select2">
-                    <option value="" disabled selected>-</option>
-                    <option value="empresa1">Audio Simple Notification Service</option>
-                    <option value="empresa2">Comunycarse Helpdesk</option>
-                    <option value="empresa3">EcomFax</option>
-                    <option value="empresa4">Recordia</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="solicitante">Solicitante</label>
-                <select id="solicitante" class="select2">
-                    <option value="" disabled selected>-</option>
-                    {% for user in usuarios %}
-                    <option value="{{ user.id }}">{{ user.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="asignado">Asignado</label>
-                <select id="asignado" class="select2">
-                    <option value="" disabled selected>-</option>
-                    {% for user in agentes %}
-                    <option value="{{ user.id }}">{{ user.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="ccs">CCs</label>
-                <select id="ccs" class="select2" multiple>
-                    {% for user in todos %}
-                    <option value="{{ user.id }}">{{ user.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="tags">Tags</label>
-                <select id="tags" class="select2" multiple>
-                    {% for tag in tags %}
-                    <option value="{{ tag.id }}">{{ tag.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="form-row">
+    <form id="ticket-form" method="post" action="{% url 'create_ticket' %}">
+        {% csrf_token %}
+        <div class="ticket-form">
+            <div class="column">
                 <div class="form-group">
-                    <label for="tipo">Tipo</label>
-                    <select id="tipo" class="select2">
-                        <option value="-" selected>-</option>
-                        <option value="incidencia">Incidencia</option>
-                        <option value="consulta">Consulta</option>
-                        <option value="mejora">Problema</option>
-                        <option value="tarea">Tarea</option>
+                    <label for="empresa">Empresa</label>
+                    <select id="empresa" name="empresa" class="select2">
+                        <option value="" disabled selected>-</option>
+                        <option value="Audio Simple Notification Service">Audio Simple Notification Service</option>
+                        <option value="Comunycarse Helpdesk">Comunycarse Helpdesk</option>
+                        <option value="EcomFax">EcomFax</option>
+                        <option value="Recordia">Recordia</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="prioridad">Prioridad</label>
-                    <select id="prioridad" class="select2">
-                        <option value="-" selected>-</option>
-                        <option value="baja">Baja</option>
-                        <option value="media">Media</option>
-                        <option value="alta">Alta</option>
-                        <option value="urgente">Urgente</option>
+                    <label for="solicitante">Solicitante</label>
+                    <select id="solicitante" name="solicitante" class="select2">
+                        <option value="" disabled selected>-</option>
+                        {% for user in usuarios %}
+                        <option value="{{ user.id }}">{{ user.name }}</option>
+                        {% endfor %}
                     </select>
                 </div>
+                <div class="form-group">
+                    <label for="asignado">Asignado</label>
+                    <select id="asignado" name="asignado" class="select2">
+                        <option value="" disabled selected>-</option>
+                        {% for user in agentes %}
+                        <option value="{{ user.id }}">{{ user.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="ccs">CCs</label>
+                    <select id="ccs" name="ccs" class="select2" multiple>
+                        {% for user in todos %}
+                        <option value="{{ user.id }}">{{ user.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="tags">Tags</label>
+                    <select id="tags" name="tags" class="select2" multiple>
+                        {% for tag in tags %}
+                        <option value="{{ tag.id }}">{{ tag.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="tipo">Tipo</label>
+                        <select id="tipo" name="tipo" class="select2">
+                            <option value="-" selected>-</option>
+                            <option value="incidencia">Incidencia</option>
+                            <option value="consulta">Consulta</option>
+                            <option value="mejora">Problema</option>
+                            <option value="tarea">Tarea</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="prioridad">Prioridad</label>
+                        <select id="prioridad" name="prioridad" class="select2">
+                            <option value="-" selected>-</option>
+                            <option value="baja">Baja</option>
+                            <option value="media">Media</option>
+                            <option value="alta">Alta</option>
+                            <option value="urgente">Urgente</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="servicio">Servicio</label>
+                    <select id="servicio" name="servicio" class="select2">
+                        <option value="-">-</option>
+                        <option value="ecomfax">EcomFax</option>
+                        <option value="ecomfaxpro">EcomFaxPro</option>
+                        <option value="recordia">Recordia</option>
+                        <option value="aplicateca">Aplicateca</option>
+                        <option value="audiolog">Audiolog</option>
+                        <option value="cisco_telefonia">Cisco Telefonia</option>
+                        <option value="rightfax">Rightfax</option>
+                        <option value="internocomuny">InternoComuny</option>
+                        <option value="rts">RTS</option>
+                        <option value="otros" selected>Otros</option>
+                        <option value="cognitia">Cognitia</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="canal">Canal</label>
+                    <select id="canal" name="canal" class="select2">
+                        <option value="-" selected>-</option>
+                        <option value="email">Email</option>
+                        <option value="telefono">Teléfono</option>
+                        <option value="web">Web</option>
+                        <option value="api">API</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="idioma">Idioma</label>
+                    <select id="idioma" name="idioma" class="select2">
+                        <option value="es">Español</option>
+                        <option value="en">Inglés</option>
+                    </select>
+                </div>
+                <div class="margin-bottom-large">
+                    <label for="categoria">Categoría</label>
+                    <select id="categoria" name="categoria" class="select2">
+                        <option value="-" selected>-</option>
+                        <option value="communication">Communication</option>
+                        <option value="hardware">Hardware</option>
+                        <option value="base_software">Base software</option>
+                        <option value="app_functionality">App Functionality</option>
+                        <option value="database">Database</option>
+                        <option value="api">App Program Interface (API)</option>
+                        <option value="webservice">WebService</option>
+                        <option value="configuration">Configuration</option>
+                        <option value="others">Others</option>
+                        <option value="information">Information</option>
+                    </select>
+                </div>
+                <hr class="margin-bottom-large">
             </div>
-            <div class="form-group">
-                <label for="servicio">Servicio</label>
-                <select id="servicio" class="select2">
-                    <option value="-">-</option>
-                    <option value="ecomfax">EcomFax</option>
-                    <option value="ecomfaxpro">EcomFaxPro</option>
-                    <option value="recordia">Recordia</option>
-                    <option value="aplicateca">Aplicateca</option>
-                    <option value="audiolog">Audiolog</option>
-                    <option value="cisco_telefonia">Cisco Telefonia</option>
-                    <option value="rightfax">Rightfax</option>
-                    <option value="internocomuny">InternoComuny</option>
-                    <option value="rts">RTS</option>
-                    <option value="otros" selected>Otros</option>
-                    <option value="cognitia">Cognitia</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="canal">Canal</label>
-                <select id="canal" class="select2">
-                    <option value="-" selected>-</option>
-                    <option value="email">Email</option>
-                    <option value="telefono">Teléfono</option>
-                    <option value="web">Web</option>
-                    <option value="api">API</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="idioma">Idioma</label>
-                <select id="idioma" class="select2">
-                    <option value="es">Español</option>
-                    <option value="en">Inglés</option>
-                </select>
-            </div>
-            <div class="margin-bottom-large">
-                <label for="categoria">Categoría</label>
-                <select id="categoria" class="select2">
-                    <option value="-" selected>-</option>
-                    <option value="communication">Communication</option>
-                    <option value="hardware">Hardware</option>
-                    <option value="base_software">Base software</option>
-                    <option value="app_functionality">App Functionality</option>
-                    <option value="database">Database</option>
-                    <option value="api">App Program Interface (API)</option>
-                    <option value="webservice">WebService</option>
-                    <option value="configuration">Configuration</option>
-                    <option value="others">Others</option>
-                    <option value="information">Information</option>
-                </select>
-            </div>
-            <hr class="margin-bottom-large">
-        </div>
 
-        <div class="column2">
-            <!-- Barra de Subject -->
-            <div class="subject-bar">
-                <h1>Subject</h1>
-            </div>
+            <div class="column2">
+                <!-- Barra de Subject -->
+                <div class="subject-bar">
+                    <input type="text" id="subject" name="subject" placeholder="Subject">
+                </div>
 
-            <!-- Cuadro de mensajes -->
-            <div class="messages-box">
-                <!-- Aquí se mostrarán los mensajes del ticket -->
-                <div class="message">
-                    <p><strong>Usuario:</strong> Mensaje de ejemplo</p>
-                    <span class="timestamp">2023-10-01 12:00</span>
+                <!-- Cuadro de mensajes -->
+                <div class="messages-box">
+                    <!-- Aquí se mostrarán los mensajes del ticket -->
+                    <div class="message">
+                        <p><strong>Usuario:</strong> Mensaje de ejemplo</p>
+                        <span class="timestamp">2023-10-01 12:00</span>
+                    </div>
+                </div>
+
+                <div class="message-input">
+                    <textarea id="new-message" name="content" placeholder="Escribe un mensaje..."></textarea>
                 </div>
             </div>
+        </div>
+        <div class="footer-bar">
+            <div class="footer-right">
+                <button type="button" id="publish-button" class="main-btn">Publicar como <span id="selected-status"> New</span></button>
+                <button id="dropdown-button" class="dropdown-btn"><i class="fas fa-caret-down"></i></button>
+                <div id="dropdown-content" class="dropdown-content">
+                    <a href="#" data-status="New"> New</a>
+                    <a href="#" data-status="Open">Open</a>
+                    <a href="#" data-status="Pending">Pending</a>
+                    <a href="#" data-status="On-hold">On-hold</a>
+                    <a href="#" data-status="Solved">Solved</a>
+                </div>
+            </div>
+        </div>
+    </form>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const publishButton = document.getElementById('publish-button');
+            const dropdownButton = document.getElementById('dropdown-button');
+            const dropdownContent = document.getElementById('dropdown-content');
+            const selectedStatus = document.getElementById('selected-status');
+            const ticketForm = document.getElementById('ticket-form');
 
-            <div class="message-input">
-                <textarea id="new-message" placeholder="Escribe un mensaje..."></textarea>
-                <button id="send-message">
-                    <i class="fas fa-paper-plane"></i>
-                </button>
-            </div>
-        </div>
-    </div>
-    <div class="footer-bar">
-        <div class="footer-right">
-            <button id="publish-button" class="main-btn">Publicar como <span id="selected-status"> New</span></button>
-            <button id="dropdown-button" class="dropdown-btn"><i class="fas fa-caret-down"></i></button>
-            <div id="dropdown-content" class="dropdown-content">
-                <a href="#" data-status="New"> New</a>
-                <a href="#" data-status="Open">Open</a>
-                <a href="#" data-status="Pending">Pending</a>
-                <a href="#" data-status="On-hold">On-hold</a>
-                <a href="#" data-status="Solved">Solved</a>
-            </div>
-        </div>
-    </div>
+            dropdownContent.addEventListener('click', (event) => {
+                if (event.target.tagName === 'A') {
+                    const status = event.target.getAttribute('data-status');
+                    selectedStatus.textContent = status;
+                    dropdownContent.classList.remove('show');
+                    console.log('Publicar ticket con estado:', status);
+                }
+            });
+
+            dropdownButton.addEventListener('click', () => {
+                dropdownContent.classList.toggle('show');
+            });
+
+            window.addEventListener('click', (event) => {
+                if (!event.target.matches('.dropdown-btn')) {
+                    dropdownContent.classList.remove('show');
+                }
+            });
+
+            publishButton.addEventListener('click', () => {
+                const status = selectedStatus.textContent.trim();
+                const statusInput = document.createElement('input');
+                statusInput.type = 'hidden';
+                statusInput.name = 'status';
+                statusInput.value = status;
+                ticketForm.appendChild(statusInput);
+                ticketForm.submit();
+            });
+        });
+    </script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const sendMessageButton = document.getElementById('send-message');
+            const newMessageTextarea = document.getElementById('new-message');
+            const messagesBox = document.querySelector('.messages-box');
+
+            sendMessageButton.addEventListener('click', async () => {
+                const content = newMessageTextarea.value.trim();
+                if (!content) {
+                    alert('El contenido no puede estar vacío.');
+                    return;
+                }
+
+                const urlParams = new URLSearchParams(window.location.search);
+                const ticketId = urlParams.get('id');
+
+                if (!ticketId) {
+                    alert('No se pudo obtener el ID del ticket.');
+                    return;
+                }
+
+                const response = await fetch(`/tickets/create/?id=${ticketId}/add_comment/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({
+                        ticket_id: ticketId.split('-')[1],
+                        content: content
+                    })
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    const newComment = document.createElement('div');
+                    newComment.classList.add('message');
+                    newComment.innerHTML = `
+                                                <p><strong>${data.username}:</strong> ${data.content}</p>
+                                                <span class="timestamp">${data.created_at}</span>
+                                            `;
+                    messagesBox.appendChild(newComment);
+                    newMessageTextarea.value = '';
+                } else {
+                    alert(data.error);
+                }
+            });
+
+            function getCookie(name) {
+                let cookieValue = null;
+                if (document.cookie && document.cookie !== '') {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i].trim();
+                        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                            break;
+                        }
+                    }
+                }
+                return cookieValue;
+            }
+        });
+    </script>
+
+
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const publishButton = document.getElementById('publish-button');

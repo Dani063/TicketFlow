@@ -350,7 +350,7 @@
         </div>
     </div>
     <div class="pending-tickets">
-        <h2>Tickets que requieren tu atención (0)</h2>
+        <h2>Tickets que requieren tu atención ({% if tickets %}{{ tickets|length }}{% else %}0{% endif %})</h2>
     </div>
     <div class="tabla">
         <table>
@@ -360,20 +360,20 @@
                     <th>Asunto</th>
                     <th>Solicitante</th>
                     <th>Solicitante actualizado</th>
-                    <th>Grupo</th>
+                    <th>Servicio</th>
                     <th>Asignado</th>
                 </tr>
             </thead>
             <tbody>
-                {% if pending_tickets %}
-                {% for ticket in pending_tickets %}
+                {% if tickets %}
+                {% for ticket in tickets %}
                 <tr>
                     <td>{{ ticket.id }}</td>
                     <td>{{ ticket.subject }}</td>
-                    <td>{{ ticket.requester }}</td>
+                    <td>{{ ticket.requester.name }}</td>
                     <td>{{ ticket.updated_at }}</td>
-                    <td>{{ ticket.group }}</td>
-                    <td>{{ ticket.assigned_to }}</td>
+                    <td>{{ ticket.service }}</td>
+                    <td>{{ ticket.assignee.name }}</td>
                 </tr>
                 {% endfor %}
                 {% else %}
