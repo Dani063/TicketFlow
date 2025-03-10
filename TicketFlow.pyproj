@@ -61,6 +61,7 @@
     <Folder Include="TicketFlow\" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="app\.babelrc" />
     <Content Include="app\static\tickets\Animation - 1738849719549.json" />
     <Content Include="app\static\tickets\create_ticket.css" />
     <Content Include="app\static\tickets\home.css" />

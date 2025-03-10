@@ -311,18 +311,37 @@
             // Inicializa Select2 con la funcionalidad de creación de tags solo para el campo de "Tags"
             $('#tags').select2({
                 tags: true,
-                createTag: function (params) {
-                    return {
-                        id: 'create_new_tag',
-                        text: 'Añadir tag: ' + params.term,
-                        newTag: true // add additional parameters
-                    };
+                tokenSeparators: [','],
+                placeholder: "Selecciona o añade etiquetas",
+                allowClear: true,
+                minimumInputLength: 1,
+                ajax: {
+                    url: '/api/tags/',  // Asegúrate de tener una API para buscar tags
+                    dataType: 'json',
+                    delay: 250,
+                    data: function (params) {
+                        return {
+                            q: params.term  // Término de búsqueda
+                        };
+                    },
+                    processResults: function (data) {
+                        return {
+                            results: data.results
+                        };
+                    },
+                    cache: true
                 },
-                templateResult: function (data) {
-                    if (data.newTag) {
-                        return $('<span class="add-tag-button">' + data.text + '</span>');
+                createTag: function (params) {
+                    var term = $.trim(params.term);
+                    if (term === '') {
+                        return null;
                     }
-                    return data.text;
+
+                    return {
+                        id: term,
+                        text: term,
+                        newTag: true  // Indica que es una nueva etiqueta
+                    };
                 }
             });
 
@@ -385,6 +404,29 @@
 
             // Cargar los datos del formulario al cargar la página
             loadFormData();
+
+            if (ticketId) {
+                // Lógica para cargar la información del ticket
+                fetch(`/api/tickets/${ticketId}/`)
+                    .then(response => response.json())
+                    .then(data => {
+                        // Rellenar el formulario con los datos del ticket
+                        document.getElementById('empresa').value = data.empresa;
+                        document.getElementById('solicitante').value = data.solicitante;
+                        document.getElementById('asignado').value = data.asignado;
+                        document.getElementById('ccs').value = data.ccs;
+                        document.getElementById('tags').value = data.tags;
+                        document.getElementById('tipo').value = data.tipo;
+                        document.getElementById('prioridad').value = data.prioridad;
+                        document.getElementById('servicio').value = data.servicio;
+                        document.getElementById('canal').value = data.canal;
+                        document.getElementById('idioma').value = data.idioma;
+                        document.getElementById('categoria').value = data.categoria;
+                        document.getElementById('subject').value = data.subject;
+                        // Rellenar otros campos según sea necesario
+                    })
+                    .catch(error => console.error('Error al cargar el ticket:', error));
+            }
         });
     </script>
 
@@ -426,7 +468,7 @@
                 <div class="form-group">
                     <label for="ccs">CCs</label>
                     <select id="ccs" name="ccs" class="select2" multiple>
-                        {% for user in todos %}
+                        {% for user in usuarios %}
                         <option value="{{ user.id }}">{{ user.name }}</option>
                         {% endfor %}
                     </select>
@@ -550,44 +592,6 @@
     </form>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const publishButton = document.getElementById('publish-button');
-            const dropdownButton = document.getElementById('dropdown-button');
-            const dropdownContent = document.getElementById('dropdown-content');
-            const selectedStatus = document.getElementById('selected-status');
-            const ticketForm = document.getElementById('ticket-form');
-
-            dropdownContent.addEventListener('click', (event) => {
-                if (event.target.tagName === 'A') {
-                    const status = event.target.getAttribute('data-status');
-                    selectedStatus.textContent = status;
-                    dropdownContent.classList.remove('show');
-                    console.log('Publicar ticket con estado:', status);
-                }
-            });
-
-            dropdownButton.addEventListener('click', () => {
-                dropdownContent.classList.toggle('show');
-            });
-
-            window.addEventListener('click', (event) => {
-                if (!event.target.matches('.dropdown-btn')) {
-                    dropdownContent.classList.remove('show');
-                }
-            });
-
-            publishButton.addEventListener('click', () => {
-                const status = selectedStatus.textContent.trim();
-                const statusInput = document.createElement('input');
-                statusInput.type = 'hidden';
-                statusInput.name = 'status';
-                statusInput.value = status;
-                ticketForm.appendChild(statusInput);
-                ticketForm.submit();
-            });
-        });
-    </script>
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
             const sendMessageButton = document.getElementById('send-message');
             const newMessageTextarea = document.getElementById('new-message');
             const messagesBox = document.querySelector('.messages-box');
@@ -624,9 +628,9 @@
                     const newComment = document.createElement('div');
                     newComment.classList.add('message');
                     newComment.innerHTML = `
-                                                <p><strong>${data.username}:</strong> ${data.content}</p>
-                                                <span class="timestamp">${data.created_at}</span>
-                                            `;
+                                                            <p><strong>${data.username}:</strong> ${data.content}</p>
+                                                            <span class="timestamp">${data.created_at}</span>
+                                                        `;
                     messagesBox.appendChild(newComment);
                     newMessageTextarea.value = '';
                 } else {
@@ -650,14 +654,13 @@
             }
         });
     </script>
-
-
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const publishButton = document.getElementById('publish-button');
             const dropdownButton = document.getElementById('dropdown-button');
             const dropdownContent = document.getElementById('dropdown-content');
             const selectedStatus = document.getElementById('selected-status');
+            const ticketForm = document.getElementById('ticket-form');
 
             dropdownContent.addEventListener('click', (event) => {
                 if (event.target.tagName === 'A') {
@@ -665,18 +668,30 @@
                     selectedStatus.textContent = status;
                     dropdownContent.classList.remove('show');
                     console.log('Publicar ticket con estado:', status);
-                    // Aquí puedes añadir la lógica para publicar el ticket con el estado seleccionado
                 }
             });
 
-            dropdownButton.addEventListener('click', () => {
+            dropdownButton.addEventListener('click', (event) => {
+                event.preventDefault(); // Evitar que el formulario se envíe
+                event.stopPropagation(); // Evitar que el evento se propague y cierre el desplegable
                 dropdownContent.classList.toggle('show');
             });
 
             window.addEventListener('click', (event) => {
-                if (!event.target.matches('.dropdown-btn')) {
+                if (!event.target.matches('.dropdown-btn') && !event.target.closest('#dropdown-content')) {
                     dropdownContent.classList.remove('show');
                 }
+            });
+
+            publishButton.addEventListener('click', (event) => {
+                event.preventDefault(); // Evitar que el formulario se envíe
+                const status = selectedStatus.textContent.trim();
+                const statusInput = document.createElement('input');
+                statusInput.type = 'hidden';
+                statusInput.name = 'status';
+                statusInput.value = status;
+                ticketForm.appendChild(statusInput);
+                ticketForm.submit();
             });
         });
     </script>

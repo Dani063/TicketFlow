@@ -93,7 +93,8 @@ class Ticket(models.Model):
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_tickets')
     brand = models.CharField(max_length=255, null=True)
     type = models.CharField(max_length=255, null=True)
-    ccs = models.TextField(null=True, help_text='Comma-separated list of user emails to CC')
+    ccs = models.ManyToManyField('User', related_name='tickets_ccd', blank=True)
+    tags = models.ManyToManyField('TicketTag', related_name='tickets', blank=True)
     channel = models.CharField(max_length=255, null=True)
     service = models.CharField(max_length=255, null=True)
     language = models.CharField(max_length=255, null=True)
@@ -112,13 +113,6 @@ class TicketTag(models.Model):
     name = models.CharField(max_length=255, unique=True, null=False, help_text='Label for categorizing tickets')
     def __str__(self):
         return self.name
-
-class TicketTagAssignment(models.Model):
-    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE)
-    tag = models.ForeignKey(TicketTag, on_delete=models.CASCADE)
-
-    class Meta:
-        unique_together = ('ticket', 'tag')
 
 class TicketHistory(models.Model):
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE)

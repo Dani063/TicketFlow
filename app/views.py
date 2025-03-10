@@ -3,6 +3,7 @@ Definition of views.
 """
 # -*- coding: utf-8 -*-
 from datetime import datetime
+from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
@@ -16,6 +17,7 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 from django.views.decorators.http import require_POST
 from django.utils import timezone
+from django.views import View
 
 # Funcionalidades de Ticket
 
@@ -123,6 +125,27 @@ from django.utils import timezone
 import random
 from django.utils import timezone
 
+def ticket_detail_api(request, ticket_id):
+    ticket = get_object_or_404(Ticket, id=ticket_id)
+    data = {
+        'empresa': ticket.brand,
+        'solicitante': ticket.requester_id,
+        'asignado': ticket.assignee_id,
+        'ccs': [user.id for user in ticket.ccs.all()],
+        'tags': [tag.id for tag in ticket.tags.all()],
+        'tipo': ticket.type,
+        'prioridad': ticket.priority,
+        'servicio': ticket.service,
+        'canal': ticket.channel,
+        'idioma': ticket.language,
+        'categoria': ticket.category,
+        'subject': ticket.subject,
+        'content': ticket.description,
+    }
+    return JsonResponse(data)
+# app/views.py
+
+@login_required
 def create_ticket(request):
     if request.method == 'POST':
         # Obtener los datos del formulario
@@ -141,13 +164,13 @@ def create_ticket(request):
 
         # Obtener el usuario logueado
         requester_id = request.user.id
-        
-         # Si no se selecciona un solicitante, usar el usuario logueado
-        if solicitante_id == '':
+
+        # Si no se selecciona un solicitante, usar el usuario logueado
+        if not solicitante_id:
             solicitante_id = requester_id
-        
+
         # Si no se selecciona un agente, asignar uno aleatorio
-        if asignado_id == '':
+        if not asignado_id:
             agentes = User.objects.filter(group_id='2')
             asignado_id = random.choice(agentes).id if agentes.exists() else None
 
@@ -168,6 +191,28 @@ def create_ticket(request):
             priority=priority,
             status=status
         )
+
+        # Obtener las listas de ccs y tags desde el formulario
+        ccs_ids = request.POST.getlist('ccs')
+        tags = request.POST.getlist('tags')  # Puede contener IDs y/o nombres de etiquetas
+
+        # Asignar las relaciones Many-to-Many para CCs
+        if ccs_ids:
+            ticket.ccs.set(ccs_ids)
+
+        # Procesar y asignar etiquetas
+        for tag in tags:
+            if tag.isdigit():
+                # Etiqueta existente por ID
+                try:
+                    tag_obj = TicketTag.objects.get(id=tag)
+                    ticket.tags.add(tag_obj)
+                except TicketTag.DoesNotExist:
+                    continue  # O manejar el error según corresponda
+            else:
+                # Nueva etiqueta por nombre
+                tag_obj, created = TicketTag.objects.get_or_create(name=tag)
+                ticket.tags.add(tag_obj)
 
         # Crear el comentario
         Comment.objects.create(
@@ -190,6 +235,13 @@ def create_ticket(request):
         'email': request.user.email,
     }
     return render(request, 'tickets/create_ticket.html', context)
+
+class TagListAPIView(View):
+    def get(self, request):
+        query = request.GET.get('q', '')
+        tags = TicketTag.objects.filter(name__icontains=query)[:10]
+        results = [{'id': tag.id, 'text': tag.name} for tag in tags]
+        return JsonResponse({'results': results})
 
 @login_required
 def assign_agent(request, pk):

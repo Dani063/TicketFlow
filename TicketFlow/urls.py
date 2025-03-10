@@ -45,6 +45,8 @@ urlpatterns = [
 
     path('api/register/', views.register, name='register'),
     path('api/login/', views.user_login, name='login'),
+    path('api/tickets/<int:ticket_id>/', views.ticket_detail_api, name='ticket_detail_api'),
+    path('api/tags/', views.TagListAPIView.as_view(), name='tag-list-api'),
 
     #Botones
     path('logout/', views.user_logout, name='logout'),

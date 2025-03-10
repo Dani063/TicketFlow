@@ -367,7 +367,7 @@
             <tbody>
                 {% if tickets %}
                 {% for ticket in tickets %}
-                <tr>
+                <tr onclick="openTicket('{{ ticket.id }}')">
                     <td>{{ ticket.id }}</td>
                     <td>{{ ticket.subject }}</td>
                     <td>{{ ticket.requester.name }}</td>
@@ -383,6 +383,15 @@
                 {% endif %}
             </tbody>
         </table>
+
+        <script>
+            function openTicket(ticketId) {
+                const tabText = "Ticket " + ticketId;
+                const tabUrl = `{% url 'create_ticket' %}?id=${ticketId}`;
+                addTab(tabText, tabUrl);
+            }
+        </script>
+
     </div>
 </body>
 </html>

@@ -129,9 +129,9 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/2.1/howto/static-files/
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
-# Configuración de la URL de inicio de sesión
+# Configuraciï¿½n de la URL de inicio de sesiï¿½n
 LOGIN_URL = '/login/'
 
-# Configuración de la URL de redirección después del inicio de sesión
+# Configuraciï¿½n de la URL de redirecciï¿½n despuï¿½s del inicio de sesiï¿½n
 LOGIN_REDIRECT_URL = '/'
    
