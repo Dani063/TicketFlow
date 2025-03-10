@@ -64,6 +64,7 @@
     <Content Include="app\.babelrc" />
     <Content Include="app\static\tickets\Animation - 1738849719549.json" />
     <Content Include="app\static\tickets\create_ticket.css" />
+    <Content Include="app\static\tickets\create_ticket.js" />
     <Content Include="app\static\tickets\home.css" />
     <Content Include="app\static\tickets\login.css" />
     <Content Include="app\static\tickets\logo.png" />

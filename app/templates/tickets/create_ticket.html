@@ -1,4 +1,4 @@
-﻿<!-- templates/tickets/crete_ticket.html -->
+﻿<!-- app/templates/tickets/create_ticket.html -->
 {% load static %}
 <!DOCTYPE html>
 <html lang="es">
@@ -10,12 +10,12 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <!-- CSS de Select2 -->
     <link href="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/css/select2.min.css" rel="stylesheet" />
-
-    <!-- JS de Select2 -->
+    <!-- JS de Select2 y jQuery -->
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
 </head>
 <body>
+    <!-- Sidebar de Navegación -->
     <div class="sidebar-navigation">
         <img src="{% static 'tickets/logo.png' %}" alt="Logo">
         <ul>
@@ -51,6 +51,8 @@
             </li>
         </ul>
     </div>
+
+    <!-- Barra de Navegación -->
     <nav class="navbar">
         <div class="navbar-left">
             <button class="add-tab">+ Add</button>
@@ -69,18 +71,21 @@
             </div>
         </div>
     </nav>
+
+    <!-- Popup de Notificaciones -->
     <div class="notifications-popup" id="notificationsPopup" style="display: none;">
         <div class="popup-header">
             <h2>Notificaciones</h2>
             <button class="close-popup" id="closePopup">X</button>
         </div>
         <div class="popup-content">
-            <!-- Aquí se mostrarán las notificaciones -->
             <ul id="notificationsList">
-                <!-- Las notificaciones se cargarán dinámicamente aquí -->
+                <!-- Notificaciones dinámicas -->
             </ul>
         </div>
     </div>
+
+    <!-- Popup de Usuario -->
     <div class="user-popup" id="userPopup" style="display: none;">
         <div class="popup-header">
             <div class="user-info">
@@ -95,348 +100,17 @@
         </div>
     </div>
 
-    <script>
-        document.querySelector('.user-profile').addEventListener('click', () => {
-            const userPopup = document.getElementById('userPopup');
-            const notificationsPopup = document.getElementById('notificationsPopup');
-            const userProfileIcon = document.querySelector('.user-profile');
-            const notificationsIcon = document.querySelector('.notifications');
-
-            if (userPopup.style.display === 'block') {
-                userPopup.style.display = 'none';
-                userProfileIcon.classList.remove('active');
-            } else {
-                userPopup.style.display = 'block';
-                userProfileIcon.classList.add('active');
-
-                // Cerrar la ventana de notificaciones si está abierta
-                if (notificationsPopup.style.display === 'block') {
-                    notificationsPopup.style.display = 'none';
-                    notificationsIcon.classList.remove('active');
-                }
-            }
-        });
-
-        document.getElementById('logoutButton').addEventListener('click', () => {
-            // Aquí puedes añadir la lógica para desloguearse, por ejemplo, redirigir a la página de logout
-            window.location.href = '{% url "login" %}';
-        });
-
-    </script>
-
-    <script>
-        document.querySelector('.notifications').addEventListener('click', () => {
-            const notificationsPopup = document.getElementById('notificationsPopup');
-            const userPopup = document.getElementById('userPopup');
-            const notificationsIcon = document.querySelector('.notifications');
-            const userProfileIcon = document.querySelector('.user-profile');
-
-            if (notificationsPopup.style.display === 'block') {
-                notificationsPopup.style.display = 'none';
-                notificationsIcon.classList.remove('active');
-            } else {
-                notificationsPopup.style.display = 'block';
-                notificationsIcon.classList.add('active');
-                loadNotifications();
-
-                // Cerrar la ventana de usuario si está abierta
-                if (userPopup.style.display === 'block') {
-                    userPopup.style.display = 'none';
-                    userProfileIcon.classList.remove('active');
-                }
-            }
-        });
-
-        document.getElementById('closePopup').addEventListener('click', () => {
-            document.getElementById('notificationsPopup').style.display = 'none';
-            document.querySelector('.notifications').classList.remove('active');
-        });
-
-        function loadNotifications() {
-            // Aquí puedes cargar las notificaciones del usuario, por ejemplo, haciendo una llamada AJAX
-            const notifications = [
-                'Notificación 1',
-                'Notificación 2',
-                'Notificación 3'
-            ];
-
-            const notificationsList = document.getElementById('notificationsList');
-            notificationsList.innerHTML = '';
-            notifications.forEach(notification => {
-                const li = document.createElement('li');
-                li.textContent = notification;
-                notificationsList.appendChild(li);
-            });
-        }
-    </script>
-    <script>
-        // Función para cargar las pestañas desde localStorage
-        function loadTabs() {
-            const tabs = JSON.parse(localStorage.getItem('tabs')) || [];
-            tabs.forEach(tab => {
-                addTab(tab.text, tab.url, false);
-            });
-        }
-
-        // Función para guardar las pestañas en localStorage
-        function saveTabs() {
-            const tabs = [];
-            document.querySelectorAll('.navbar-left .tab').forEach(tab => {
-                tabs.push({ text: tab.innerText.replace(/\sX$/, ''), url: tab.dataset.url });
-            });
-            localStorage.setItem('tabs', JSON.stringify(tabs));
-        }
-
-        // Función para añadir una pestaña
-        function addTab(text, url, select = true) {
-            const tab = document.createElement('div');
-            tab.className = 'tab';
-            tab.dataset.url = url;
-
-            const img = document.createElement('img');
-            img.src = '{% static "tickets/logo.png" %}';
-            img.alt = 'Icono';
-            img.className = 'tab-icon';
-
-            const tabText = document.createElement('span');
-            tabText.className = 'tab-text';
-            tabText.innerText = text;
-
-            const closeButton = document.createElement('button');
-            closeButton.innerText = 'X';
-            closeButton.className = 'close-tab';
-            closeButton.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const nextTab = tab.nextElementSibling || tab.previousElementSibling;
-                tab.remove();
-                saveTabs();
-                if (nextTab) {
-                    window.location.href = nextTab.dataset.url;
-                } else {
-                    window.location.href = '{% url "tickets_list" %}';
-                }
-            });
-
-            tab.appendChild(img);
-            tab.appendChild(tabText);
-            tab.appendChild(closeButton);
-
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('.navbar-left .tab').forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                window.location.href = url;
-            });
-
-            document.querySelector('.navbar-left').appendChild(tab);
-            if (select) {
-                tab.click();
-            }
-            saveTabs();
-        }
-
-        // Evento para añadir una nueva pestaña
-        document.querySelector('.add-tab').addEventListener('click', () => {
-            const tabText = "Nuevo ticket";
-            const tabId = `ticket-${Date.now()}`;
-            addTab(tabText, `{% url "create_ticket" %}?id=${tabId}`);
-        });
-
-        // Función para marcar la pestaña activa
-        function highlightActiveTab() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const activeTabId = urlParams.get('id'); // Obtiene el ID del ticket de la URL
-
-            if (activeTabId) {
-                document.querySelectorAll('.navbar-left .tab').forEach(tab => {
-                    if (tab.dataset.url.includes(`id=${activeTabId}`)) {
-                        tab.classList.add('active'); // Marca la pestaña activa
-                    } else {
-                        tab.classList.remove('active'); // Quita la clase de las demás
-                    }
-                });
-            }
-        }
-
-        // Llama a la función después de cargar las pestañas
-        document.addEventListener('DOMContentLoaded', () => {
-            loadTabs();
-            highlightActiveTab();
-        });
-    </script>
-    <script>
-        // Ejemplo de inicialización de un desplegable con búsqueda
-        document.addEventListener('DOMContentLoaded', () => {
-            const selectElements = document.querySelectorAll('select');
-            selectElements.forEach(select => {
-                // Inicializa el desplegable con búsqueda (puedes usar una librería como Select2)
-                $(select).select2();
-            });
-        });
-
-        // Ejemplo de manejo de creación de nuevos usuarios/tags
-        document.getElementById('ccs').addEventListener('input', (event) => {
-            const value = event.target.value;
-            if (value.endsWith(',')) {
-                // Lógica para crear un nuevo usuario
-                const newUser = value.slice(0, -1);
-                console.log('Crear nuevo usuario:', newUser);
-                // Añadir el nuevo usuario a la lista de CCs
-            }
-        });
-
-        document.getElementById('tags').addEventListener('change', (event) => {
-            const value = event.target.value;
-            if (value === 'create_new_tag') {
-                // Lógica para crear un nuevo tag
-                const newTag = prompt('Introduce el nuevo tag:');
-                if (newTag) {
-                    console.log('Crear nuevo tag:', newTag);
-                    // Añadir el nuevo tag a la lista de tags
-                }
-            }
-        });
-    </script>
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            // Obtener el ID del ticket de la URL
-            const urlParams = new URLSearchParams(window.location.search);
-            const ticketId = urlParams.get('id');
-
-            // Inicializa Select2 para todos los campos de selección
-            const selectElements = document.querySelectorAll('select');
-            selectElements.forEach(select => {
-                $(select).select2();
-            });
-
-            // Inicializa Select2 con la funcionalidad de creación de tags solo para el campo de "Tags"
-            $('#tags').select2({
-                tags: true,
-                tokenSeparators: [','],
-                placeholder: "Selecciona o añade etiquetas",
-                allowClear: true,
-                minimumInputLength: 1,
-                ajax: {
-                    url: '/api/tags/',  // Asegúrate de tener una API para buscar tags
-                    dataType: 'json',
-                    delay: 250,
-                    data: function (params) {
-                        return {
-                            q: params.term  // Término de búsqueda
-                        };
-                    },
-                    processResults: function (data) {
-                        return {
-                            results: data.results
-                        };
-                    },
-                    cache: true
-                },
-                createTag: function (params) {
-                    var term = $.trim(params.term);
-                    if (term === '') {
-                        return null;
-                    }
-
-                    return {
-                        id: term,
-                        text: term,
-                        newTag: true  // Indica que es una nueva etiqueta
-                    };
-                }
-            });
-
-            // Manejo de creación de nuevos tags
-            $('#tags').on('select2:select', function (e) {
-                const data = e.params.data;
-                if (data.id === 'create_new_tag') {
-                    const newTag = data.text.replace('Añadir tag: ', '');
-                    const isValidTag = /^[a-zA-Z0-9]+$/.test(newTag); // Verificar si el tag es válido
-                    if (newTag && isValidTag) {
-                        // Verificar si el tag ya existe en la lista
-                        let exists = false;
-                        $('#tags option').each(function () {
-                            if ($(this).val() === newTag) {
-                                exists = true;
-                                return false; // salir del bucle
-                            }
-                        });
-
-                        // Añadir el nuevo tag a la lista de tags si no existe
-                        if (!exists) {
-                            const newOption = new Option(newTag, newTag, true, true);
-                            $('#tags').append(newOption).trigger('change');
-                        }
-
-                        // Eliminar la opción temporal "Añadir tag: ejemplo"
-                        $('#tags').find('option[value="create_new_tag"]').remove();
-                    } else {
-                        alert('El tag solo puede contener letras y números, sin espacios en blanco.');
-                        $('#tags').find('option[value="create_new_tag"]').remove();
-                    }
-                }
-            });
-
-            // Función para guardar los datos del formulario en localStorage
-            function saveFormData() {
-                const formData = {};
-                selectElements.forEach(select => {
-                    formData[select.id] = $(select).val();
-                });
-                localStorage.setItem(`ticketFormData_${ticketId}`, JSON.stringify(formData));
-            }
-
-            // Función para cargar los datos del formulario desde localStorage
-            function loadFormData() {
-                const formData = JSON.parse(localStorage.getItem(`ticketFormData_${ticketId}`));
-                if (formData) {
-                    selectElements.forEach(select => {
-                        if (formData[select.id]) {
-                            $(select).val(formData[select.id]).trigger('change');
-                        }
-                    });
-                }
-            }
-
-            // Guardar los datos del formulario cuando se cambian
-            selectElements.forEach(select => {
-                $(select).on('change', saveFormData);
-            });
-
-            // Cargar los datos del formulario al cargar la página
-            loadFormData();
-
-            if (ticketId) {
-                // Lógica para cargar la información del ticket
-                fetch(`/api/tickets/${ticketId}/`)
-                    .then(response => response.json())
-                    .then(data => {
-                        // Rellenar el formulario con los datos del ticket
-                        document.getElementById('empresa').value = data.empresa;
-                        document.getElementById('solicitante').value = data.solicitante;
-                        document.getElementById('asignado').value = data.asignado;
-                        document.getElementById('ccs').value = data.ccs;
-                        document.getElementById('tags').value = data.tags;
-                        document.getElementById('tipo').value = data.tipo;
-                        document.getElementById('prioridad').value = data.prioridad;
-                        document.getElementById('servicio').value = data.servicio;
-                        document.getElementById('canal').value = data.canal;
-                        document.getElementById('idioma').value = data.idioma;
-                        document.getElementById('categoria').value = data.categoria;
-                        document.getElementById('subject').value = data.subject;
-                        // Rellenar otros campos según sea necesario
-                    })
-                    .catch(error => console.error('Error al cargar el ticket:', error));
-            }
-        });
-    </script>
-
+    <!-- Barra de Título -->
     <div class="title-bar">
         <h1>Nuevo Ticket</h1>
     </div>
+
+    <!-- Formulario de Creación de Ticket -->
     <form id="ticket-form" method="post" action="{% url 'create_ticket' %}">
         {% csrf_token %}
         <div class="ticket-form">
             <div class="column">
+                <!-- Campos del Formulario -->
                 <div class="form-group">
                     <label for="empresa">Empresa</label>
                     <select id="empresa" name="empresa" class="select2">
@@ -562,26 +236,28 @@
                     <input type="text" id="subject" name="subject" placeholder="Subject">
                 </div>
 
-                <!-- Cuadro de mensajes -->
+                <!-- Cuadro de Mensajes -->
                 <div class="messages-box">
-                    <!-- Aquí se mostrarán los mensajes del ticket -->
                     <div class="message">
                         <p><strong>Usuario:</strong> Mensaje de ejemplo</p>
                         <span class="timestamp">2023-10-01 12:00</span>
                     </div>
                 </div>
 
+                <!-- Input de Mensaje -->
                 <div class="message-input">
                     <textarea id="new-message" name="content" placeholder="Escribe un mensaje..."></textarea>
                 </div>
             </div>
         </div>
+
+        <!-- Barra de Pie de Formulario -->
         <div class="footer-bar">
             <div class="footer-right">
-                <button type="button" id="publish-button" class="main-btn">Publicar como <span id="selected-status"> New</span></button>
+                <button type="button" id="publish-button" class="main-btn">Publicar como <span id="selected-status">New</span></button>
                 <button id="dropdown-button" class="dropdown-btn"><i class="fas fa-caret-down"></i></button>
                 <div id="dropdown-content" class="dropdown-content">
-                    <a href="#" data-status="New"> New</a>
+                    <a href="#" data-status="New">New</a>
                     <a href="#" data-status="Open">Open</a>
                     <a href="#" data-status="Pending">Pending</a>
                     <a href="#" data-status="On-hold">On-hold</a>
@@ -591,109 +267,17 @@
         </div>
     </form>
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const sendMessageButton = document.getElementById('send-message');
-            const newMessageTextarea = document.getElementById('new-message');
-            const messagesBox = document.querySelector('.messages-box');
-
-            sendMessageButton.addEventListener('click', async () => {
-                const content = newMessageTextarea.value.trim();
-                if (!content) {
-                    alert('El contenido no puede estar vacío.');
-                    return;
-                }
-
-                const urlParams = new URLSearchParams(window.location.search);
-                const ticketId = urlParams.get('id');
-
-                if (!ticketId) {
-                    alert('No se pudo obtener el ID del ticket.');
-                    return;
-                }
-
-                const response = await fetch(`/tickets/create/?id=${ticketId}/add_comment/`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken')
-                    },
-                    body: JSON.stringify({
-                        ticket_id: ticketId.split('-')[1],
-                        content: content
-                    })
-                });
-
-                const data = await response.json();
-                if (response.ok) {
-                    const newComment = document.createElement('div');
-                    newComment.classList.add('message');
-                    newComment.innerHTML = `
-                                                            <p><strong>${data.username}:</strong> ${data.content}</p>
-                                                            <span class="timestamp">${data.created_at}</span>
-                                                        `;
-                    messagesBox.appendChild(newComment);
-                    newMessageTextarea.value = '';
-                } else {
-                    alert(data.error);
-                }
-            });
-
-            function getCookie(name) {
-                let cookieValue = null;
-                if (document.cookie && document.cookie !== '') {
-                    const cookies = document.cookie.split(';');
-                    for (let i = 0; i < cookies.length; i++) {
-                        const cookie = cookies[i].trim();
-                        if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                            break;
-                        }
-                    }
-                }
-                return cookieValue;
-            }
-        });
+        window.urls = {
+            create_ticket: "{% url 'create_ticket' %}",
+            tickets_list: "{% url 'tickets_list' %}",
+            login: "{% url 'login' %}",
+            /* Añade otras URLs necesarias */
+        };
+        window.static_urls = {
+            logo: "{% static 'tickets/logo.png' %}",
+            /* Otras rutas estáticas si es necesario */
+        };
     </script>
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const publishButton = document.getElementById('publish-button');
-            const dropdownButton = document.getElementById('dropdown-button');
-            const dropdownContent = document.getElementById('dropdown-content');
-            const selectedStatus = document.getElementById('selected-status');
-            const ticketForm = document.getElementById('ticket-form');
-
-            dropdownContent.addEventListener('click', (event) => {
-                if (event.target.tagName === 'A') {
-                    const status = event.target.getAttribute('data-status');
-                    selectedStatus.textContent = status;
-                    dropdownContent.classList.remove('show');
-                    console.log('Publicar ticket con estado:', status);
-                }
-            });
-
-            dropdownButton.addEventListener('click', (event) => {
-                event.preventDefault(); // Evitar que el formulario se envíe
-                event.stopPropagation(); // Evitar que el evento se propague y cierre el desplegable
-                dropdownContent.classList.toggle('show');
-            });
-
-            window.addEventListener('click', (event) => {
-                if (!event.target.matches('.dropdown-btn') && !event.target.closest('#dropdown-content')) {
-                    dropdownContent.classList.remove('show');
-                }
-            });
-
-            publishButton.addEventListener('click', (event) => {
-                event.preventDefault(); // Evitar que el formulario se envíe
-                const status = selectedStatus.textContent.trim();
-                const statusInput = document.createElement('input');
-                statusInput.type = 'hidden';
-                statusInput.name = 'status';
-                statusInput.value = status;
-                ticketForm.appendChild(statusInput);
-                ticketForm.submit();
-            });
-        });
-    </script>
+    <script src="{% static 'tickets/create_ticket.js' %}"></script>
 </body>
 </html>

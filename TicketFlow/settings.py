@@ -131,6 +131,7 @@ STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 # Configuraci�n de la URL de inicio de sesi�n
 LOGIN_URL = '/login/'
+DEFAULT_CHARSET = 'utf-8'
 
 # Configuraci�n de la URL de redirecci�n despu�s del inicio de sesi�n
 LOGIN_REDIRECT_URL = '/'
