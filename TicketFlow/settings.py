@@ -41,6 +41,43 @@ DEBUG = True
 
 ALLOWED_HOSTS = []
 
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console_app': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+    },
+    'loggers': {
+        # Logger para tu aplicación
+        'app.views': {
+            'handlers': ['console_app'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        # Reducir la verbosidad de los loggers de Django
+        'django': {
+            'handlers': ['console_app'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['console_app'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+    },
+}
+   
+
 # Application references
 # https://docs.djangoproject.com/en/2.1/ref/settings/#std:setting-INSTALLED_APPS
 INSTALLED_APPS = [

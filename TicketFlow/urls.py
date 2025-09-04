@@ -13,6 +13,9 @@ from app import forms, views
 urlpatterns = [
     path('', views.home, name='home'),  # P�gina principal
     # Funcionalidades de Ticket
+    path('tickets/create/', views.create_ticket, name='create_ticket'),
+    path('tickets/<int:ticket_id>/add_comment/', views.add_comment, name='add_comment'),
+    path('api/tickets/<int:ticket_id>/', views.ticket_detail_api, name='ticket_detail_api'),
     path('tickets/', views.tickets_list, name='tickets_list'),  # Listar tickets
     path('tickets/create/undefined', views.tickets_list, name='tickets_list'),
     path('tickets/create/', views.create_ticket, name='create_ticket'),
@@ -20,6 +23,7 @@ urlpatterns = [
     path('tickets/<int:pk>/update/', views.update_ticket, name='update_ticket'),
     path('tickets/<int:pk>/close/', views.close_ticket, name='close_ticket'),
     path('tickets/<int:pk>/reopen/', views.reopen_ticket, name='reopen_ticket'),
+    path('tickets/<int:ticket_id>/add_comment/', views.add_comment, name='add_comment'),
     
     # Funcionalidades de Comentarios
     path('tickets/<int:ticket_pk>/comments/add/', views.add_comment, name='add_comment'),

@@ -106,7 +106,9 @@
     </div>
 
     <!-- Formulario de Creación de Ticket -->
-    <form id="ticket-form" method="post" action="{% url 'create_ticket' %}">
+    <form id="ticket-form" method="post"
+          action="{% url 'create_ticket' %}{% if ticket %}?id={{ ticket.id }}{% elif request.GET.id %}?id={{ request.GET.id }}{% endif %}">
+
         {% csrf_token %}
         <div class="ticket-form">
             <div class="column">
@@ -169,11 +171,10 @@
                     <div class="form-group">
                         <label for="prioridad">Prioridad</label>
                         <select id="prioridad" name="prioridad" class="select2">
-                            <option value="-" selected>-</option>
-                            <option value="baja">Baja</option>
-                            <option value="media">Media</option>
-                            <option value="alta">Alta</option>
-                            <option value="urgente">Urgente</option>
+                            <option value="low">Baja</option>
+                            <option value="normal" selected>Media</option>
+                            <option value="high">Alta</option>
+                            <option value="urgent">Urgente</option>
                         </select>
                     </div>
                 </div>
@@ -237,16 +238,25 @@
                 </div>
 
                 <!-- Cuadro de Mensajes -->
-                <div class="messages-box">
-                    <div class="message">
-                        <p><strong>Usuario:</strong> Mensaje de ejemplo</p>
-                        <span class="timestamp">2023-10-01 12:00</span>
+                <div class="messages-box" id="messagesBox">
+                    {% if ticket %}
+                    {% for c in ticket.comment_set.all %}
+                    <div class="message{% if c.user_id == request.user.id %} me{% endif %}">
+                        <p><strong>{{ c.user.name }}:</strong> {{ c.content }}</p>
+                        <span class="timestamp">{{ c.created_at }}</span>
                     </div>
+                    {% empty %}
+                    <div class="message"><em>Sin mensajes aún.</em></div>
+                    {% endfor %}
+                    {% else %}
+                    <div class="message"><em>Guarda el ticket para comenzar a comentar.</em></div>
+                    {% endif %}
                 </div>
 
                 <!-- Input de Mensaje -->
                 <div class="message-input">
                     <textarea id="new-message" name="content" placeholder="Escribe un mensaje..."></textarea>
+                    <button id="send-message" type="button"><i class="fas fa-paper-plane"></i></button>
                 </div>
             </div>
         </div>
@@ -254,29 +264,29 @@
         <!-- Barra de Pie de Formulario -->
         <div class="footer-bar">
             <div class="footer-right">
-                <button type="button" id="publish-button" class="main-btn">Publicar como <span id="selected-status">New</span></button>
+                <button type="button" id="publish-button" class="main-btn">
+                    Publicar como <span id="selected-status">{{ ticket.status|default:"open" }}</span>
+                </button>
                 <button id="dropdown-button" class="dropdown-btn"><i class="fas fa-caret-down"></i></button>
                 <div id="dropdown-content" class="dropdown-content">
-                    <a href="#" data-status="New">New</a>
-                    <a href="#" data-status="Open">Open</a>
-                    <a href="#" data-status="Pending">Pending</a>
-                    <a href="#" data-status="On-hold">On-hold</a>
-                    <a href="#" data-status="Solved">Solved</a>
+                    <a href="#" data-status="open">Open</a>
+                    <a href="#" data-status="pending">Pending</a>
+                    <a href="#" data-status="resolved">Resolved</a>
+                    <a href="#" data-status="closed">Closed</a>
                 </div>
             </div>
         </div>
     </form>
     <script>
+        window.currentUserId = {{ request.user.id }};
+        window.ticketId = {{ ticket.id|default:"null" }};
         window.urls = {
-            create_ticket: "{% url 'create_ticket' %}",
-            tickets_list: "{% url 'tickets_list' %}",
-            login: "{% url 'login' %}",
-            /* Añade otras URLs necesarias */
-        };
-        window.static_urls = {
-            logo: "{% static 'tickets/logo.png' %}",
-            /* Otras rutas estáticas si es necesario */
-        };
+        create_ticket: "{% url 'create_ticket' %}",
+        tickets_list: "{% url 'tickets_list' %}",
+        login: "{% url 'login' %}",
+        add_comment: window.ticketId ? `/tickets/${window.ticketId}/add_comment/` : null
+    };
+    window.static_urls = { logo: "{% static 'tickets/logo.png' %}" };
     </script>
     <script src="{% static 'tickets/create_ticket.js' %}"></script>
 </body>

@@ -15,6 +15,7 @@ from django.contrib.auth import authenticate, login as auth_login
 from django.contrib.auth import logout
 from django.views.decorators.csrf import csrf_exempt
 import json
+import logging
 from django.views.decorators.http import require_POST
 from django.utils import timezone
 from django.views import View
@@ -143,96 +144,131 @@ def ticket_detail_api(request, ticket_id):
         'content': ticket.description,
     }
     return JsonResponse(data)
-# app/views.py
+
+logger = logging.getLogger('app.views')
 
 @login_required
 def create_ticket(request):
+    id_param = request.GET.get('id', None)
+
     if request.method == 'POST':
-        # Obtener los datos del formulario
-        empresa = request.POST.get('empresa')
-        subject = request.POST.get('subject')
-        content = request.POST.get('content')
-        language = request.POST.get('idioma')
-        category = request.POST.get('categoria')
-        channel = request.POST.get('canal')
-        service = request.POST.get('servicio')
-        type = request.POST.get('tipo')
-        priority = request.POST.get('prioridad')
-        status = request.POST.get('status')
-        solicitante_id = request.POST.get('solicitante')
-        asignado_id = request.POST.get('asignado')
+        # --- Leer y sanear inputs (evita NULL en campos obligatorios) ---
+        subject = (request.POST.get('subject') or '').strip()
+        content = (request.POST.get('content') or '').strip()
+        status  = (request.POST.get('status')  or 'open').strip().lower()
+        priority = (request.POST.get('prioridad') or 'normal').strip().lower()
 
-        # Obtener el usuario logueado
-        requester_id = request.user.id
+        # Mapear placeholders o valores no válidos a defaults
+        if status not in ('open', 'pending', 'closed', 'resolved'):
+            status = 'open'
+        if priority not in ('low', 'normal', 'high', 'urgent'):
+            priority = 'normal'
+        if not subject:
+            subject = '(sin asunto)'          # nunca NULL en DB
+        # description en modelo es not null: mínimo cadena vacía
+        description = content or ''
 
-        # Si no se selecciona un solicitante, usar el usuario logueado
-        if not solicitante_id:
-            solicitante_id = requester_id
+        empresa   = request.POST.get('empresa') or None
+        language  = request.POST.get('idioma') or None
+        category  = request.POST.get('categoria') or None
+        channel   = request.POST.get('canal') or None
+        service   = request.POST.get('servicio') or None
+        tipo      = request.POST.get('tipo') or None
 
-        # Si no se selecciona un agente, asignar uno aleatorio
+        solicitante_id = request.POST.get('solicitante') or request.user.id
+        asignado_id    = request.POST.get('asignado')
         if not asignado_id:
             agentes = User.objects.filter(group_id='2')
-            asignado_id = random.choice(agentes).id if agentes.exists() else None
+            asignado_id = random.choice(list(agentes)).id if agentes.exists() else None
 
-        # Crear el ticket
+        ccs_ids = request.POST.getlist('ccs')
+        tags_in = request.POST.getlist('tags')
+
+        def _set_m2m(ticket):
+            if ccs_ids:
+                ticket.ccs.set(ccs_ids)
+            ticket.tags.clear()
+            for tag in tags_in:
+                if tag.isdigit():
+                    try:
+                        ticket.tags.add(TicketTag.objects.get(id=tag))
+                    except TicketTag.DoesNotExist:
+                        pass
+                else:
+                    tag_obj, _ = TicketTag.objects.get_or_create(name=tag)
+                    ticket.tags.add(tag_obj)
+
+        # --- Actualizar ticket existente (id numérico) ---
+        if id_param and id_param.isdigit():
+            ticket = get_object_or_404(Ticket, id=int(id_param))
+            ticket.subject     = subject
+            ticket.description = description
+            ticket.assignee_id = asignado_id
+            ticket.brand       = empresa
+            ticket.type        = tipo
+            ticket.channel     = channel
+            ticket.service     = service
+            ticket.language    = language
+            ticket.category    = category
+            ticket.priority    = priority
+            ticket.status      = status
+            ticket.save()
+            _set_m2m(ticket)
+
+            if content:  # si escribiste texto, lo registramos como comentario
+                Comment.objects.create(
+                    ticket_id=ticket.id,
+                    user_id=request.user.id,
+                    content=content,
+                    created_at=timezone.now()
+                )
+            return redirect(f'{request.path}?id={ticket.id}')
+
+        # --- Crear ticket nuevo (id temporal o sin id) ---
         ticket = Ticket.objects.create(
             subject=subject,
-            description=content,
+            description=description,
+            status=status,
+            priority=priority,
             requester_id=solicitante_id,
             assignee_id=asignado_id,
-            created_by_id=requester_id,
+            created_by_id=request.user.id,
             brand=empresa,
-            type=type,
+            type=tipo,
             channel=channel,
             service=service,
             language=language,
             created_at=timezone.now(),
             category=category,
-            priority=priority,
-            status=status
         )
+        _set_m2m(ticket)
 
-        # Obtener las listas de ccs y tags desde el formulario
-        ccs_ids = request.POST.getlist('ccs')
-        tags = request.POST.getlist('tags')  # Puede contener IDs y/o nombres de etiquetas
+        if content:
+            Comment.objects.create(
+                ticket_id=ticket.id,
+                user_id=request.user.id,
+                content=content,
+                created_at=timezone.now()
+            )
 
-        # Asignar las relaciones Many-to-Many para CCs
-        if ccs_ids:
-            ticket.ccs.set(ccs_ids)
+        return redirect(f'{request.path}?id={ticket.id}')
 
-        # Procesar y asignar etiquetas
-        for tag in tags:
-            if tag.isdigit():
-                # Etiqueta existente por ID
-                try:
-                    tag_obj = TicketTag.objects.get(id=tag)
-                    ticket.tags.add(tag_obj)
-                except TicketTag.DoesNotExist:
-                    continue  # O manejar el error según corresponda
-            else:
-                # Nueva etiqueta por nombre
-                tag_obj, created = TicketTag.objects.get_or_create(name=tag)
-                ticket.tags.add(tag_obj)
-
-        # Crear el comentario
-        Comment.objects.create(
-            ticket_id=ticket.id,
-            user_id=requester_id,
-            content=content,
-            created_at=timezone.now()
-        )
-
+    # GET ...
     usuarios = User.objects.filter(group=1)
     agentes = User.objects.filter(group=2)
     tags = TicketTag.objects.all()
     todos = User.objects.all()
+
+    ticket_obj = get_object_or_404(Ticket, id=int(id_param)) if id_param and id_param.isdigit() else None
+
     context = {
         'usuarios': usuarios,
         'agentes': agentes,
         'tags': tags,
-        'todos': todos, 
+        'todos': todos,
         'username': request.user.name,
         'email': request.user.email,
+        'ticket': ticket_obj,
     }
     return render(request, 'tickets/create_ticket.html', context)
 
@@ -285,12 +321,9 @@ def reopen_ticket(request, pk):
 
 @login_required
 @require_POST
-def add_comment(request):
+def add_comment(request, ticket_id):
     data = json.loads(request.body)
-    ticket_id = data.get('ticket_id')
-    content = data.get('content')
-    user = request.user
-
+    content = data.get('content', '').strip()
     if not content:
         return JsonResponse({'error': 'El contenido no puede estar vacío.'}, status=400)
 
@@ -298,7 +331,7 @@ def add_comment(request):
 
     comment = Comment.objects.create(
         ticket=ticket,
-        user=user,
+        user=request.user,
         content=content,
         created_at=timezone.now()
     )
@@ -307,10 +340,11 @@ def add_comment(request):
         'id': comment.id,
         'content': comment.content,
         'created_at': comment.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-        'ticket_id': comment.ticket.id,
-        'user_id': comment.user.id,
-        'username': comment.user.name
+        'ticket_id': ticket.id,
+        'user_id': request.user.id,
+        'username': request.user.name,
     })
+
 # Funcionalidades de Gestion de Usuarios
 
 # Funcionalidades de Notificaciones, Reportes, Busquedas y Etiquetas

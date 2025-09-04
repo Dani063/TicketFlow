@@ -163,72 +163,108 @@ document.addEventListener('DOMContentLoaded', () => {
     highlightActiveTab();
 
     // Manejo de Envío de Mensajes
-    const sendMessage = async () => {
+    // Manejo de Envío de Mensajes
+    const sendMessage = async (ev) => {
+        if (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+        }
         const content = document.getElementById('new-message').value.trim();
+
+        // Si aún no existe id real, validar como en "Publicar"
+        if (!window.ticketId) {
+            const errors = [];
+            const brand = (document.getElementById('empresa')?.value || '').trim();
+            const subject = (document.getElementById('subject')?.value || '').trim();
+
+            if (!brand) errors.push('Please provide a ticket brand');
+            if (!content) errors.push('Please provide a ticket description');
+            if (!subject) errors.push('Please provide a ticket subject');
+
+            if (errors.length) {
+                alert(errors.join('\n'));
+                return; // NO enviamos nada
+            }
+
+            // Inyecta status y ahora sí crea/redirige
+            const ticketForm = document.getElementById('ticket-form');
+            const selectedStatus = document.getElementById('selected-status').textContent.trim();
+            let statusInput = ticketForm.querySelector('input[name="status"]');
+            if (!statusInput) {
+                statusInput = document.createElement('input');
+                statusInput.type = 'hidden';
+                statusInput.name = 'status';
+                ticketForm.appendChild(statusInput);
+            }
+            statusInput.value = selectedStatus;
+
+            ticketForm.requestSubmit();
+            return;
+        }
+
+        // Ticket existente: solo validar contenido
         if (!content) {
             alert('El contenido no puede estar vacío.');
             return;
         }
 
-        const urlParams = new URLSearchParams(window.location.search);
-        const ticketId = urlParams.get('id');
-
-        if (!ticketId) {
-            alert('No se pudo obtener el ID del ticket.');
-            return;
-        }
-
         try {
-            const response = await fetch(`/tickets/create/?id=${ticketId}/add_comment/`, {
+            const response = await fetch(`/tickets/${window.ticketId}/add_comment/`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': getCookie('csrftoken')
                 },
-                body: JSON.stringify({
-                    ticket_id: ticketId.split('-')[1],
-                    content: content
-                })
+                body: JSON.stringify({ content })
             });
 
             const data = await response.json();
             if (response.ok) {
-                const messagesBox = document.querySelector('.messages-box');
+                const messagesBox = document.getElementById('messagesBox');
                 const newComment = document.createElement('div');
-                newComment.classList.add('message');
+                const isMe = Number(data.user_id) === Number(window.currentUserId);
+                newComment.className = 'message' + (isMe ? ' me' : '');
                 newComment.innerHTML = `
-                    <p><strong>${data.username}:</strong> ${data.content}</p>
-                    <span class="timestamp">${data.created_at}</span>
-                `;
+        <p><strong>${data.username}:</strong> ${data.content}</p>
+        <span class="timestamp">${data.created_at}</span>
+      `;
                 messagesBox.appendChild(newComment);
                 document.getElementById('new-message').value = '';
+                messagesBox.scrollTop = messagesBox.scrollHeight;
             } else {
-                alert(data.error);
+                alert(data.error || 'No se pudo enviar el mensaje.');
             }
         } catch (error) {
             console.error('Error al enviar el mensaje:', error);
         }
     };
 
-    const getCookie = (name) => {
-        let cookieValue = null;
-        if (document.cookie && document.cookie !== '') {
-            const cookies = document.cookie.split(';');
-            for (let i = 0; i < cookies.length; i++) {
-                const cookie = cookies[i].trim();
-                if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                    break;
-                }
-            }
-        }
-        return cookieValue;
-    };
-
-    // Asignar Evento al Botón de Enviar Mensaje
     const sendMessageButton = document.getElementById('send-message');
     if (sendMessageButton) {
         sendMessageButton.addEventListener('click', sendMessage);
+    }
+
+    const ticketForm = document.getElementById('ticket-form');
+    if (ticketForm) {
+        ticketForm.addEventListener('submit', (e) => {
+            // Solo bloqueamos el submit automático en tickets NUEVOS si faltan datos
+            if (!window.ticketId) {
+                const brand = (document.getElementById('empresa')?.value || '').trim();
+                const subject = (document.getElementById('subject')?.value || '').trim();
+                const description = (document.getElementById('new-message')?.value || '').trim();
+
+                const errors = [];
+                if (!brand) errors.push('Please provide a ticket brand');
+                if (!description) errors.push('Please provide a ticket description');
+                if (!subject) errors.push('Please provide a ticket subject');
+
+                if (errors.length) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    alert(errors.join('\n'));
+                }
+            }
+        });
     }
 
     // Manejo del Dropdown de Estado
@@ -238,6 +274,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const dropdownContent = document.getElementById('dropdown-content');
         const selectedStatus = document.getElementById('selected-status');
         const ticketForm = document.getElementById('ticket-form');
+
+        if (selectedStatus && dropdownContent) {
+            const current = selectedStatus.textContent.trim().toLowerCase();
+            dropdownContent.querySelectorAll('a').forEach(a => {
+                a.classList.toggle('active', a.dataset.status.toLowerCase() === current);
+            });
+        }
 
         dropdownContent.addEventListener('click', (event) => {
             if (event.target.tagName === 'A') {
@@ -262,12 +305,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
         publishButton.addEventListener('click', (event) => {
             event.preventDefault();
-            const status = selectedStatus.textContent.trim();
-            const statusInput = document.createElement('input');
-            statusInput.type = 'hidden';
-            statusInput.name = 'status';
-            statusInput.value = status;
-            ticketForm.appendChild(statusInput);
+
+            const errors = [];
+            const brand = (document.getElementById('empresa')?.value || '').trim();
+            const subject = (document.getElementById('subject')?.value || '').trim();
+            const description = (document.getElementById('new-message')?.value || '').trim();
+
+            if (!brand) errors.push('Please provide a ticket brand');
+            if (!description) errors.push('Please provide a ticket description');
+            if (!subject) errors.push('Please provide a ticket subject');
+
+            if (errors.length) {
+                // puedes reemplazar alert por tu toaster si tienes uno
+                alert(errors.join('\n'));
+                return; // no enviamos
+            }
+
+            // inyecta <input hidden name="status"> con el valor del span
+            const selectedStatus = document.getElementById('selected-status').textContent.trim();
+            let statusInput = ticketForm.querySelector('input[name="status"]');
+            if (!statusInput) {
+                statusInput = document.createElement('input');
+                statusInput.type = 'hidden';
+                statusInput.name = 'status';
+                ticketForm.appendChild(statusInput);
+            }
+            statusInput.value = selectedStatus;
+
             ticketForm.submit();
         });
     };
@@ -370,7 +434,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 $('#idioma').val(data.idioma).trigger('change');
                 $('#categoria').val(data.categoria).trigger('change');
                 $('#subject').val(data.subject);
-                // Rellenar otros campos si es necesario
+                
             })
             .catch(error => console.error('Error al cargar el ticket:', error));
     }

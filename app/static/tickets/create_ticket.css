@@ -145,17 +145,28 @@ input, select {
     height: calc(100vh - 500px); /* Ajuste de altura dinámico */
 }
 
+/* por defecto, a la izquierda (otros) */
 .message {
+    align-self: flex-start;
     margin-bottom: 10px;
+    padding: 10px 12px;
+    background: #f2f3f5; /* gris claro */
+    border-radius: 12px;
+    max-width: 80%;
 }
 
-    .message p {
-        margin: 0;
+    /* mis mensajes: a la derecha, azul vivo, texto blanco */
+    .message.me {
+        align-self: flex-end;
+        background: #ecf9f9; /* azul */
+        color: #000;
+        border: none;
     }
 
+    /* Timestamps más sutiles */
     .message .timestamp {
         font-size: 12px;
-        color: #999;
+        color: #7a7a7a;
     }
 
 /* Sección para escribir mensajes */
