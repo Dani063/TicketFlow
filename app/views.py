@@ -2,6 +2,7 @@
 Definition of views.
 """
 # -*- coding: utf-8 -*-
+from django.db.models import Q
 from datetime import datetime
 from types import new_class
 from unicodedata import category
@@ -24,24 +25,24 @@ from django.views import View
 
 @login_required
 def home(request):
+    tickets = Ticket.objects.filter(Q(assignee=request.user) | Q(ccs=request.user)).distinct()
+    context = {
+        'username': request.user.name,
+        'email': request.user.email,
+        'tickets': tickets,         
+        'my_tickets': tickets,      
+    }
+    return render(request, 'tickets/home.html', context)
+
+@login_required
+def tickets_list(request):
     tickets = Ticket.objects.all()
-    users = User.objects.all()
     context = {
         'username': request.user.name,
         'email': request.user.email,
         'tickets': tickets,
-        'users': users,
     }
-    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/home.html', context)
-
-@login_required
-def tickets_list(request):
-    context = {
-        'username': request.user.name,
-        'email': request.user.email,
-    }
-    tickets = Ticket.objects.all()
-    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/tickets_list.html', context)
+    return render(request, 'tickets/tickets_list.html', context)
 
 @login_required
 def customers_list(request):
@@ -106,10 +107,11 @@ def user_login(request):
                 return JsonResponse({'error': 'Credenciales inválidas'}, status=400)
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
+    return JsonResponse({'detail': 'Method not allowed'}, status=405)
 
 def user_logout(request):
     logout(request)  # Cierra la sesión del usuario
-    return redirect('/login/')  # Redirige al login
+    return redirect('login') # Redirige al login
    
 def ticket_detail(request, pk):
     ticket = get_object_or_404(Ticket, pk=pk)

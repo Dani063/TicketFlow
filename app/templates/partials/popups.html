@@ -1,0 +1,24 @@
+{% load static %}
+<div class="notifications-popup" id="notificationsPopup" style="display:none;">
+    <div class="popup-header">
+        <h2>Notificaciones</h2>
+        <button class="close-popup" id="closePopup">X</button>
+    </div>
+    <div class="popup-content">
+        <ul id="notificationsList"></ul>
+    </div>
+</div>
+
+<div class="user-popup" id="userPopup" style="display:none;">
+    <div class="popup-header">
+        <div class="user-info">
+            <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="profile-picture">
+            <span class="username">{{ request.user.name }}</span>
+            <span class="username">{{ request.user.email }}</span>
+            <a href="{% url 'profile' %}" class="view-profile">Ver perfil</a>
+        </div>
+    </div>
+    <div class="popup-content">
+        <button class="logout-button" id="logoutButton">Desloguearse</button>
+    </div>
+</div>
