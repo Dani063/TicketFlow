@@ -13,13 +13,19 @@
     }
 
     function normalizeUrl(u) {
-        const url = new URL(u, window.location.origin);
-        const path = url.pathname;
-        const params = [...url.searchParams.entries()].sort((a, b) =>
-            a[0] === b[0] ? (a[1] > b[1] ? 1 : -1) : (a[0] > b[0] ? 1 : -1)
-        );
-        const query = params.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
-        return query ? `${path}?${query}` : path;
+        try {
+            if (u == null || u === '') return '';
+            const url = new URL(String(u), window.location.origin);
+            const path = url.pathname;
+            const params = [...url.searchParams.entries()].sort((a, b) =>
+                a[0] === b[0] ? (a[1] > b[1] ? 1 : -1) : (a[0] > b[0] ? 1 : -1)
+            );
+            const qs = params.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+            return qs ? `${path}?${qs}` : path;
+        } catch (err) {
+            console.warn('[tabs] normalizeUrl invalid:', u, err);
+            return String(u || '');
+        }
     }
 
     function getContainer() {
@@ -165,9 +171,17 @@
     }
 
     function loadTabs() {
-        const saved = JSON.parse(localStorage.getItem('tabs') || '[]')
-            .filter(t => isTicketUrl(t.url)); // ← solo tabs de tickets
-        saved.forEach(t => addTab(t.text, t.url, false));
+        let saved = [];
+        try {
+            saved = JSON.parse(localStorage.getItem('tabs') || '[]') || [];
+        } catch (e) {
+            console.warn('[tabs] corrupted localStorage, clearing', e);
+            localStorage.removeItem('tabs');
+            saved = [];
+        }
+        saved
+            .filter(t => t && typeof t.url === 'string' && t.url.length && isTicketUrl(t.url))
+            .forEach(t => addTab(t.text || 'Ticket', t.url, false));
     }
 
     // Garantiza que exista la pestaña de la URL actual si es una vista “ticket”
@@ -208,12 +222,103 @@
         });
     }
 
+    // ===== Popups manager (Perfil / Notificaciones) =====
+    function initPopups() {
+        // Cache de nodos (si no existen en alguna vista, todo queda no-op)
+        const notifPop = document.getElementById('notificationsPopup');
+        const userPop = document.getElementById('userPopup');
+        const closeBtn = document.getElementById('closePopup');
+        const notifList = document.getElementById('notificationsList');
+
+        // Si no existe ninguno de los popups, no registramos nada
+        if (!notifPop && !userPop) {
+            // Opcional: consola para depurar
+            // console.debug('[tabs] initPopups: no popups found');
+            return;
+        }
+
+        const show = el => el && (el.style.display = 'block');
+        const hide = el => el && (el.style.display = 'none');
+        const isOpen = el => el && el.style.display === 'block';
+        const hideAll = () => { hide(notifPop); hide(userPop); toggleActive(null); };
+
+        function toggleActive(which) {
+            const notifIcon = document.querySelector('.navbar-right .notifications');
+            const userIcon = document.querySelector('.navbar-right .user-profile');
+            if (notifIcon) notifIcon.classList.toggle('active', which === 'notif');
+            if (userIcon) userIcon.classList.toggle('active', which === 'user');
+        }
+
+        function loadNotifications() {
+            if (!notifList) return;
+            // Sustituye por tu fetch cuando lo tengas listo
+            const notifications = ['Notificación 1', 'Notificación 2', 'Notificación 3'];
+            notifList.innerHTML = '';
+            notifications.forEach(n => {
+                const li = document.createElement('li');
+                li.textContent = n;
+                notifList.appendChild(li);
+            });
+        }
+
+        // Delegación global: funciona aunque la navbar se re-renderice
+        document.addEventListener('click', (e) => {
+            const notifBtn = e.target.closest('.notifications');
+            const userBtn = e.target.closest('.user-profile');
+
+            if (notifBtn) {
+                e.preventDefault(); e.stopPropagation();
+                if (isOpen(notifPop)) {
+                    hide(notifPop); toggleActive(null);
+                } else {
+                    hide(userPop); show(notifPop); loadNotifications(); toggleActive('notif');
+                }
+                return;
+            }
+
+            if (userBtn) {
+                e.preventDefault(); e.stopPropagation();
+                if (isOpen(userPop)) {
+                    hide(userPop); toggleActive(null);
+                } else {
+                    hide(notifPop); show(userPop); toggleActive('user');
+                }
+                return;
+            }
+
+            // Clic fuera de los popups → cerrar
+            const withinNotif = notifPop && notifPop.contains(e.target);
+            const withinUser = userPop && userPop.contains(e.target);
+            if (!withinNotif && !withinUser) hideAll();
+        });
+
+        // Botón cerrar de notificaciones (si existe)
+        closeBtn && closeBtn.addEventListener('click', (e) => {
+            e.preventDefault(); e.stopPropagation();
+            hide(notifPop); toggleActive(null);
+        });
+
+        const logoutBtn = document.getElementById('logoutButton');
+        logoutBtn && logoutBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // Cierra popups y navega al logout real
+            if (typeof hideAll === 'function') hideAll();
+            const target = (window.urls && window.urls.logout) || '/logout/';
+            window.location.href = target;
+        });
+    }
     function initOnce() {
-        loadTabs();
-        dedupeDomTabs();
-        ensureCurrentTab();   // <— clave para que al entrar en create_ticket exista una sola pestaña correcta
-        highlightActiveTab();
-        hookGlobalAddButton();
+        try {
+            loadTabs();
+            dedupeDomTabs();
+            ensureCurrentTab();
+            highlightActiveTab();
+            hookGlobalAddButton();
+            initPopups();
+        } catch (e) {
+            console.error('[tabs] init error:', e);
+        }
     }
 
     document.addEventListener('DOMContentLoaded', initOnce);

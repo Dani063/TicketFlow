@@ -57,6 +57,7 @@
     <Folder Include="app\static\tickets\" />
     <Folder Include="app\templates\" />
     <Folder Include="app\templates\app\" />
+    <Folder Include="app\templates\partials\" />
     <Folder Include="app\templates\tickets\" />
     <Folder Include="TicketFlow\" />
   </ItemGroup>
@@ -68,10 +69,13 @@
     <Content Include="app\static\tickets\home.css" />
     <Content Include="app\static\tickets\login.css" />
     <Content Include="app\static\tickets\logo.png" />
-    <Content Include="app\static\tickets\notification.js" />
     <Content Include="app\static\tickets\profile-pic.png" />
     <Content Include="app\static\tickets\style.css" />
     <Content Include="app\static\tickets\tabs.js" />
+    <Content Include="app\templates\base.html" />
+    <Content Include="app\templates\partials\navbar.html" />
+    <Content Include="app\templates\partials\popups.html" />
+    <Content Include="app\templates\partials\sidebar.html" />
     <Content Include="app\templates\tickets\create_ticket.html" />
     <Content Include="app\templates\tickets\customers_list.html" />
     <Content Include="app\templates\tickets\home.html" />

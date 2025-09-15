@@ -15,65 +15,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Inicializar Select2
     initializeSelect2();
 
-    // Manejo de Popups
-    const togglePopup = (popupId, relatedPopupId) => {
-        const popup = document.getElementById(popupId);
-        const relatedPopup = relatedPopupId ? document.getElementById(relatedPopupId) : null;
-        const relatedIcon = relatedPopupId ? document.querySelector(`.${relatedPopupId === 'userPopup' ? 'notifications' : 'user-profile'}`) : null;
-
-        if (popup.style.display === 'block') {
-            popup.style.display = 'none';
-            document.querySelector(`.${popupId === 'userPopup' ? 'user-profile' : 'notifications'}`).classList.remove('active');
-        } else {
-            popup.style.display = 'block';
-            document.querySelector(`.${popupId === 'userPopup' ? 'user-profile' : 'notifications'}`).classList.add('active');
-
-            if (relatedPopup && relatedPopup.style.display === 'block') {
-                relatedPopup.style.display = 'none';
-                relatedIcon.classList.remove('active');
-            }
-        }
-    };
-
-    // Evento Click en Perfil de Usuario
-    document.querySelector('.user-profile').addEventListener('click', () => {
-        togglePopup('userPopup', 'notificationsPopup');
-    });
-
-    // Evento Click en Notificaciones
-    document.querySelector('.notifications').addEventListener('click', () => {
-        togglePopup('notificationsPopup', 'userPopup');
-        loadNotifications();
-    });
-
-    // Cerrar Popup de Notificaciones
-    document.getElementById('closePopup').addEventListener('click', () => {
-        document.getElementById('notificationsPopup').style.display = 'none';
-        document.querySelector('.notifications').classList.remove('active');
-    });
-
-    // Función para Cargar Notificaciones
-    const loadNotifications = () => {
-        const notifications = [
-            'Notificación 1',
-            'Notificación 2',
-            'Notificación 3'
-        ];
-
-        const notificationsList = document.getElementById('notificationsList');
-        notificationsList.innerHTML = '';
-        notifications.forEach(notification => {
-            const li = document.createElement('li');
-            li.textContent = notification;
-            notificationsList.appendChild(li);
-        });
-    };
-
-    // Logout Button
-    document.getElementById('logoutButton').addEventListener('click', () => {
-        window.location.href = window.urls.login;
-    });
-
     // Manejo de Envío de Mensajes
     const sendMessage = async (ev) => {
         if (ev) {

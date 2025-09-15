@@ -24,14 +24,13 @@
     window.urls = {
       create_ticket: "{% url 'create_ticket' %}",
       tickets_list: "{% url 'tickets_list' %}",
-      login: "{% url 'login' %}"
+      login: "{% url 'login' %}",
+      logout: "{% url 'logout' %}"
     };
     window.static_urls = { logo: "{% static 'tickets/logo.png' %}" };
     window.currentUserId = {{ request.user.id|default:'null' }};
     </script>
     <script src="{% static 'tickets/tabs.js' %}"></script>
-    <script src="{% static 'tickets/notification.js' %}"></script>
-    <script src="{% static 'tickets/user_popup.js' %}"></script>
 
     {% block extra_js %}{% endblock %}
 </body>
