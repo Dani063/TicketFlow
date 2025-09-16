@@ -1,4 +1,4 @@
-/* Basics */
+﻿/* Basics */
 * {
     margin: 0;
     padding: 0;
@@ -178,8 +178,8 @@ body {
     .notifications-popup:before {
         content: '';
         position: absolute;
-        top: -10px; /* Ajusta seg�n sea necesario */
-        right: 20px; /* Ajusta seg�n sea necesario */
+        top: -10px; /* Ajusta según sea necesario */
+        right: 20px; /* Ajusta según sea necesario */
         width: 20px;
         height: 20px;
         background-color: white;
@@ -402,6 +402,348 @@ body {
                 .sidebar-navigation ul li.active i {
                     color: #ffffff;
                 }
+
+/*Profile Styles*/
+.user-profile-page {
+    max-width: 800px;
+    margin: 0 auto;
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+.user-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+    .user-header .profile-picture {
+        width: 80px;
+        height: 80px;
+        margin-right: 20px;
+    }
+
+.user-meta .username {
+    font-size: 22px;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.user-meta .email {
+    color: #666;
+}
+
+.user-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.detail-card {
+    background: #f8f9f9;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 15px;
+    text-align: center;
+}
+
+    .detail-card h3 {
+        font-size: 13px;
+        text-transform: uppercase;
+        color: #888;
+        margin-bottom: 8px;
+    }
+
+    .detail-card p {
+        font-size: 15px;
+        font-weight: 500;
+        color: #333;
+    }
+
+.profile-actions {
+    text-align: center;
+}
+.user-link {
+    display: flex;
+    align-items: center;
+    text-decoration: none;
+    padding: 10px;
+    border-radius: 6px;
+    transition: background 0.2s;
+    width: 100%; /* ocupa todo el ancho del popup */
+    box-sizing: border-box;
+}
+
+    .user-link:hover {
+        background: #f5f5f5;
+    }
+
+    .user-link .profile-picture {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        margin-right: 10px;
+    }
+
+    .user-link .user-meta {
+        display: flex;
+        flex-direction: column;
+    }
+
+        .user-link .user-meta .username {
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .user-link .user-meta .email {
+            font-size: 12px;
+            color: #666;
+        }
+
+/* ===== Perfil ===== */
+.profile-container {
+    display: flex;
+    gap: 1px;
+    padding: 1px;
+}
+
+.profile-sidebar {
+    flex: 1;
+    max-width: 300px;
+    background-color: #fff;
+    padding: 15px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+    .profile-sidebar h2 {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 10px;
+    }
+
+    .profile-sidebar ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .profile-sidebar li {
+        padding: 10px;
+        font-size: 14px;
+        cursor: pointer;
+    }
+
+        .profile-sidebar li:hover {
+            background: #f5f5f5;
+        }
+
+        .profile-sidebar li.active {
+            background: #007BFF;
+            color: #fff;
+            font-weight: bold;
+        }
+
+/* Contenido: ocupa todo el ancho restante */
+.profile-content {
+    flex: 3;
+}
+
+/* Caja general de información → ocupa todo el ancho */
+.profile-general {
+    background: #fff;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    width: 100%;
+}
+
+/* Encabezado con avatar */
+.profile-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.profile-picture-large {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    margin-right: 20px;
+}
+
+.user-meta h2 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: bold;
+}
+
+.user-meta p {
+    margin: 5px 0 0;
+    color: #666;
+}
+
+/* Detalles en grid */
+.profile-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.detail-card {
+    background: #f8f9f9;
+    border: 1px solid #ddd;
+    padding: 15px;
+}
+
+    .detail-card h3 {
+        font-size: 13px;
+        text-transform: uppercase;
+        color: #888;
+        margin-bottom: 6px;
+    }
+
+    .detail-card p {
+        font-size: 15px;
+        font-weight: 500;
+        color: #333;
+    }
+
+/* Botón de logout */
+.profile-actions {
+    text-align: right;
+}
+
+.logout-link {
+    background-color: #ff5630;
+    color: #fff;
+    padding: 10px 18px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-size: 14px;
+}
+
+    .logout-link:hover {
+        background-color: #e04e2a;
+    }
+/* ===== Filtros Tickets ===== */
+#filters {
+    max-height: calc(100vh - 120px); /* ocupa casi toda la pantalla */
+    overflow-y: auto; /* scroll si hay demasiados */
+}
+
+    #filters li {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background-color: #ffffff;
+        padding: 10px;
+        margin-bottom: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        font-size: 14px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+        #filters li:hover {
+            background-color: #e9f1f8;
+        }
+
+        #filters li.active {
+            background-color: #dbe8f3;
+            color: #fff;
+            font-weight: bold;
+        }
+
+    #filters .filter-name {
+        flex: 1;
+        color: #000000;
+    }
+
+    #filters .filter-count {
+        min-width: 40px; /* asegura alineación */
+        text-align: right;
+        font-weight: bold;
+    }
+
+#loadingSpinner {
+    font-size: 18px;
+    color: #007BFF;
+}
+.filters-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#refreshFilters {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    color: #333;
+    transition: color 0.2s;
+}
+
+    #refreshFilters:hover {
+        color: #007BFF;
+    }
+
+/* Animación de giro limitada */
+.spin-once {
+    animation: spin 1.5s linear;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+/* ===== Filtros Customers ===== */
+#customerFilters {
+    max-height: calc(100vh - 120px); /* ocupa casi toda la pantalla */
+    overflow-y: auto; /* scroll si hay demasiados */
+}
+
+    #customerFilters li {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background-color: #ffffff;
+        padding: 10px;
+        margin-bottom: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        font-size: 14px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+        #customerFilters li:hover {
+            background-color: #e9f1f8;
+        }
+
+        #customerFilters li.active {
+            background-color: #dbe8f3;
+            font-weight: bold;
+        }
+
+    #customerFilters .filter-name {
+        flex: 1;
+        color: #000000;
+    }
+
+    #customerFilters .filter-count {
+        min-width: 40px; /* asegura alineación */
+        text-align: right;
+        font-weight: bold;
+    }
 
 /* Content Styles */
 .content {

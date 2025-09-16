@@ -2,48 +2,282 @@
 {% load static %}
 
 {% block title %}TicketFlow – Tickets{% endblock %}
+
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'tickets/home.css' %}">
 {% endblock %}
-{% block content %}
-<div class="content">
-    <h1>Lista de tickets</h1>
 
-    <div class="tabla">
-        <table>
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Asunto</th>
-                    <th>Solicitante</th>
-                    <th>Solicitante actualizado</th>
-                    <th>Servicio</th>
-                    <th>Asignado</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% if tickets %}
-                {% for ticket in tickets %}
-                <tr onclick="openTicket('{{ ticket.id }}')">
-                    <td>{{ ticket.id }}</td>
-                    <td>{{ ticket.subject }}</td>
-                    <td>{{ ticket.requester.name }}</td>
-                    <td>{{ ticket.updated_at }}</td>
-                    <td>{{ ticket.service }}</td>
-                    <td>{{ ticket.assignee.name }}</td>
-                </tr>
-                {% endfor %}
-                {% else %}
-                <tr>
-                    <td colspan="6">No hay tickets.</td>
-                </tr>
-                {% endif %}
-            </tbody>
-        </table>
-    </div>
+{% block content %}
+<div class="title-bar">
+    <h1>Lista de Tickets</h1>
 </div>
 
+<!-- Columna izquierda: filtros -->
+<div class="left-column">
+    <h2 class="filters-header">
+        Filtros
+        <button id="refreshFilters" title="Actualizar filtros">
+            <i id="refreshIcon" class="fas fa-sync-alt"></i>
+        </button>
+    </h2>
+    <ul id="filters">
+        <li data-view="telefonica_mes" class="active">
+            <span class="filter-name">Tickets Telefónica último mes</span>
+            <span class="filter-count">{{ filtros.telefonica_mes }}</span>
+        </li>
+        <li data-view="unsolved_no_tareas">
+            <span class="filter-name">Your unsolved tickets (NO tareas)</span>
+            <span class="filter-count">{{ filtros.unsolved_no_tareas }}</span>
+        </li>
+        <li data-view="unassigned">
+            <span class="filter-name">Unassigned tickets</span>
+            <span class="filter-count">{{ filtros.unassigned }}</span>
+        </li>
+        <li data-view="all_unsolved_no_tareas">
+            <span class="filter-name">All unsolved tickets (No tareas)</span>
+            <span class="filter-count">{{ filtros.all_unsolved_no_tareas }}</span>
+        </li>
+        <li data-view="recently_updated">
+            <span class="filter-name">Recently updated tickets</span>
+            <span class="filter-count">{{ filtros.recently_updated }}</span>
+        </li>
+        <li data-view="recently_solved">
+            <span class="filter-name">Recently solved tickets</span>
+            <span class="filter-count">{{ filtros.recently_solved }}</span>
+        </li>
+        <li data-view="pendientes">
+            <span class="filter-name">Todos los Tickets pendientes</span>
+            <span class="filter-count">{{ filtros.pendientes }}</span>
+        </li>
+        <li data-view="tareas">
+            <span class="filter-name">Todas las tareas</span>
+            <span class="filter-count">{{ filtros.tareas }}</span>
+        </li>
+        <li data-view="unsolved_groups">
+            <span class="filter-name">Unsolved tickets in your groups</span>
+            <span class="filter-count">{{ filtros.unsolved_groups }}</span>
+        </li>
+        <li data-view="rated_last7">
+            <span class="filter-name">Rated tickets from the last 7 days</span>
+            <span class="filter-count">{{ filtros.rated_last7 }}</span>
+        </li>
+        <li data-view="internos_comuny">
+            <span class="filter-name">Tickets INTERNOS abiertos de Comunycarse</span>
+            <span class="filter-count">{{ filtros.internos_comuny }}</span>
+        </li>
+        <li data-view="abiertos_ecomfax">
+            <span class="filter-name">Abiertos eComFax</span>
+            <span class="filter-count">{{ filtros.abiertos_ecomfax }}</span>
+        </li>
+        <li data-view="recordia_sgsd">
+            <span class="filter-name">Recordia SGSD</span>
+            <span class="filter-count">{{ filtros.recordia_sgsd }}</span>
+        </li>
+        <li data-view="closed">
+            <span class="filter-name">Todos Tickets Cerrados</span>
+            <span class="filter-count">{{ filtros.closed }}</span>
+        </li>
+        <li data-view="sus_pendientes">
+            <span class="filter-name">Sus tickets pendientes</span>
+            <span class="filter-count">{{ filtros.sus_pendientes }}</span>
+        </li>
+        <li data-view="espera">
+            <span class="filter-name">Todos Tickets ESPERA</span>
+            <span class="filter-count">{{ filtros.espera }}</span>
+        </li>
+        <li data-view="abiertos">
+            <span class="filter-name">Todos Tickets ABIERTO</span>
+            <span class="filter-count">{{ filtros.abiertos }}</span>
+        </li>
+        <li data-view="sus_no_cerrados">
+            <span class="filter-name">Sus Tickets (NO CERRADOS)</span>
+            <span class="filter-count">{{ filtros.sus_no_cerrados }}</span>
+        </li>
+        <li data-view="ultimos_cerrados">
+            <span class="filter-name">Ultimos Tickets Cerrados</span>
+            <span class="filter-count">{{ filtros.ultimos_cerrados }}</span>
+        </li>
+        <li data-view="no_resueltos">
+            <span class="filter-name">Todos los tickets No Resueltos</span>
+            <span class="filter-count">{{ filtros.no_resueltos }}</span>
+        </li>
+        <li data-view="twitter">
+            <span class="filter-name">Recibido por Twitter</span>
+            <span class="filter-count">{{ filtros.twitter }}</span>
+        </li>
+        <li data-view="twitter_dm">
+            <span class="filter-name">Recibido por Twitter Mensaje directo</span>
+            <span class="filter-count">{{ filtros.twitter_dm }}</span>
+        </li>
+        <li data-view="twitter_like">
+            <span class="filter-name">Recibido por Twitter "Me gusta"</span>
+            <span class="filter-count">{{ filtros.twitter_like }}</span>
+        </li>
+        <li data-view="sus_tareas">
+            <span class="filter-name">Todas sus tareas</span>
+            <span class="filter-count">{{ filtros.sus_tareas }}</span>
+        </li>
+        <li data-view="resueltos">
+            <span class="filter-name">Todos Tickets Resueltos</span>
+            <span class="filter-count">{{ filtros.resueltos }}</span>
+        </li>
+        <li data-view="new_in_groups">
+            <span class="filter-name">New tickets in your groups</span>
+            <span class="filter-count">{{ filtros.new_in_groups }}</span>
+        </li>
+        <li data-view="open">
+            <span class="filter-name">Tickets Abiertos (Open)</span>
+            <span class="filter-count">{{ filtros.open }}</span>
+        </li>
+        <li data-view="no_update_48h">
+            <span class="filter-name">Tickets sin actualizar en 48 horas</span>
+            <span class="filter-count">{{ filtros.no_update_48h }}</span>
+        </li>
+    </ul>
+</div>
+
+<div class="profile-content">
+    <div class="stats-group" style="width: 100%;">
+        <h2>Tickets</h2>
+        <div class="tabla">
+            <div id="loadingSpinner" style="display:none; text-align:center; padding:20px;">
+                <i class="fas fa-spinner fa-spin" style="font-size:24px; color:#007BFF;"></i>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Asunto</th>
+                        <th>Solicitante</th>
+                        <th>Solicitante actualizado</th>
+                        <th>Servicio</th>
+                        <th>Asignado</th>
+                    </tr>
+                </thead>
+                <tbody id="ticketsTableBody">
+                    <tr><td colspan="6">Cargando...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<!-- Columna derecha: tabla -->
 <script>
+    async function refreshFilterCounts() {
+        const refreshIcon = document.getElementById("refreshIcon");
+        try {
+            // añadir clase para que gire solo una vez
+            refreshIcon.classList.add("spin-once");
+
+            const response = await fetch(`/tickets/filter/?view=all`);
+            const data = await response.json();
+
+            if (data.filtros) {
+                for (const [key, value] of Object.entries(data.filtros)) {
+                    const span = document.querySelector(`#filters li[data-view="${key}"] .filter-count`);
+                    if (span) span.textContent = value;
+                }
+            }
+        } catch (err) {
+            console.error("Error refrescando filtros:", err);
+        } finally {
+            // quitar la animación después de que termine
+            setTimeout(() => refreshIcon.classList.remove("spin-once"), 1500);
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        const refreshBtn = document.getElementById("refreshFilters");
+        if (refreshBtn) {
+            refreshBtn.addEventListener("click", refreshFilterCounts);
+        }
+    });
+
+    function getUrlParam(name) {
+        const params = new URLSearchParams(window.location.search);
+        return params.get(name);
+    }
+
+    async function loadTickets(view, updateUrl = true) {
+        const spinner = document.getElementById("loadingSpinner");
+        const tbody = document.getElementById("ticketsTableBody");
+
+        try {
+            // mostrar spinner
+            spinner.style.display = "block";
+            tbody.innerHTML = "";
+
+            const response = await fetch(`/tickets/filter/?view=${view}`);
+            const data = await response.json();
+
+            // actualizar tabla
+            tbody.innerHTML = "";
+            if (!data.tickets || data.tickets.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6">No hay tickets.</td></tr>`;
+            } else {
+                data.tickets.forEach(t => {
+                    const row = document.createElement("tr");
+                    row.onclick = () => openTicket(t.id);
+                    row.innerHTML = `
+                    <td>${t.id}</td>
+                    <td>${t.subject}</td>
+                    <td>${t.requester}</td>
+                    <td>${t.updated_at}</td>
+                    <td>${t.service}</td>
+                    <td>${t.assignee}</td>
+                `;
+                    tbody.appendChild(row);
+                });
+            }
+
+            // actualizar contadores
+            if (data.filtros) {
+                for (const [key, value] of Object.entries(data.filtros)) {
+                    const li = document.querySelector(`#filters li[data-view="${key}"] .filter-count`);
+                    if (li) li.textContent = value;
+                }
+            }
+
+            // actualizar URL
+            if (updateUrl) {
+                const url = new URL(window.location);
+                url.searchParams.set("view", view);
+                window.history.replaceState({}, "", url);
+            }
+        } catch (err) {
+            console.error("Error cargando tickets:", err);
+        } finally {
+            // ocultar spinner
+            spinner.style.display = "none";
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        const filters = document.querySelectorAll("#filters li");
+        let activeView = getUrlParam("view");
+
+        if (!activeView && filters.length > 0) {
+            activeView = filters[0].dataset.view;
+        }
+
+        filters.forEach(f => {
+            f.addEventListener("click", () => {
+                filters.forEach(x => x.classList.remove("active"));
+                f.classList.add("active");
+                loadTickets(f.dataset.view);
+            });
+
+            if (f.dataset.view === activeView) {
+                f.classList.add("active");
+            }
+        });
+
+        if (activeView) {
+            loadTickets(activeView, false);
+        }
+    });
+
+    // función para abrir un ticket en pestaña
     function openTicket(ticketId) {
         const tabText = "Ticket " + ticketId;
         const tabUrl = "{% url 'create_ticket' %}?id=" + ticketId;

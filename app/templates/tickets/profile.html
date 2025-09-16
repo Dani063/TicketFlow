@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}TicketFlow – Perfil{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'tickets/home.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="title-bar">
+    <h1>Perfil de Usuario</h1>
+</div>
+
+<!-- Columna izquierda -->
+<div class="left-column">
+    <h2>Opciones de perfil</h2>
+    <ul>
+        <li class="active">Información general</li>
+    </ul>
+</div>
+
+<!-- Columna derecha -->
+<div class="tabla">
+    <div class="profile-content">
+        <div class="stats-group" style="width: 100%; text-align: left;">
+            <h2>Información general</h2>
+
+            <div class="profile-header" style="display: flex; align-items: center; margin-bottom: 20px;">
+                <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
+                <div>
+                    <h3 style="margin:0;">{{ request.user.name }}</h3>
+                    <p style="margin:5px 0 0; color:#666;">{{ request.user.email }}</p>
+                </div>
+            </div>
+
+            <div class="profile-details">
+                <div class="detail-card">
+                    <h3>Rol</h3>
+                    <p>{{ request.user.role.role_name|default:"-" }}</p>
+                </div>
+                <div class="detail-card">
+                    <h3>Grupo</h3>
+                    <p>{{ request.user.group.group_name|default:"-" }}</p>
+                </div>
+                <div class="detail-card">
+                    <h3>Cuenta creada</h3>
+                    <p>{{ request.user.created_at|date:"d/m/Y H:i" }}</p>
+                </div>
+                <div class="detail-card">
+                    <h3>Última actualización</h3>
+                    <p>{{ request.user.updated_at|date:"d/m/Y H:i" }}</p>
+                </div>
+            </div>
+
+            <div style="margin-top:20px; text-align:right;">
+                <a href="{% url 'logout' %}" class="logout-link">Cerrar sesión</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

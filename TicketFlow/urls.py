@@ -16,7 +16,9 @@ urlpatterns = [
     path('tickets/create/', views.create_ticket, name='create_ticket'),
     path('tickets/<int:ticket_id>/add_comment/', views.add_comment, name='add_comment'),
     path('api/tickets/<int:ticket_id>/', views.ticket_detail_api, name='ticket_detail_api'),
+    path("tickets/filter/", views.filter_tickets, name="filter_tickets"),
 
+    path("customers/filter/", views.filter_customers, name="filter_customers"),
     path('customers/', views.customers_list, name='customers_list'),
     path('reporting/', views.reporting, name='reporting'),
     path('settings/', views.settings, name='settings'),
