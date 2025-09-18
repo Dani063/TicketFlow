@@ -4,12 +4,23 @@
     if (window.Tabs && window.Tabs.__initialized) return;
 
     const qs = () => window.location.pathname + window.location.search;
-    function isTicketUrl(u) {
-        // Solo consideramos "tab" a las URLs del formulario de ticket
-        if (!window.urls || !window.urls.create_ticket) return false;
-        const normCreate = normalizeUrl(window.urls.create_ticket);
+    function isTabUrl(u) {
+        if (!window.urls) return false;
         const norm = normalizeUrl(u);
-        return norm.startsWith(normCreate); // ej: /tickets/create/?id=...
+
+        // Tickets
+        if (window.urls.create_ticket) {
+            const normCreate = normalizeUrl(window.urls.create_ticket);
+            if (norm.startsWith(normCreate)) return true;
+        }
+
+        // Customers
+        if (window.urls.customer_profile) {
+            const normCustomer = normalizeUrl(window.urls.customer_profile);
+            if (norm.startsWith(normCustomer)) return true;
+        }
+
+        return false;
     }
 
     function normalizeUrl(u) {
@@ -72,7 +83,7 @@
     }
 
     function addTab(text, url, select = true) {
-        if (!isTicketUrl(url)) {
+        if (!isTabUrl(url)) {
             // No crear pestañas para páginas del sidebar; simplemente navegar (o no hacer nada si ya estás ahí)
             const curr = normalizeUrl(window.location.pathname + window.location.search);
             const target = normalizeUrl(url);
@@ -180,7 +191,7 @@
             saved = [];
         }
         saved
-            .filter(t => t && typeof t.url === 'string' && t.url.length && isTicketUrl(t.url))
+            .filter(t => t && typeof t.url === 'string' && t.url.length && isTabUrl(t.url))
             .forEach(t => addTab(t.text || 'Ticket', t.url, false));
     }
 
@@ -204,7 +215,7 @@
 
     function highlightActiveTab() {
         const curr = normalizeUrl(window.location.pathname + window.location.search);
-        const isTicket = isTicketUrl(curr);
+        const isTicket = isTabUrl(curr);
         document.querySelectorAll('.navbar-left .tab').forEach(tab => {
             const same = normalizeUrl(tab.dataset.url) === curr;
             tab.classList.toggle('active', isTicket && same);

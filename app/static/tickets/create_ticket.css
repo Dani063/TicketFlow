@@ -126,7 +126,7 @@ input, select {
 }
 
     .subject-bar input {
-        width: 100%;
+        width: 98%;
         padding: 8px;
         border: 1px solid #ccc;
         border-radius: 4px;
@@ -282,3 +282,45 @@ input, select {
     display: block;
 }
 
+.column3 {
+    flex: 1;
+    max-width: 390px;
+    min-width: 280px;
+    background-color: #ffffff;
+    padding: 15px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border-radius: 5px;
+    overflow-y: auto;
+    height: calc(100vh - 40px);
+}
+
+.profile-picture-large {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    margin-right: 15px;
+}
+
+.view-profile {
+    display: inline-block;
+    margin-top: 5px;
+    font-size: 14px;
+    color: #007BFF;
+    text-decoration: none;
+}
+
+    .view-profile:hover {
+        text-decoration: underline;
+    }
+
+.requester-info .detail-card {
+    margin-bottom: 10px;
+}
+.small-tabla table {
+    font-size: 12px;
+}
+
+.small-tabla th,
+.small-tabla td {
+    padding: 6px 8px;
+}

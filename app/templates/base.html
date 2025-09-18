@@ -21,11 +21,26 @@
 
     <!-- JS globales (centralizados) -->
     <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            document.querySelectorAll(".tabla table tbody").forEach(tbody => {
+                tbody.addEventListener("click", (e) => {
+                    const row = e.target.closest("tr");
+                    if (!row) return;
+                    // limpiar selección previa
+                    tbody.querySelectorAll("tr").forEach(r => r.classList.remove("selected"));
+                    // marcar la nueva
+                    row.classList.add("selected");
+                });
+            });
+        });
+    </script>
+    <script>
     window.urls = {
       create_ticket: "{% url 'create_ticket' %}",
       tickets_list: "{% url 'tickets_list' %}",
       login: "{% url 'login' %}",
-      logout: "{% url 'logout' %}"
+      logout: "{% url 'logout' %}",
+      customer_profile: "{% url 'customer_profile' %}"
     };
     window.static_urls = { logo: "{% static 'tickets/logo.png' %}" };
     window.currentUserId = {{ request.user.id|default:'null' }};

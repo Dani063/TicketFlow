@@ -56,50 +56,57 @@ function getUrlParam(name) {
     return params.get(name);
 }
 
-async function loadCustomers(view, updateUrl = true) {
-    const tbody = document.getElementById("customersTableBody");
-
-    try {
+    async function loadCustomers(view, updateUrl = true) {
+        const tbody = document.getElementById("customersTableBody");
         tbody.innerHTML = `<tr><td colspan="5">Cargando...</td></tr>`;
-        const response = await fetch(`/customers/filter/?view=${view}`);
-        const data = await response.json();
 
-        tbody.innerHTML = "";
-        if (!data.customers || data.customers.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="5">No hay usuarios.</td></tr>`;
-        } else {
-            data.customers.forEach(u => {
-                const row = document.createElement("tr");
-                row.innerHTML = `
+        try {
+            const response = await fetch(`/customers/filter/?view=${view}`);
+            const data = await response.json();
+
+            tbody.innerHTML = "";
+            if (!data.customers || data.customers.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="5">No hay usuarios.</td></tr>`;
+            } else {
+                data.customers.forEach(u => {
+                    const row = document.createElement("tr");
+                    row.onclick = () => openCustomer(u.id);
+                    row.innerHTML = `
                     <td>${u.id}</td>
                     <td>${u.name}</td>
                     <td>${u.email}</td>
                     <td>${u.status}</td>
                     <td>${u.created_at}</td>
                 `;
-                tbody.appendChild(row);
-            });
-        }
-
-        // actualizar contadores
-        if (data.filtros) {
-            for (const [key, value] of Object.entries(data.filtros)) {
-                const span = document.querySelector(`#customerFilters li[data-view="${key}"] .filter-count`);
-                if (span) span.textContent = value;
+                    tbody.appendChild(row);
+                });
             }
-        }
 
-        // actualizar URL
-        if (updateUrl) {
-            const url = new URL(window.location);
-            url.searchParams.set("view", view);
-            window.history.replaceState({}, "", url);
+            if (data.filtros) {
+                for (const [key, value] of Object.entries(data.filtros)) {
+                    const span = document.querySelector(`#customerFilters li[data-view="${key}"] .filter-count`);
+                    if (span) span.textContent = value;
+                }
+            }
+
+            if (updateUrl) {
+                const url = new URL(window.location);
+                url.searchParams.set("view", view);
+                window.history.replaceState({}, "", url);
+            }
+        } catch (err) {
+            console.error("Error cargando usuarios:", err);
         }
-    } catch (err) {
-        console.error("Error cargando usuarios:", err);
     }
-}
-
+    function openCustomer(customerId) {
+        const tabText = "Cliente " + customerId;
+        const tabUrl = "{% url 'customer_profile' %}?id=" + customerId;
+        if (window.Tabs && typeof window.Tabs.addTab === 'function') {
+            window.Tabs.addTab(tabText, tabUrl);
+        } else {
+            window.location.href = tabUrl;
+        }
+    }
 document.addEventListener("DOMContentLoaded", () => {
     const filters = document.querySelectorAll("#customerFilters li");
     let activeView = getUrlParam("view");

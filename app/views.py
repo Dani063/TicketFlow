@@ -25,14 +25,40 @@ from django.views import View
 
 @login_required
 def home(request):
-    tickets = Ticket.objects.filter(Q(assignee=request.user) | Q(ccs=request.user)).distinct()
+    user = request.user
+
+    # Tickets asociados al usuario
+    tickets = Ticket.objects.filter(
+        Q(requester=user) | Q(assignee=user) | Q(ccs=user)
+    ).distinct()
+
+    # --- Sección "Tickets Abiertos" ---
+    abiertos_you = tickets.filter(status="open").count()
+    abiertos_groups = 0
+    if user.group:  # si pertenece a un grupo
+        abiertos_groups = Ticket.objects.filter(
+            assignee__group=user.group, status="open"
+        ).distinct().count()
+
+    # --- Sección "Estadísticas de Tickets" ---
+    bien = "-"        # aún no implementado
+    mal = "-"         # aún no implementado
+    solventado = tickets.filter(status="closed").count()
+
     context = {
-        'username': request.user.name,
-        'email': request.user.email,
-        'tickets': tickets,         
-        'my_tickets': tickets,      
+        "username": user.name,
+        "email": user.email,
+        "tickets": tickets,
+        "my_tickets": tickets,
+        "stats": {
+            "abiertos_you": abiertos_you,
+            "abiertos_groups": abiertos_groups,
+            "bien": bien,
+            "mal": mal,
+            "solventado": solventado,
+        }
     }
-    return render(request, 'tickets/home.html', context)
+    return render(request, "tickets/home.html", context)
 
 @login_required
 def tickets_list(request):
@@ -215,6 +241,26 @@ def filter_customers(request):
     return JsonResponse({"customers": data, "filtros": filtros})
 
 @login_required
+def customer_profile(request):
+    customer_id = request.GET.get("id")
+    customer = get_object_or_404(User, id=customer_id, role__role_name="End user")
+
+    tickets = Ticket.objects.filter(
+    Q(requester__id=customer.id) | Q(assignee__id=customer.id) | Q(ccs__id=customer.id) | Q(created_by_id=customer.id)
+    ).distinct().order_by("-updated_at")
+
+    return render(request, "tickets/customer_profile.html", {
+        "customer": customer,
+        "tickets": tickets
+    })
+
+def tags_api(request):
+    q = request.GET.get('q', '')
+    tags = TicketTag.objects.filter(name__icontains=q) if q else TicketTag.objects.all()
+    results = [{"id": tag.id, "text": tag.name} for tag in tags]
+    return JsonResponse({"results": results})
+
+@login_required
 def customers_list(request):
     context = {
         'username': request.user.name,
@@ -239,8 +285,17 @@ def settings(request):
     }
     return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/settings.html', context)
    
+@login_required
 def profile(request):
-    return render(request, 'tickets/profile.html')
+    user = request.user
+    tickets = Ticket.objects.filter(
+    Q(requester__id=user.id) | Q(assignee__id=user.id) | Q(ccs__id=user.id) | Q(created_by_id=user.id)
+    ).distinct().order_by("-updated_at")
+
+    return render(request, "tickets/profile.html", {
+        "user": user,
+        "tickets": tickets
+    })
 
 def login(request):
     return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/login.html')

@@ -163,8 +163,59 @@
                 <button id="send-message" type="button"><i class="fas fa-paper-plane"></i></button>
             </div>
         </div>
-    </div>
+        <!-- Columna solicitante -->
+        {% if ticket and ticket.requester %}
+        <div class="column3 requester-info">
+            <div class="profile-header" style="display:flex; align-items:center; margin-bottom:20px;">
+                <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
+                <div style="margin-left:10px;">
+                    <h3 style="margin:0;">{{ ticket.requester.name }}</h3>
+                    <p style="margin:5px 0 0; color:#666;">{{ ticket.requester.email }}</p>
+                    <a href="{% url 'customer_profile' %}?id={{ ticket.requester.id }}" class="view-profile">Ver perfil completo</a>
+                </div>
+            </div>
 
+            <div class="profile-details">
+                <div class="detail-card">
+                    <h3>Rol</h3>
+                    <p>{{ ticket.requester.role.role_name|default:"-" }}</p>
+                </div>
+                <div class="detail-card">
+                    <h3>Grupo</h3>
+                    <p>{{ ticket.requester.group.group_name|default:"-" }}</p>
+                </div>
+                <div class="detail-card">
+                    <h3>Cuenta creada</h3>
+                    <p>{{ ticket.requester.created_at|date:"d/m/Y H:i" }}</p>
+                </div>
+            </div>
+
+            <h3>Últimos tickets</h3>
+            <div class="tabla small-tabla">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Asunto</th>
+                            <th>Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for t in ticket.requester.requested_tickets.all|slice:":5" %}
+                        <tr onclick="openTicket('{{ t.id }}')">
+                            <td>{{ t.id }}</td>
+                            <td>{{ t.subject }}</td>
+                            <td>{{ t.status }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="3">No hay tickets previos.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
     <!-- Barra de Pie de Formulario -->
     <div class="footer-bar">
         <div class="footer-right">
@@ -183,6 +234,17 @@
 </form>
 {% endblock %}
 {% block extra_js %}
+<script>
+    function openTicket(ticketId) {
+        const tabText = "Ticket " + ticketId;
+        const tabUrl = "{% url 'create_ticket' %}?id=" + ticketId;
+        if (window.Tabs && typeof window.Tabs.addTab === 'function') {
+            window.Tabs.addTab(tabText, tabUrl);
+        } else {
+            window.location.href = tabUrl;
+        }
+    }
+</script>
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
 

@@ -768,3 +768,63 @@ body, html {
     flex-grow: 1;
     overflow: hidden;
 }
+/* ===== Opciones de perfil (sidebar) ===== */
+#profileMenu {
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+}
+
+    #profileMenu li {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background-color: #ffffff;
+        padding: 10px;
+        margin-bottom: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        font-size: 14px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+        #profileMenu li:hover {
+            background-color: #e9f1f8;
+        }
+
+        #profileMenu li.active {
+            background-color: #dbe8f3;
+            color: #000;
+            font-weight: bold;
+        }
+
+    #profileMenu .filter-name {
+        flex: 1;
+    }
+/* ===== Tablas globales ===== */
+.tabla table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.tabla th,
+.tabla td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #ddd;
+    text-align: left;
+}
+
+.tabla tbody tr {
+    cursor: pointer; /* cambia el cursor a "seleccionar" */
+    transition: background-color 0.2s;
+}
+
+    .tabla tbody tr:hover {
+        background-color: #f1f7ff; /* color claro en hover */
+    }
+
+    /* fila seleccionada */
+    .tabla tbody tr.selected {
+        background-color: #d6eaff;
+        font-weight: bold;
+    }

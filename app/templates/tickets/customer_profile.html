@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}TicketFlow – Perfil{% endblock %}
+{% block title %}TicketFlow – Perfil Cliente{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'tickets/home.css' %}">
@@ -9,9 +9,8 @@
 
 {% block content %}
 <div class="title-bar">
-    <h1>Perfil de Usuario</h1>
+    <h1>Perfil de Cliente</h1>
 </div>
-
 <!-- Columna izquierda -->
 <div class="left-column">
     <h2>Opciones de perfil</h2>
@@ -29,45 +28,40 @@
 <div class="tabla profile-content">
     <div class="stats-group" style="width: 100%; text-align: left;">
 
-        <!-- 🔹 Información general -->
+        <!-- Sección Información -->
         <div id="info-section" class="profile-section">
             <h2>Información general</h2>
-
             <div class="profile-header" style="display:flex; align-items:center; margin-bottom:20px;">
                 <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
                 <div>
-                    <h3 style="margin:0;">{{ request.user.name }}</h3>
-                    <p style="margin:5px 0 0; color:#666;">{{ request.user.email }}</p>
+                    <h3 style="margin:0;">{{ customer.name }}</h3>
+                    <p style="margin:5px 0 0; color:#666;">{{ customer.email }}</p>
                 </div>
             </div>
 
             <div class="profile-details">
                 <div class="detail-card">
                     <h3>Rol</h3>
-                    <p>{{ request.user.role.role_name|default:"-" }}</p>
+                    <p>{{ customer.role.role_name|default:"-" }}</p>
                 </div>
                 <div class="detail-card">
                     <h3>Grupo</h3>
-                    <p>{{ request.user.group.group_name|default:"-" }}</p>
+                    <p>{{ customer.group.group_name|default:"-" }}</p>
                 </div>
                 <div class="detail-card">
                     <h3>Cuenta creada</h3>
-                    <p>{{ request.user.created_at|date:"d/m/Y H:i" }}</p>
+                    <p>{{ customer.created_at|date:"d/m/Y H:i" }}</p>
                 </div>
                 <div class="detail-card">
                     <h3>Última actualización</h3>
-                    <p>{{ request.user.updated_at|date:"d/m/Y H:i" }}</p>
+                    <p>{{ customer.updated_at|date:"d/m/Y H:i" }}</p>
                 </div>
-            </div>
-
-            <div style="margin-top:20px; text-align:right;">
-                <a href="{% url 'logout' %}" class="logout-link">Cerrar sesión</a>
             </div>
         </div>
 
-        <!-- 🔹 Tickets asociados -->
+        <!-- Sección Tickets -->
         <div id="tickets-section" class="profile-section" style="display:none;">
-            <h2>Mis Tickets</h2>
+            <h2>Tickets asociados</h2>
             <div class="tabla">
                 <table>
                     <thead>
@@ -91,7 +85,7 @@
                         </tr>
                         {% endfor %}
                         {% else %}
-                        <tr><td colspan="5">No tienes tickets.</td></tr>
+                        <tr><td colspan="5">No hay tickets asociados.</td></tr>
                         {% endif %}
                     </tbody>
                 </table>
@@ -102,32 +96,33 @@
 </div>
 
 <script>
-    function openTicket(ticketId) {
-        const tabText = "Ticket " + ticketId;
-        const tabUrl = "{% url 'create_ticket' %}?id=" + ticketId;
-        if (window.Tabs && typeof window.Tabs.addTab === 'function') {
-            window.Tabs.addTab(tabText, tabUrl);
-        } else {
-            window.location.href = tabUrl;
-        }
+function openTicket(ticketId) {
+    const tabText = "Ticket " + ticketId;
+    const tabUrl = "{% url 'create_ticket' %}?id=" + ticketId;
+    if (window.Tabs && typeof window.Tabs.addTab === 'function') {
+        window.Tabs.addTab(tabText, tabUrl);
+    } else {
+        window.location.href = tabUrl;
     }
+}
 
-    document.addEventListener("DOMContentLoaded", () => {
-        const menuItems = document.querySelectorAll("#profileMenu li");
-        const sections = document.querySelectorAll(".profile-section");
+// toggle secciones del perfil
+document.addEventListener("DOMContentLoaded", () => {
+    const menuItems = document.querySelectorAll("#profileMenu li");
+    const sections = document.querySelectorAll(".profile-section");
 
-        menuItems.forEach(item => {
-            item.addEventListener("click", () => {
-                // reset
-                menuItems.forEach(i => i.classList.remove("active"));
-                sections.forEach(s => s.style.display = "none");
+    menuItems.forEach(item => {
+        item.addEventListener("click", () => {
+            // reset
+            menuItems.forEach(i => i.classList.remove("active"));
+            sections.forEach(s => s.style.display = "none");
 
-                // activar
-                item.classList.add("active");
-                const target = document.getElementById(item.dataset.section);
-                if (target) target.style.display = "block";
-            });
+            // activar
+            item.classList.add("active");
+            const target = document.getElementById(item.dataset.section);
+            if (target) target.style.display = "block";
         });
     });
+});
 </script>
 {% endblock %}

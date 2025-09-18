@@ -78,6 +78,7 @@
     <Content Include="app\templates\partials\sidebar.html" />
     <Content Include="app\templates\tickets\create_ticket.html" />
     <Content Include="app\templates\tickets\customers_list.html" />
+    <Content Include="app\templates\tickets\customer_profile.html" />
     <Content Include="app\templates\tickets\home.html" />
     <Content Include="app\templates\tickets\login.html" />
     <Content Include="app\templates\tickets\navbar_sidebar.html" />
