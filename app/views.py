@@ -21,7 +21,6 @@ from django.views.decorators.http import require_POST
 from django.utils import timezone
 from django.views import View
 
-# Funcionalidades de Ticket
 
 @login_required
 def home(request):
@@ -374,6 +373,11 @@ def ticket_detail_api(request, ticket_id):
 
 logger = logging.getLogger('app.views')
 
+def _is_agent(user):
+    role_name = (getattr(getattr(user, 'role', None), 'role_name', '') or '').lower()
+    # tratamos "End user" como cliente; todo lo demás se considera agente/staff
+    return role_name not in ('end user', 'end-user', 'cliente', 'customer')
+
 @login_required
 def create_ticket(request):
     id_param = request.GET.get('id', None)
@@ -381,7 +385,7 @@ def create_ticket(request):
     if request.method == 'POST':
         # --- Leer y sanear inputs (evita NULL en campos obligatorios) ---
         subject = (request.POST.get('subject') or '').strip()
-        content = (request.POST.get('content') or '').strip()
+        content = ((request.POST.get('content') or request.POST.get('message')) or '').strip()
         status  = (request.POST.get('status')  or 'open').strip().lower()
         priority = (request.POST.get('prioridad') or 'normal').strip().lower()
 
@@ -442,12 +446,16 @@ def create_ticket(request):
             ticket.save()
             _set_m2m(ticket)
 
-            if content:  # si escribiste texto, lo registramos como comentario
+            if content:
+                requested_public = str((request.POST.get('is_public') or 'true')).lower() in ('true','1','yes','on')
+                final_is_public = requested_public if _is_agent(request.user) else True
+
                 Comment.objects.create(
                     ticket_id=ticket.id,
                     user_id=request.user.id,
                     content=content,
-                    created_at=timezone.now()
+                    created_at=timezone.now(),
+                    is_public=final_is_public,
                 )
             return redirect(f'{request.path}?id={ticket.id}')
 
@@ -471,22 +479,32 @@ def create_ticket(request):
         _set_m2m(ticket)
 
         if content:
+            requested_public = str((request.POST.get('is_public') or 'true')).lower() in ('true','1','yes','on')
+            final_is_public = requested_public if _is_agent(request.user) else True
+
             Comment.objects.create(
                 ticket_id=ticket.id,
                 user_id=request.user.id,
                 content=content,
-                created_at=timezone.now()
+                created_at=timezone.now(),
+                is_public=final_is_public,
             )
-
         return redirect(f'{request.path}?id={ticket.id}')
 
-    # GET ...
+    # GET .
     usuarios = User.objects.filter(group=1)
     agentes = User.objects.filter(group=2)
     tags = TicketTag.objects.all()
     todos = User.objects.all()
 
     ticket_obj = get_object_or_404(Ticket, id=int(id_param)) if id_param and id_param.isdigit() else None
+
+    # prepara comentarios según rol
+    if ticket_obj:
+        comments_qs = ticket_obj.comment_set.order_by("created_at") if _is_agent(request.user) \
+                      else ticket_obj.comment_set.filter(is_public=True).order_by("created_at")
+    else:
+        comments_qs = Comment.objects.none()
 
     context = {
         'usuarios': usuarios,
@@ -496,6 +514,8 @@ def create_ticket(request):
         'username': request.user.name,
         'email': request.user.email,
         'ticket': ticket_obj,
+        'comments': comments_qs,                    
+        'can_use_internal': _is_agent(request.user)
     }
     return render(request, 'tickets/create_ticket.html', context)
 
@@ -550,17 +570,21 @@ def reopen_ticket(request, pk):
 @require_POST
 def add_comment(request, ticket_id):
     data = json.loads(request.body)
-    content = data.get('content', '').strip()
+    content = (data.get('content') or '').strip()
     if not content:
         return JsonResponse({'error': 'El contenido no puede estar vacío.'}, status=400)
 
     ticket = get_object_or_404(Ticket, id=ticket_id)
 
+    requested_public = bool(data.get('is_public', True))
+    final_is_public = requested_public if _is_agent(request.user) else True  # clientes → siempre público
+
     comment = Comment.objects.create(
         ticket=ticket,
         user=request.user,
         content=content,
-        created_at=timezone.now()
+        created_at=timezone.now(),
+        is_public=final_is_public,
     )
 
     return JsonResponse({
@@ -570,6 +594,7 @@ def add_comment(request, ticket_id):
         'ticket_id': ticket.id,
         'user_id': request.user.id,
         'username': request.user.name,
+        'is_public': comment.is_public,
     })
 
 # Funcionalidades de Gestion de Usuarios

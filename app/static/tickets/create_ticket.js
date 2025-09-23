@@ -1,6 +1,20 @@
 ﻿// app/static/tickets/create_ticket.js
 
 document.addEventListener('DOMContentLoaded', () => {
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
     // Inicialización de Select2 para todos los selects
     const initializeSelect2 = () => {
         $('select.select2').select2({
@@ -14,6 +28,64 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Inicializar Select2
     initializeSelect2();
+
+    // ---- Desplegable Público/Interno ----
+    const isPublicInput = document.getElementById('is_public_input');
+    const visBtn = document.getElementById('visBtn');
+    const visMenu = document.getElementById('visMenu');
+
+    function setVisibility(publicVal) {
+        const isPub = publicVal === true || publicVal === 'true';
+        if (isPublicInput) isPublicInput.value = String(isPub);
+        if (visBtn) {
+            const label = visBtn.querySelector('.vis-label');
+            const icon = visBtn.querySelector('i.fas:not(.caret)');
+            if (label) label.textContent = isPub ? 'Público' : 'Interno';
+            if (icon) icon.className = isPub ? 'fas fa-eye' : 'fas fa-user-shield';
+        }
+    }
+
+    if (visBtn && visMenu) {
+        // Estado inicial (desde hidden)
+        setVisibility(isPublicInput ? isPublicInput.value : 'true');
+
+        // Abrir/cerrar
+        visBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const open = visBtn.parentElement.classList.toggle('open');
+            visBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (open) {
+                const first = visMenu.querySelector('.vis-option');
+                first && first.focus();
+            }
+        });
+
+        // Selección de opción
+        visMenu.querySelectorAll('.vis-option').forEach((opt) => {
+            opt.addEventListener('click', () => {
+                const val = opt.dataset.public === 'true';
+                setVisibility(val);
+                visBtn.parentElement.classList.remove('open');
+                visBtn.setAttribute('aria-expanded', 'false');
+                visBtn.focus();
+            });
+        });
+
+        // Cerrar al hacer click fuera o con ESC
+        document.addEventListener('click', () => {
+            if (visBtn.parentElement.classList.contains('open')) {
+                visBtn.parentElement.classList.remove('open');
+                visBtn.setAttribute('aria-expanded', 'false');
+            }
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && visBtn.parentElement.classList.contains('open')) {
+                visBtn.parentElement.classList.remove('open');
+                visBtn.setAttribute('aria-expanded', 'false');
+                visBtn.focus();
+            }
+        });
+    }
 
     // Manejo de Envío de Mensajes
     const sendMessage = async (ev) => {
@@ -55,10 +127,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Ticket existente: solo validar contenido
-        if (!content) {
-            alert('El contenido no puede estar vacío.');
-            return;
-        }
+        if (!content) { alert('El contenido no puede estar vacío.'); return; }
+
+        const isPublic = isPublicInput ? (isPublicInput.value === 'true') : true;
 
         try {
             const response = await fetch(`/tickets/${window.ticketId}/add_comment/`, {
@@ -67,7 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': getCookie('csrftoken')
                 },
-                body: JSON.stringify({ content })
+                body: JSON.stringify({ content, is_public: isPublic })
             });
 
             const data = await response.json();
@@ -75,11 +146,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const messagesBox = document.getElementById('messagesBox');
                 const newComment = document.createElement('div');
                 const isMe = Number(data.user_id) === Number(window.currentUserId);
-                newComment.className = 'message' + (isMe ? ' me' : '');
+                newComment.className = 'message' + (isMe ? ' me' : '') + (data.is_public ? '' : ' internal');
+
+                const internalBadge = data.is_public ? '' : '<span class="badge-internal">Interno</span>';
+
                 newComment.innerHTML = `
-        <p><strong>${data.username}:</strong> ${data.content}</p>
-        <span class="timestamp">${data.created_at}</span>
-      `;
+          ${internalBadge}
+          <p><strong>${data.username}:</strong> ${data.content}</p>
+          <span class="timestamp">${data.created_at}</span>
+        `;
                 messagesBox.appendChild(newComment);
                 document.getElementById('new-message').value = '';
                 messagesBox.scrollTop = messagesBox.scrollHeight;
@@ -91,7 +166,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const sendMessageButton = document.getElementById('send-message');
+    const sendMessageButton = document.getElementById('send-message-btn');
     if (sendMessageButton) {
         sendMessageButton.addEventListener('click', sendMessage);
     }

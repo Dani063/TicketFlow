@@ -108,6 +108,7 @@ class Comment(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     content = models.TextField(null=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    is_public = models.BooleanField(default=True)
 
 class TicketTag(models.Model):
     name = models.CharField(max_length=255, unique=True, null=False, help_text='Label for categorizing tickets')

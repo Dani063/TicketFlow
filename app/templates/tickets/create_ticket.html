@@ -144,8 +144,11 @@
             <!-- Cuadro de Mensajes -->
             <div class="messages-box" id="messagesBox">
                 {% if ticket %}
-                {% for c in ticket.comment_set.all %}
-                <div class="message{% if c.user_id == request.user.id %} me{% endif %}">
+                {% for c in comments %}
+                <div class="message{% if c.user_id == request.user.id %} me{% endif %}{% if not c.is_public %} internal{% endif %}">
+                    {% if not c.is_public and can_use_internal %}
+                    <span class="badge-internal">Interno</span>
+                    {% endif %}
                     <p><strong>{{ c.user.name }}:</strong> {{ c.content }}</p>
                     <span class="timestamp">{{ c.created_at }}</span>
                 </div>
@@ -156,66 +159,100 @@
                 <div class="message"><em>Guarda el ticket para comenzar a comentar.</em></div>
                 {% endif %}
             </div>
-
             <!-- Input de Mensaje -->
             <div class="message-input">
-                <textarea id="new-message" name="content" placeholder="Escribe un mensaje..."></textarea>
-                <button id="send-message" type="button"><i class="fas fa-paper-plane"></i></button>
+                <textarea id="new-message" name="message" placeholder="Escribe un mensaje..."></textarea>
+                <button type="button" id="send-message-btn" title="Enviar">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+                {# Solo agentes ven el toggle Público/Interno #}
+                {% if can_use_internal %}
+                <div class="visibility-control dropdown">
+                    <button type="button" class="vis-btn" id="visBtn" aria-haspopup="true" aria-expanded="false">
+                        <i class="fas fa-eye"></i>
+                        <span class="vis-label">Público</span>
+                        <i class="fas fa-chevron-down caret"></i>
+                    </button>
+
+                    <ul class="vis-menu" id="visMenu" role="menu" aria-labelledby="visBtn">
+                        <li role="menuitem">
+                            <button type="button" class="vis-option" data-public="true">
+                                <i class="fas fa-eye"></i>
+                                <div class="txt">
+                                    <strong>Público</strong>
+                                    <small>visible al cliente</small>
+                                </div>
+                            </button>
+                        </li>
+                        <li role="menuitem">
+                            <button type="button" class="vis-option" data-public="false">
+                                <i class="fas fa-user-shield"></i>
+                                <div class="txt">
+                                    <strong>Interno</strong>
+                                    <small>solo agentes</small>
+                                </div>
+                            </button>
+                        </li>
+                    </ul>
+
+                    <input type="hidden" name="is_public" id="is_public_input" value="true">
+                </div>
+                {% endif %}
             </div>
         </div>
-        <!-- Columna solicitante -->
-        {% if ticket and ticket.requester %}
-        <div class="column3 requester-info">
-            <div class="profile-header" style="display:flex; align-items:center; margin-bottom:20px;">
-                <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
-                <div style="margin-left:10px;">
-                    <h3 style="margin:0;">{{ ticket.requester.name }}</h3>
-                    <p style="margin:5px 0 0; color:#666;">{{ ticket.requester.email }}</p>
-                    <a href="{% url 'customer_profile' %}?id={{ ticket.requester.id }}" class="view-profile">Ver perfil completo</a>
+            <!-- Columna solicitante -->
+            {% if ticket and ticket.requester %}
+            <div class="column3 requester-info">
+                <div class="profile-header" style="display:flex; align-items:center; margin-bottom:20px;">
+                    <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
+                    <div style="margin-left:10px;">
+                        <h3 style="margin:0;">{{ ticket.requester.name }}</h3>
+                        <p style="margin:5px 0 0; color:#666;">{{ ticket.requester.email }}</p>
+                        <a href="{% url 'customer_profile' %}?id={{ ticket.requester.id }}" class="view-profile">Ver perfil completo</a>
+                    </div>
                 </div>
-            </div>
 
-            <div class="profile-details">
-                <div class="detail-card">
-                    <h3>Rol</h3>
-                    <p>{{ ticket.requester.role.role_name|default:"-" }}</p>
+                <div class="profile-details">
+                    <div class="detail-card">
+                        <h3>Rol</h3>
+                        <p>{{ ticket.requester.role.role_name|default:"-" }}</p>
+                    </div>
+                    <div class="detail-card">
+                        <h3>Grupo</h3>
+                        <p>{{ ticket.requester.group.group_name|default:"-" }}</p>
+                    </div>
+                    <div class="detail-card">
+                        <h3>Cuenta creada</h3>
+                        <p>{{ ticket.requester.created_at|date:"d/m/Y H:i" }}</p>
+                    </div>
                 </div>
-                <div class="detail-card">
-                    <h3>Grupo</h3>
-                    <p>{{ ticket.requester.group.group_name|default:"-" }}</p>
-                </div>
-                <div class="detail-card">
-                    <h3>Cuenta creada</h3>
-                    <p>{{ ticket.requester.created_at|date:"d/m/Y H:i" }}</p>
-                </div>
-            </div>
 
-            <h3>Últimos tickets</h3>
-            <div class="tabla small-tabla">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Asunto</th>
-                            <th>Estado</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for t in ticket.requester.requested_tickets.all|slice:":5" %}
-                        <tr onclick="openTicket('{{ t.id }}')">
-                            <td>{{ t.id }}</td>
-                            <td>{{ t.subject }}</td>
-                            <td>{{ t.status }}</td>
-                        </tr>
-                        {% empty %}
-                        <tr><td colspan="3">No hay tickets previos.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+                <h3>Últimos tickets</h3>
+                <div class="tabla small-tabla">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Asunto</th>
+                                <th>Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in ticket.requester.requested_tickets.all|slice:":5" %}
+                            <tr onclick="openTicket('{{ t.id }}')">
+                                <td>{{ t.id }}</td>
+                                <td>{{ t.subject }}</td>
+                                <td>{{ t.status }}</td>
+                            </tr>
+                            {% empty %}
+                            <tr><td colspan="3">No hay tickets previos.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
+            {% endif %}
         </div>
-        {% endif %}
-    </div>
     <!-- Barra de Pie de Formulario -->
     <div class="footer-bar">
         <div class="footer-right">
@@ -250,6 +287,7 @@
 
 <script>
   window.ticketId = {{ ticket.id|default:'null' }};
+  window.currentUserId = {{ request.user.id }};
   window.urls.add_comment = window.ticketId ? `/tickets/${window.ticketId}/add_comment/` : null;
 </script>
 <script src="{% static 'tickets/create_ticket.js' %}"></script>

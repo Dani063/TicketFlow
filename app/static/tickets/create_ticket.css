@@ -1,4 +1,4 @@
-/* Title Bar Styles */
+Ôªø/* Title Bar Styles */
 .title-bar {
     background-color: #f8f9f9;
     padding: 15px 85px;
@@ -31,16 +31,16 @@
     border-radius: 5px;
     /* Scroll en la columna */
     overflow-y: auto;
-    height: calc(100vh - 40px); /* Ajuste de altura din·mico */
+    height: calc(100vh - 40px); /* Ajuste de altura din√°mico */
 }
 
     /* Asegurar que la columna pueda desplazarse */
     .column > div {
         min-height: 7%;
-        margin-bottom: 10px; /* AÒadir margen inferior para espacio en blanco */
+        margin-bottom: 10px; /* A√±adir margen inferior para espacio en blanco */
     }
 
-    /* PersonalizaciÛn de la barra de desplazamiento */
+    /* Personalizaci√≥n de la barra de desplazamiento */
     .column::-webkit-scrollbar {
         width: 8px;
     }
@@ -76,7 +76,7 @@ input, select {
         color: #aaa;
     }
 
-/* Estilos para el botÛn de aÒadir tag en Select2 */
+/* Estilos para el bot√≥n de a√±adir tag en Select2 */
 .select2-container--default .select2-results__option.add-tag-button {
     background-color: #007bff;
     color: white;
@@ -117,7 +117,7 @@ input, select {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     border-radius: 5px;
     overflow-y: auto;
-    height: calc(100vh - 40px); /* Ajuste de altura din·mico */
+    height: calc(100vh - 40px); /* Ajuste de altura din√°mico */
 }
 
 /* Barra de Subject */
@@ -142,7 +142,7 @@ input, select {
     border-radius: 4px;
     margin-bottom: 15px;
     overflow-y: auto;
-    height: calc(100vh - 500px); /* Ajuste de altura din·mico */
+    height: calc(100vh - 500px); /* Ajuste de altura din√°mico */
 }
 
 /* por defecto, a la izquierda (otros) */
@@ -163,13 +163,13 @@ input, select {
         border: none;
     }
 
-    /* Timestamps m·s sutiles */
+    /* Timestamps m√°s sutiles */
     .message .timestamp {
         font-size: 12px;
         color: #7a7a7a;
     }
 
-/* SecciÛn para escribir mensajes */
+/* Secci√≥n para escribir mensajes */
 .message-input {
     position: relative;
     display: flex;
@@ -183,10 +183,10 @@ input, select {
         border-radius: 4px;
         resize: none;
         height: 200px;
-        padding-right: 40px; /* Espacio para el botÛn de enviar */
+        padding-right: 40px; /* Espacio para el bot√≥n de enviar */
     }
 
-    .message-input button {
+    .message-input #send-message-btn {
         position: absolute;
         right: 10px;
         background-color: transparent;
@@ -198,7 +198,7 @@ input, select {
         transition: color 0.3s;
     }
 
-        .message-input button:hover {
+        .message-input #send-message-btn:hover {
             color: #0056b3;
         }
 .footer-bar {
@@ -323,4 +323,103 @@ input, select {
 .small-tabla th,
 .small-tabla td {
     padding: 6px 8px;
+}
+
+.badge-internal {
+    display: inline-block;
+    margin-right: 8px;
+    font-size: 11px;
+    background: #ffe8a3;
+    color: #7a5d00;
+    padding: 2px 6px;
+    border-radius: 8px;
+}
+
+.message.internal {
+    border-left: 3px solid #f0c36d;
+}
+/* ---- Desplegable P√∫blico/Interno ---- */
+.visibility-control {
+    position: absolute;
+    left: 14px;
+    bottom: 12px;
+    z-index: 1000; /* por encima del textarea y dem√°s */
+}
+
+.vis-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid #ced4da;
+    border-radius: 20px;
+    padding: 6px 10px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05); /* ‚Üê arreglado .05 */
+}
+
+    .vis-btn .caret {
+        font-size: 10px;
+        opacity: .7;
+    }
+
+.vis-menu {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 8px); /* ‚Üê se abre justo encima del bot√≥n */
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 12px;
+    padding: 6px;
+    margin: 0;
+    list-style: none;
+    min-width: 220px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.12); /* ‚Üê arreglado .12 */
+    display: none;
+}
+
+.visibility-control.open .vis-menu {
+    display: flex;
+    flex-direction:column;
+    gap:4px;
+}
+
+.vis-menu li {
+    margin: 0;
+}
+
+.vis-option {
+    width: 100%;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    text-align: left;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+    .vis-option:hover {
+        background: #f8f9fa;
+    }
+
+    .vis-option .txt small {
+        display: block;
+        font-size: 10px;
+        color: #6c757d;
+    }
+
+@media (max-width:640px) {
+    .vis-menu {
+        min-width: 180px;
+    }
+
+    .vis-option .txt small {
+        display: none;
+    }
 }

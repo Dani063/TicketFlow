@@ -10,7 +10,7 @@ class TicketForm(forms.ModelForm):
 class CommentForm(forms.ModelForm):
     class Meta:
         model = Comment
-        fields = ['ticket', 'user', 'content']
+        fields = ['ticket', 'user', 'content', 'is_public']
 
 class UserForm(forms.ModelForm):
     class Meta:
