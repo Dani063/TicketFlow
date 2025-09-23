@@ -151,6 +151,21 @@
                     {% endif %}
                     <p><strong>{{ c.user.name }}:</strong> {{ c.content }}</p>
                     <span class="timestamp">{{ c.created_at }}</span>
+                    {% with atts=c.attachment_set.all %}
+                    {% if atts %}
+                    <div class="attachments">
+                        {% for a in atts %}
+                        {% if a.file_type and a.file_type|slice:":6" == "image/" %}
+                        <a href="{{ a.file_url }}" target="_blank"><img src="{{ a.file_url }}" alt="adjunto"></a>
+                        {% else %}
+                        <a href="{{ a.file_url }}" target="_blank" class="file-pill">
+                            <i class="fas fa-paperclip"></i> Archivo
+                        </a>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% endwith %}
                 </div>
                 {% empty %}
                 <div class="message"><em>Sin mensajes aún.</em></div>
@@ -198,6 +213,16 @@
                     <input type="hidden" name="is_public" id="is_public_input" value="true">
                 </div>
                 {% endif %}
+                <!-- Botón y input de adjuntos -->
+                <button type="button" class="attach-btn" id="attach-btn" title="Adjuntar">
+                    <i class="fas fa-paperclip"></i>
+                </button>
+                <input type="file" id="attach-input"
+                       accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt"
+                       multiple hidden>
+
+                <!-- Previsualización de adjuntos pendientes de enviar -->
+                <div class="pending-attachments" id="pending-attachments"></div>
             </div>
         </div>
             <!-- Columna solicitante -->

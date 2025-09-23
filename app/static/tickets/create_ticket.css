@@ -182,7 +182,7 @@ input, select {
         border: 1px solid #ccc;
         border-radius: 4px;
         resize: none;
-        height: 200px;
+        height: 190px;
         padding-right: 40px; /* Espacio para el botón de enviar */
     }
 
@@ -423,3 +423,121 @@ input, select {
         display: none;
     }
 }
+/* --- Adjuntos en composer --- */
+.message-input {
+    position: relative;
+}
+
+    /* Botón Adjuntar (izquierda) */
+    .message-input .attach-btn {
+        position: absolute;
+        left: 120px;
+        bottom: 10px;
+        border: 0;
+        background: transparent;
+        cursor: pointer;
+        font-size: 18px;
+        color: #495057;
+    }
+
+        .message-input .attach-btn:hover {
+            color: #212529;
+        }
+
+/* Pills ARRIBA en una sola fila + scroll */
+.pending-attachments {
+    position: absolute;
+    top: 8px;
+    left: 12px; /* mueve a 180px si quieres alinearlas con el texto */
+    right: 56px; /* deja un poco de aire a la derecha */
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap; /* UNA sola fila */
+    overflow-x: auto; /* ← scroll horizontal */
+    overflow-y: hidden;
+    height: 32px; /* alto fijo de la tira */
+    padding-bottom: 2px; /* aire para la barra */
+    z-index: 2;
+    scrollbar-width: thin; /* Firefox */
+}
+
+    .pending-attachments::-webkit-scrollbar {
+        height: 6px;
+    }
+
+    .pending-attachments::-webkit-scrollbar-thumb {
+        background: #c5cbd3;
+        border-radius: 4px;
+    }
+
+    .pending-attachments::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    /* Píldoras */
+    .pending-attachments .pending-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 8px;
+        border-radius: 9999px;
+        background: #f1f3f5;
+        border: 1px solid #e9ecef;
+        font-size: 12px;
+        line-height: 1.1;
+    }
+
+        .pending-attachments .pending-pill .name {
+            max-width: 180px; /* más compacto para que quepan más */
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .pending-attachments .pending-pill .remove {
+            border: 0;
+            background: transparent;
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+            color: #6c757d;
+            padding: 0 2px;
+            margin-left: 2px;
+        }
+
+            .pending-attachments .pending-pill .remove:hover {
+                color: #dc3545;
+            }
+
+/* Reserva un hueco arriba para la tira con scroll */
+.message-input textarea {
+    padding-top: 44px; /* ~32px de alto + margen */
+    padding-left: 10px; /* lo dejas como lo tenías */
+    padding-right: 44px; /* botón enviar */
+}
+
+/* --- Adjuntos en los mensajes (renderizados) --- */
+.message .attachments {
+    margin-top: 6px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+    .message .attachments img {
+        max-height: 120px;
+        border-radius: 6px;
+        border: 1px solid #e9ecef;
+    }
+
+    .message .attachments .file-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        background: #f1f3f5;
+        border: 1px solid #e9ecef;
+    }

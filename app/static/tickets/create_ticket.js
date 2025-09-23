@@ -28,6 +28,86 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Inicializar Select2
     initializeSelect2();
+    function middleEllipsis(filename, max = 26, filler = '…') {
+        if (!filename) return '';
+        // separa extensión
+        const lastDot = filename.lastIndexOf('.');
+        const ext = lastDot > 0 ? filename.slice(lastDot) : '';
+        const base = lastDot > 0 ? filename.slice(0, lastDot) : filename;
+
+        if (base.length + ext.length <= max) return filename;
+
+        const keep = Math.max(1, max - ext.length - 1); // 1 para el filler
+        const start = Math.ceil(keep / 2);
+        const end = Math.floor(keep / 2);
+        return base.slice(0, start) + filler + base.slice(base.length - end) + ext;
+    }
+
+    // ---- Adjuntos: subir y preparar para el comentario ----
+    window.pendingAttachmentIds = [];
+
+    const attachBtn = document.getElementById('attach-btn');
+    const attachInput = document.getElementById('attach-input');
+    const pendingBox = document.getElementById('pending-attachments');
+
+    function isImageType(t) { return t && t.startsWith('image/'); }
+
+    if (attachBtn && attachInput) {
+        attachBtn.addEventListener('click', () => {
+            if (!window.ticketId) {
+                alert('Guarda el ticket antes de adjuntar archivos.');
+                return;
+            }
+            attachInput.click();
+        });
+
+        attachInput.addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files || []);
+            for (const file of files) {
+                const fd = new FormData();
+                fd.append('file', file);
+                try {
+                    const res = await fetch(`/tickets/${window.ticketId}/attachments/upload/`, {
+                        method: 'POST',
+                        headers: { 'X-CSRFToken': getCookie('csrftoken') }, // NO pongas Content-Type aquí
+                        body: fd
+                    });
+                    const data = await res.json();
+                    if (!res.ok) { alert(data.error || 'Error al subir adjunto'); continue; }
+
+                    // guardamos id para el comentario
+                    window.pendingAttachmentIds.push(data.id);
+                    // pinta píldora con nombre (elipsis medio) y botón de quitar
+                    const pill = document.createElement('div');
+                    pill.className = 'pending-pill';
+                    pill.dataset.id = String(data.id);
+
+                    const originalName = data.filename || (data.file_url || '').split('/').pop() || 'archivo';
+                    const displayName = middleEllipsis(originalName, 26, '…');
+
+                    pill.innerHTML = `
+  <i class="fas fa-paperclip" aria-hidden="true"></i>
+  <span class="name" title="${originalName}">${displayName}</span>
+  <button type="button" class="remove" aria-label="Quitar adjunto">&times;</button>
+`;
+
+                    const removeBtn = pill.querySelector('.remove');
+                    removeBtn.addEventListener('click', () => {
+                        window.pendingAttachmentIds = window.pendingAttachmentIds.filter(id => id !== data.id);
+                        pill.remove();
+                    });
+
+                    pendingBox && pendingBox.appendChild(pill);
+
+                } catch (err) {
+                    console.error('Upload error', err);
+                    alert('No se pudo subir el adjunto.');
+                }
+            }
+            attachInput.value = '';
+        });
+    }
+
 
     // ---- Desplegable Público/Interno ----
     const isPublicInput = document.getElementById('is_public_input');
@@ -87,32 +167,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Manejo de Envío de Mensajes
     const sendMessage = async (ev) => {
-        if (ev) {
-            ev.preventDefault();
-            ev.stopPropagation();
-        }
-        const content = document.getElementById('new-message').value.trim();
+        if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+
+        const textarea = document.getElementById('new-message');
+        const content = (textarea?.value || '').trim();
 
         // Si aún no existe id real, validar como en "Publicar"
         if (!window.ticketId) {
             const errors = [];
             const brand = (document.getElementById('empresa')?.value || '').trim();
             const subject = (document.getElementById('subject')?.value || '').trim();
-
             if (!brand) errors.push('Please provide a ticket brand');
             if (!content) errors.push('Please provide a ticket description');
             if (!subject) errors.push('Please provide a ticket subject');
+            if (errors.length) { alert(errors.join('\n')); return; }
 
-            if (errors.length) {
-                alert(errors.join('\n'));
-                return; // NO enviamos nada
-            }
-
-            // Inyecta status y ahora sí crea/redirige
+            // Inyecta status y crea/redirige
             const ticketForm = document.getElementById('ticket-form');
-            const selectedStatus = document.getElementById('selected-status').textContent.trim();
+            const selectedStatus = document.getElementById('selected-status')?.textContent?.trim() || '';
             let statusInput = ticketForm.querySelector('input[name="status"]');
             if (!statusInput) {
                 statusInput = document.createElement('input');
@@ -121,15 +194,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 ticketForm.appendChild(statusInput);
             }
             statusInput.value = selectedStatus;
-
             ticketForm.requestSubmit();
             return;
         }
 
-        // Ticket existente: solo validar contenido
+        // Ticket existente: validar contenido
         if (!content) { alert('El contenido no puede estar vacío.'); return; }
 
-        const isPublic = isPublicInput ? (isPublicInput.value === 'true') : true;
+        const isPublic = (typeof isPublicInput !== 'undefined') ? (isPublicInput.value === 'true') : true;
+        const payload = { content, is_public: isPublic };
+        if (window.pendingAttachmentIds?.length) payload.attachment_ids = window.pendingAttachmentIds;
 
         try {
             const response = await fetch(`/tickets/${window.ticketId}/add_comment/`, {
@@ -138,31 +212,62 @@ document.addEventListener('DOMContentLoaded', () => {
                     'Content-Type': 'application/json',
                     'X-CSRFToken': getCookie('csrftoken')
                 },
-                body: JSON.stringify({ content, is_public: isPublic })
+                body: JSON.stringify(payload)
             });
 
             const data = await response.json();
-            if (response.ok) {
-                const messagesBox = document.getElementById('messagesBox');
-                const newComment = document.createElement('div');
-                const isMe = Number(data.user_id) === Number(window.currentUserId);
-                newComment.className = 'message' + (isMe ? ' me' : '') + (data.is_public ? '' : ' internal');
 
-                const internalBadge = data.is_public ? '' : '<span class="badge-internal">Interno</span>';
-
-                newComment.innerHTML = `
-          ${internalBadge}
-          <p><strong>${data.username}:</strong> ${data.content}</p>
-          <span class="timestamp">${data.created_at}</span>
-        `;
-                messagesBox.appendChild(newComment);
-                document.getElementById('new-message').value = '';
-                messagesBox.scrollTop = messagesBox.scrollHeight;
-            } else {
+            if (!response.ok) {
                 alert(data.error || 'No se pudo enviar el mensaje.');
+                return;
             }
-        } catch (error) {
-            console.error('Error al enviar el mensaje:', error);
+
+            const messagesBox = document.getElementById('messagesBox');
+            const newComment = document.createElement('div');
+            const isMe = Number(data.user_id) === Number(window.currentUserId);
+            newComment.className = 'message' + (isMe ? ' me' : '') + (data.is_public ? '' : ' internal');
+
+            const internalBadge = data.is_public ? '' : '<span class="badge-internal">Interno</span>';
+
+            newComment.innerHTML = `
+      ${internalBadge}
+      <p><strong>${data.username}:</strong> ${data.content}</p>
+      <span class="timestamp">${data.created_at}</span>
+    `;
+
+            // PINTAR ADJUNTOS DEVUELTOS (si hay)
+            if (data.attachments && data.attachments.length) {
+                const at = document.createElement('div');
+                at.className = 'attachments';
+                data.attachments.forEach(a => {
+                    if (a.file_type && a.file_type.startsWith('image/')) {
+                        const link = document.createElement('a');
+                        link.href = a.file_url; link.target = '_blank';
+                        const img = document.createElement('img');
+                        img.src = a.file_url; link.appendChild(img);
+                        at.appendChild(link);
+                    } else {
+                        const link = document.createElement('a');
+                        link.href = a.file_url; link.target = '_blank';
+                        link.className = 'file-pill';
+                        link.innerHTML = '<i class="fas fa-paperclip"></i> Archivo';
+                        at.appendChild(link);
+                    }
+                });
+                newComment.appendChild(at);
+            }
+
+            messagesBox.appendChild(newComment);
+
+            // limpiar composer
+            textarea.value = '';
+            if (typeof pendingBox !== 'undefined' && pendingBox) pendingBox.innerHTML = '';
+            window.pendingAttachmentIds = [];
+            messagesBox.scrollTop = messagesBox.scrollHeight;
+
+        } catch (err) {
+            console.error('Error al enviar el comentario:', err);
+            alert('Error de red al enviar el mensaje.');
         }
     };
 

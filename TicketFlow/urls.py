@@ -7,6 +7,8 @@ from django.urls import path, include
 from django.contrib import admin
 from django.contrib.auth.views import LoginView, LogoutView
 from app import forms, views
+from django.conf import settings
+from django.conf.urls.static import static
 
 # -*- coding: utf-8 -*-
 
@@ -18,6 +20,7 @@ urlpatterns = [
     path('api/tickets/<int:ticket_id>/', views.ticket_detail_api, name='ticket_detail_api'),
     path("tickets/filter/", views.filter_tickets, name="filter_tickets"),
     path('api/tags/', views.tags_api, name='tags_api'),
+    path('tickets/<int:ticket_id>/attachments/upload/', views.upload_attachment, name='upload_attachment'),
 
     path("customers/filter/", views.filter_customers, name="filter_customers"),
     path('customers/', views.customers_list, name='customers_list'),
@@ -32,3 +35,5 @@ urlpatterns = [
 
     path('logout/', views.user_logout, name='logout'),
 ]
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

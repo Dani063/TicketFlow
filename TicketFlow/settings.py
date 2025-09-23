@@ -166,7 +166,10 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/2.1/howto/static-files/
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
-# Configuraci�n de la URL de inicio de sesi�n
+# Ficheros subidos (adjuntos)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# Configuracion de la URL de inicio de sesi�n
 LOGIN_URL = '/login/'
 DEFAULT_CHARSET = 'utf-8'
 

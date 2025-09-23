@@ -8,7 +8,7 @@ from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import Ticket, Comment, User, TicketTag
+from .models import Ticket, Comment, User, TicketTag, Attachment
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
@@ -18,6 +18,12 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 import logging
 from django.views.decorators.http import require_POST
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+from django.utils.text import slugify
+from django.conf import settings
+import os, time
+from django.conf import settings as DJANGO_SETTINGS
 from django.utils import timezone
 from django.views import View
 
@@ -587,6 +593,15 @@ def add_comment(request, ticket_id):
         is_public=final_is_public,
     )
 
+    attachment_ids = data.get('attachment_ids', []) or []
+    if attachment_ids:
+        # Solo adjuntos de ese ticket que aún no estén ligados a comentario
+        Attachment.objects.filter(
+            id__in=attachment_ids, ticket=ticket, comment__isnull=True
+        ).update(comment=comment)
+
+    # Para responder con los adjuntos del comentario
+    atts = Attachment.objects.filter(comment=comment).values('id', 'file_url', 'file_type')
     return JsonResponse({
         'id': comment.id,
         'content': comment.content,
@@ -594,7 +609,40 @@ def add_comment(request, ticket_id):
         'ticket_id': ticket.id,
         'user_id': request.user.id,
         'username': request.user.name,
-        'is_public': comment.is_public,
+        'attachments': list(atts),
+    })
+
+@login_required
+@require_POST
+def upload_attachment(request, ticket_id):
+    ticket = get_object_or_404(Ticket, id=ticket_id)
+    f = request.FILES.get('file')
+    if not f:
+        return JsonResponse({'error': 'No se recibió ningún archivo.'}, status=400)
+
+    # Nombre seguro + carpeta por ticket
+    root, ext = os.path.splitext(f.name)
+    safe_name = f"{slugify(root)[:80]}{ext.lower()}"
+    rel_dir = f"attachments/tickets/{ticket.id}/"
+    rel_path = os.path.join(rel_dir, f"{int(time.time())}_{safe_name}")
+
+    # Guardar a disco
+    saved_path = default_storage.save(rel_path, ContentFile(f.read()))
+    file_url = request.build_absolute_uri(default_storage.url(saved_path))
+
+    att = Attachment.objects.create(
+        file_url=file_url,
+        file_type=getattr(f, 'content_type', None),
+        ticket=ticket,
+        uploaded_by=request.user,
+    )
+
+    return JsonResponse({
+        'id': att.id,
+        'file_url': att.file_url,
+        'file_type': att.file_type or '',
+        'filename': safe_name,
+        'size': getattr(f, 'size', 0),
     })
 
 # Funcionalidades de Gestion de Usuarios
