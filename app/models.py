@@ -18,7 +18,7 @@ class UserManager(BaseUserManager):
             name=name,
         )
 
-        user.set_password(password)  # Hashear la contrase�a
+        user.set_password(password)  # Hashear la contraseña
         user.save(using=self._db)
         return user
 
@@ -58,17 +58,15 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.email
-
-    def has_perm(self, perm, obj=None):
-        return True
-
-    def has_module_perms(self, app_label):
-        return True
-
-    @property
-    def is_staff(self):
-        return self.is_superuser
-
+    # Campo real de staff para acceso a admin, sin atarlo a superuser
+    is_staff = models.BooleanField(
+        default=False,
+        help_text='Permite acceder al admin de Django.'
+     )
+    is_active = models.BooleanField(
+        default=True,
+        help_text='Indica si la cuenta está activa. Desmárcalo para deshabilitarla.'
+    )
 class Role(models.Model):
     role_name = models.CharField(max_length=255, unique=True, null=False)
     description = models.TextField(null=True)

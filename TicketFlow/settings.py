@@ -12,8 +12,15 @@ https://docs.djangoproject.com/en/2.1/ref/settings/
 
 import os
 import posixpath
+from pathlib import Path
+from dotenv import load_dotenv
 
-# Build paths inside the project like this: os.path.join(BASE_DIR, ...)
+BASE_DIR = Path(__file__).resolve().parent.parent
+env_path = BASE_DIR / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 STATICFILES_DIRS = [
@@ -29,17 +36,22 @@ AUTHENTICATION_BACKENDS = [
       # Backend por defecto de Django
 ]
 
+# === Seguridad y entorno ===
+# SECRET_KEY obligatorio: si no está, levantamos error para no arrancar inseguro
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY no definido. Configúralo en .env")
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/2.1/howto/deployment/checklist/
+# DEBUG por entorno
+DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes", "on")
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = '8b086694-f17f-41a1-a1ed-8ebb2cf63534'
+# Hosts permitidos (coma-separados en .env). Si vacío -> lista vacía.
+_hosts = os.getenv("ALLOWED_HOSTS", "").strip()
+ALLOWED_HOSTS = [h.strip() for h in _hosts.split(",") if h.strip()]
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
-
-ALLOWED_HOSTS = []
+# (opcional) Orígenes de confianza para CSRF (coma-separados)
+_csrf = os.getenv("CSRF_TRUSTED_ORIGINS", "").strip()
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf.split(",") if o.strip()]
 
 LOGGING = {
     'version': 1,
@@ -124,16 +136,18 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'TicketFlow.wsgi.application'
-# Database
-# https://docs.djangoproject.com/en/2.1/ref/settings/#databases
+# Database (desde .env)
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'TicketFlow',
-        'USER': 'root',
-        'PASSWORD': '@D4nielm0lina2001',
-        'HOST': 'localhost',
-        'PORT': '3306',
+    "default": {
+        "ENGINE": os.getenv("DB_ENGINE", "django.db.backends.mysql"),
+        "NAME": os.getenv("DB_NAME", "ticketflow"),
+        "USER": os.getenv("DB_USER", "root"),
+        "PASSWORD": os.getenv("DB_PASSWORD", ""),
+        "HOST": os.getenv("DB_HOST", "127.0.0.1"),
+        "PORT": os.getenv("DB_PORT", "3306"),
+        "OPTIONS": {
+            "init_command": "SET sql_mode='STRICT_TRANS_TABLES'"
+        },
     }
 }
 
