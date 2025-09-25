@@ -9,7 +9,9 @@
 {% endblock %}
 
 {% block content %}
-<div class="title-bar"><h1>{{ ticket.id|default:'Nuevo Ticket' }}</h1></div>
+<div class="title-bar">
+    <h1>{% if ticket %}Ticket {{ ticket.id }}{% else %}Nuevo ticket{% endif %}</h1>
+</div>
 
 <form id="ticket-form" method="post"
       action="{% url 'create_ticket' %}{% if ticket %}?id={{ ticket.id }}{% elif request.GET.id %}?id={{ request.GET.id }}{% endif %}">

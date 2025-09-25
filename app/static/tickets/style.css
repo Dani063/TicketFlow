@@ -828,3 +828,29 @@ body, html {
         background-color: #d6eaff;
         font-weight: bold;
     }
+/* === Ticket status indicator (shared) === */
+.status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.status-open {
+    background: #2ecc71;
+}
+/* verde */
+.status-pending {
+    background: #f1c40f;
+}
+/* amarillo */
+.status-resolved {
+    background: #339af0;
+}
+/* azul */
+.status-closed {
+    background: #adb5bd;
+}
+/* gris */

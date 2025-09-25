@@ -219,13 +219,13 @@
                     const row = document.createElement("tr");
                     row.onclick = () => openTicket(t.id);
                     row.innerHTML = `
-                    <td>${t.id}</td>
-                    <td>${t.subject}</td>
-                    <td>${t.requester}</td>
-                    <td>${t.updated_at}</td>
-                    <td>${t.service}</td>
-                    <td>${t.assignee}</td>
-                `;
+                      <td>${t.id}</td>
+                      <td><span class="status-dot status-${t.status}"></span>${t.subject}</td>
+                      <td>${t.requester}</td>
+                      <td>${t.updated_at}</td>
+                      <td>${t.service}</td>
+                      <td>${t.assignee}</td>
+                    `;
                     tbody.appendChild(row);
                 });
             }

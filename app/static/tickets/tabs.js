@@ -194,16 +194,56 @@
             .filter(t => t && typeof t.url === 'string' && t.url.length && isTabUrl(t.url))
             .forEach(t => addTab(t.text || 'Ticket', t.url, false));
     }
+    function closeDraftNewTicketTabs() {
+        if (!window.urls || !window.urls.create_ticket) return;
+        const base = normalizeUrl(window.urls.create_ticket); 
+        const container = getContainer();
+        if (!container) return;
 
-    // Garantiza que exista la pestaña de la URL actual si es una vista “ticket”
+        [...container.querySelectorAll('.tab')].forEach(tab => {
+            const url = normalizeUrl(tab.dataset.url || '');
+            if (!url) return;
+
+            // 1) /tickets/create/ sin id => borrador
+            if (url === base) { tab.remove(); return; }
+
+            try {
+                const u = new URL(url, window.location.origin);
+                const isCreatePath = normalizeUrl(u.pathname) === base;
+                if (!isCreatePath) return;
+
+                const qid = (u.searchParams.get('id') || '').trim();
+                const looksNumeric = /^\d+$/.test(qid);
+
+                // 2) ids provisionales o no numéricos => borrador
+                const isDraft = !qid ||
+                    /^ticket-\d+$/i.test(qid) ||
+                    /^(new|null|none|draft)$/i.test(qid) ||
+                    !looksNumeric;
+
+                if (isDraft) tab.remove();
+            } catch (_) { /* noop */ }
+        });
+
+        saveTabs();
+    }
     function ensureCurrentTab() {
         const currNorm = normalizeUrl(qs());
-        if (findTabByNorm(currNorm)) return;
 
-        // Título por defecto: usar h1 de la barra de título si existe; si no, inferir
+        // NEW: si estamos en un ticket real (id numérico), cierra pestañas "Nuevo ticket"
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const id = params.get('id');
+            if (id && /^\d+$/.test(id)) {
+                closeDraftNewTicketTabs();
+            }
+        } catch (_) { }
+
+        if (findTabByNorm(currNorm)) { setActive(findTabByNorm(currNorm)); return; }
+
+        // Título por defecto
         let text = document.querySelector('.title-bar h1')?.innerText?.trim();
         if (!text) {
-            // Heurística para create_ticket con ?id=
             const params = new URLSearchParams(window.location.search);
             const id = params.get('id');
             text = id ? `Ticket ${id}` : 'Nuevo ticket';
@@ -336,6 +376,7 @@
 
     window.Tabs = {
         addTab, loadTabs, saveTabs, highlightActiveTab, normalizeUrl,
+        closeDraftNewTicketTabs,
         __initialized: true
     };
 })();

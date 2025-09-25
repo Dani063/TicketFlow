@@ -78,7 +78,7 @@
                         {% for ticket in tickets %}
                         <tr onclick="openTicket('{{ ticket.id }}')">
                             <td>{{ ticket.id }}</td>
-                            <td>{{ ticket.subject }}</td>
+                            <td><span class="status-dot status-{{ ticket.status|lower }}"></span>{{ ticket.subject }}</td>
                             <td>{{ ticket.status }}</td>
                             <td>{{ ticket.priority }}</td>
                             <td>{{ ticket.updated_at|date:"d/m/Y H:i" }}</td>

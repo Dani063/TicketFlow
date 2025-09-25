@@ -194,6 +194,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 ticketForm.appendChild(statusInput);
             }
             statusInput.value = selectedStatus;
+            if (window.Tabs && typeof window.Tabs.closeDraftNewTicketTabs === 'function') {
+                window.Tabs.closeDraftNewTicketTabs();
+            }
             ticketForm.requestSubmit();
             return;
         }
@@ -271,6 +274,94 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    async function publishComment(ev) {
+        if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+
+        if (!window.ticketId) {
+            // Reutiliza tu flujo de creación
+            const ticketForm = document.getElementById('ticket-form');
+            const selectedStatus = document.getElementById('selected-status')?.textContent?.trim() || 'open';
+            let statusInput = ticketForm.querySelector('input[name="status"]');
+            if (!statusInput) {
+                statusInput = document.createElement('input');
+                statusInput.type = 'hidden';
+                statusInput.name = 'status';
+                ticketForm.appendChild(statusInput);
+            }
+            statusInput.value = selectedStatus;
+            ticketForm.requestSubmit();
+            return;
+        }
+
+        const textarea = document.getElementById('new-message');
+        const content = (textarea?.value || '').trim();
+        if (!content) { alert('El contenido no puede estar vacío.'); return; }
+
+        const isPublic = (typeof isPublicInput !== 'undefined') ? (isPublicInput.value === 'true') : true;
+        const newStatus = (document.getElementById('selected-status')?.textContent || 'open').trim().toLowerCase();
+
+        const payload = { content, is_public: isPublic, new_status: newStatus };
+        if (window.pendingAttachmentIds?.length) payload.attachment_ids = window.pendingAttachmentIds;
+
+        try {
+            const response = await fetch(`/tickets/${window.ticketId}/add_comment/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            if (!response.ok) { alert(data.error || 'No se pudo publicar.'); return; }
+
+            // Pinta el nuevo comentario (idéntico a sendMessage)
+            const messagesBox = document.getElementById('messagesBox');
+            const newComment = document.createElement('div');
+            const isMe = Number(data.user_id) === Number(window.currentUserId);
+            newComment.className = 'message' + (isMe ? ' me' : '') + (data.is_public ? '' : ' internal');
+            const internalBadge = data.is_public ? '' : '<span class="badge-internal">Interno</span>';
+            newComment.innerHTML = `
+      ${internalBadge}
+      <p><strong>${data.username}:</strong> ${data.content}</p>
+      <span class="timestamp">${data.created_at}</span>
+    `;
+            if (data.attachments && data.attachments.length) {
+                const at = document.createElement('div');
+                at.className = 'attachments';
+                data.attachments.forEach(a => {
+                    if (a.file_type && a.file_type.startsWith('image/')) {
+                        const link = document.createElement('a');
+                        link.href = a.file_url; link.target = '_blank';
+                        const img = document.createElement('img');
+                        img.src = a.file_url; link.appendChild(img);
+                        at.appendChild(link);
+                    } else {
+                        const link = document.createElement('a');
+                        link.href = a.file_url; link.target = '_blank';
+                        link.className = 'file-pill';
+                        link.innerHTML = '<i class="fas fa-paperclip"></i> Archivo';
+                        at.appendChild(link);
+                    }
+                });
+                newComment.appendChild(at);
+            }
+            messagesBox.appendChild(newComment);
+            messagesBox.scrollTop = messagesBox.scrollHeight;
+
+            // Actualiza el estado en la UI (span del footer y, si tienes, badge/campo de estado)
+            const statusSpan = document.getElementById('selected-status');
+            if (statusSpan && data.new_status) statusSpan.textContent = data.new_status;
+
+            // Limpia composer
+            textarea.value = '';
+            if (typeof pendingBox !== 'undefined' && pendingBox) pendingBox.innerHTML = '';
+            window.pendingAttachmentIds = [];
+
+        } catch (err) {
+            console.error('Error al publicar:', err);
+            alert('Error de red al publicar.');
+        }
+    }
+
+
     const sendMessageButton = document.getElementById('send-message-btn');
     if (sendMessageButton) {
         sendMessageButton.addEventListener('click', sendMessage);
@@ -337,23 +428,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
         publishButton.addEventListener('click', (event) => {
             event.preventDefault();
+            // Si hay ticketId → publicar vía AJAX con cambio de estado
+            if (window.ticketId) {
+                publishComment(event);
+                return;
+            }
 
+            // Ticket nuevo → validación + submit (tu flujo actual)
             const errors = [];
             const brand = (document.getElementById('empresa')?.value || '').trim();
             const subject = (document.getElementById('subject')?.value || '').trim();
             const description = (document.getElementById('new-message')?.value || '').trim();
-
             if (!brand) errors.push('Please provide a ticket brand');
             if (!description) errors.push('Please provide a ticket description');
             if (!subject) errors.push('Please provide a ticket subject');
+            if (errors.length) { alert(errors.join('\n')); return; }
 
-            if (errors.length) {
-                // puedes reemplazar alert por tu toaster si tienes uno
-                alert(errors.join('\n'));
-                return; // no enviamos
-            }
-
-            // inyecta <input hidden name="status"> con el valor del span
             const selectedStatus = document.getElementById('selected-status').textContent.trim();
             let statusInput = ticketForm.querySelector('input[name="status"]');
             if (!statusInput) {
@@ -363,7 +453,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 ticketForm.appendChild(statusInput);
             }
             statusInput.value = selectedStatus;
-
             ticketForm.submit();
         });
     };

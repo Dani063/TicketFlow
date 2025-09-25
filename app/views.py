@@ -8,7 +8,7 @@ from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import Ticket, Comment, User, TicketTag, Attachment
+from .models import Ticket, Comment, User, TicketTag, Attachment, TicketHistory
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
@@ -208,7 +208,8 @@ def filter_tickets(request):
             "requester": t.requester.name if t.requester else "-",
             "updated_at": t.updated_at.strftime("%d/%m/%Y %H:%M"),
             "service": t.service or "-",
-            "assignee": t.assignee.name if t.assignee else "-"
+            "assignee": t.assignee.name if t.assignee else "-",
+            "status": t.status,
         }
         for t in tickets
     ]
@@ -622,15 +623,29 @@ def add_comment(request, ticket_id):
         is_public=final_is_public,
     )
 
-    attachment_ids = data.get('attachment_ids', []) or []
-    if attachment_ids:
-        # Solo adjuntos de ese ticket que aún no estén ligados a comentario
-        Attachment.objects.filter(
-            id__in=attachment_ids, ticket=ticket, comment__isnull=True
-        ).update(comment=comment)
+    # --- NUEVO: cambio de estado inline ---
+    new_status = (data.get('new_status') or '').lower()
+    allowed = {'open', 'pending', 'resolved', 'closed'}
+    applied_status = ticket.status
+    if new_status in allowed and new_status != ticket.status:
+        prev = ticket.status
+        ticket.status = new_status
+        if new_status == 'closed':
+            ticket.closed_at = timezone.now()
+        ticket.updated_at = timezone.now()
+        ticket.save(update_fields=['status', 'updated_at', 'closed_at'])
+        # historial
+        TicketHistory.objects.create(
+            ticket=ticket,
+            previous_status=prev,
+            new_status=new_status,
+            changed_by=request.user
+        )
+        applied_status = new_status
 
-    # Para responder con los adjuntos del comentario
+    # adjuntos del comentario para el frontend
     atts = Attachment.objects.filter(comment=comment).values('id', 'file_url', 'file_type')
+
     return JsonResponse({
         'id': comment.id,
         'content': comment.content,
@@ -638,7 +653,9 @@ def add_comment(request, ticket_id):
         'ticket_id': ticket.id,
         'user_id': request.user.id,
         'username': request.user.name,
+        'is_public': comment.is_public,
         'attachments': list(atts),
+        'new_status': applied_status,  # ← devolver el estado final
     })
 
 @login_required
