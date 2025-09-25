@@ -227,55 +227,55 @@
         </div>
             <!-- Columna solicitante -->
             {% if ticket and ticket.requester %}
-            <div class="column3 requester-info">
-                <div class="profile-header" style="display:flex; align-items:center; margin-bottom:20px;">
-                    <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
-                    <div style="margin-left:10px;">
-                        <h3 style="margin:0;">{{ ticket.requester.name }}</h3>
-                        <p style="margin:5px 0 0; color:#666;">{{ ticket.requester.email }}</p>
-                        <a href="{% url 'customer_profile' %}?id={{ ticket.requester.id }}" class="view-profile">Ver perfil completo</a>
-                    </div>
-                </div>
-
-                <div class="profile-details">
-                    <div class="detail-card">
-                        <h3>Rol</h3>
-                        <p>{{ ticket.requester.role.role_name|default:"-" }}</p>
-                    </div>
-                    <div class="detail-card">
-                        <h3>Grupo</h3>
-                        <p>{{ ticket.requester.group.group_name|default:"-" }}</p>
-                    </div>
-                    <div class="detail-card">
-                        <h3>Cuenta creada</h3>
-                        <p>{{ ticket.requester.created_at|date:"d/m/Y H:i" }}</p>
-                    </div>
-                </div>
-
-                <h3>Últimos tickets</h3>
-                <div class="tabla small-tabla">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>ID</th>
-                                <th>Asunto</th>
-                                <th>Estado</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for t in ticket.requester.requested_tickets.all|slice:":5" %}
-                            <tr onclick="openTicket('{{ t.id }}')">
-                                <td>{{ t.id }}</td>
-                                <td>{{ t.subject }}</td>
-                                <td>{{ t.status }}</td>
-                            </tr>
-                            {% empty %}
-                            <tr><td colspan="3">No hay tickets previos.</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+        <div class="column3 requester-info">
+            <div class="profile-header" style="display:flex; align-items:center; margin-bottom:20px;">
+                <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
+                <div style="margin-left:10px;">
+                    <h3 style="margin:0;">{{ ticket.requester.name }}</h3>
+                    <p style="margin:5px 0 0; color:#666;">{{ ticket.requester.email }}</p>
+                    <a href="{% url 'customer_profile' %}?id={{ ticket.requester.id }}" class="view-profile">Ver perfil completo</a>
                 </div>
             </div>
+
+            <div class="profile-details">
+                <div class="detail-card">
+                    <h3>Rol</h3>
+                    <p>{{ ticket.requester.role.role_name|default:"-" }}</p>
+                </div>
+                <div class="detail-card">
+                    <h3>Grupo</h3>
+                    <p>{{ ticket.requester.group.group_name|default:"-" }}</p>
+                </div>
+                <div class="detail-card">
+                    <h3>Cuenta creada</h3>
+                    <p>{{ ticket.requester.created_at|date:"d/m/Y H:i" }}</p>
+                </div>
+            </div>
+
+            <h3>Últimos tickets</h3>
+            <h3>Historial de interacciones</h3>
+            <ul class="timeline user-timeline">
+                {% for t in user_timeline %}
+                <li class="tl-item {% if ticket and t.id == ticket.id %}active{% endif %}" onclick="openTicket('{{ t.id }}')">
+                    <span class="tl-dot status-{{ t.status|lower }}"></span>
+                    <div class="tl-content">
+                        <div class="tl-top">
+                            <strong class="tl-subject">{{ t.subject }}</strong>
+                            <small class="tl-when">{{ t.updated_at }}</small>
+                            <a class="tl-open" title="Abrir en pestaña" onclick="event.stopPropagation(); openTicket('{{ t.id }}')">
+                                <i class="fas fa-external-link-alt"></i>
+                            </a>
+                        </div>
+                        {% if t.last_comment %}
+                        <div class="tl-snippet">{{ t.last_comment }}</div>
+                        {% endif %}
+                    </div>
+                </li>
+                {% empty %}
+                <li class="tl-empty">Sin tickets previos.</li>
+                {% endfor %}
+            </ul>
+        </div>
             {% endif %}
         </div>
     <!-- Barra de Pie de Formulario -->

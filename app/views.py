@@ -505,6 +505,34 @@ def create_ticket(request):
 
     ticket_obj = get_object_or_404(Ticket, id=int(id_param)) if id_param and id_param.isdigit() else None
 
+    # --- Historial (interacciones) del solicitante: sus tickets más recientes ---
+    user_timeline = []
+    if ticket_obj and ticket_obj.requester_id:
+        # Trae los 30 más recientes; incluye el actual
+        related = (Ticket.objects
+                   .filter(requester_id=ticket_obj.requester_id)
+                   .select_related('requester', 'assignee')
+                   .order_by('-updated_at')[:30])
+
+        for t in related:
+            # Último comentario público (snippet)
+            last_pub = (Comment.objects
+                        .filter(ticket_id=t.id, is_public=True)
+                        .order_by('-created_at')
+                        .values('content', 'created_at')
+                        .first())
+            snippet = ''
+            if last_pub:
+                raw = last_pub['content'] or ''
+                snippet = (raw[:140] + '…') if len(raw) > 140 else raw
+
+            user_timeline.append({
+                'id': t.id,
+                'subject': t.subject,
+                'status': t.status,
+                'updated_at': t.updated_at.strftime('%d/%m/%Y %H:%M'),
+                'last_comment': snippet,
+            })
     # prepara comentarios según rol
     if ticket_obj:
         comments_qs = ticket_obj.comment_set.order_by("created_at") if _is_agent(request.user) \
@@ -521,7 +549,8 @@ def create_ticket(request):
         'email': request.user.email,
         'ticket': ticket_obj,
         'comments': comments_qs,                    
-        'can_use_internal': _is_agent(request.user)
+        'can_use_internal': _is_agent(request.user),
+        'user_timeline': user_timeline,
     }
     return render(request, 'tickets/create_ticket.html', context)
 
