@@ -1,34 +1,41 @@
-"""
-This file demonstrates writing tests using the unittest module. These will pass
-when you run "manage.py test".
-"""
-
-import django
 from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
+from .models import User, Ticket, Comment
 
-# TODO: Configure your database in settings.py and sync before running tests.
+class TicketFlowTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="test@example.com",
+            name="Test User",
+            password="secret"
+        )
+        self.client.force_login(self.user)
 
-class ViewTest(TestCase):
-    """Tests for the application views."""
+    def test_create_ticket(self):
+        response = self.client.post(reverse("create_ticket"), {
+            "subject": "Test Ticket",
+            "message": "Contenido inicial",
+            "status": "open",
+        })
+        self.assertEqual(response.status_code, 302)  # redirige al ticket creado
+        self.assertTrue(Ticket.objects.filter(subject="Test Ticket").exists())
 
-    if django.VERSION[:2] >= (1, 7):
-        # Django 1.7 requires an explicit setup() when running tests in PTVS
-        @classmethod
-        def setUpClass(cls):
-            super(ViewTest, cls).setUpClass()
-            django.setup()
-
-    def test_home(self):
-        """Tests the home page."""
-        response = self.client.get('/')
-        self.assertContains(response, 'Home Page', 1, 200)
-
-    def test_contact(self):
-        """Tests the contact page."""
-        response = self.client.get('/contact')
-        self.assertContains(response, 'Contact', 3, 200)
-
-    def test_about(self):
-        """Tests the about page."""
-        response = self.client.get('/about')
-        self.assertContains(response, 'About', 3, 200)
+    def test_add_comment(self):
+        ticket = Ticket.objects.create(
+            subject="Ticket Comentario",
+            description="desc",
+            status="open",
+            priority="normal",
+            requester=self.user,
+            assignee=self.user,
+            created_by=self.user,
+            created_at=timezone.now(),
+        )
+        url = reverse("add_comment", args=[ticket.id])
+        response = self.client.post(url, data={
+            "content": "Primer comentario",
+            "is_public": True
+        }, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Comment.objects.filter(ticket=ticket, content="Primer comentario").exists())

@@ -39,6 +39,8 @@
                         <th>Nombre</th>
                         <th>Email</th>
                         <th>Estado</th>
+                        <th>Rol</th>
+                        <th>Grupo</th>
                         <th>Fecha creación</th>
                     </tr>
                 </thead>
@@ -76,6 +78,8 @@ function getUrlParam(name) {
                     <td>${u.name}</td>
                     <td>${u.email}</td>
                     <td>${u.status}</td>
+                    <td>${u.role}</td>
+                    <td>${u.group}</td>
                     <td>${u.created_at}</td>
                 `;
                     tbody.appendChild(row);

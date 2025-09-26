@@ -8,7 +8,7 @@ from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import Ticket, Comment, User, TicketTag, Attachment, TicketHistory
+from .models import Ticket, Comment, User, TicketTag, Attachment, TicketHistory, Notification
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
@@ -26,6 +26,7 @@ import os, time
 from django.conf import settings as DJANGO_SETTINGS
 from django.utils import timezone
 from django.views import View
+from django.views.decorators.http import require_GET
 
 
 @login_required
@@ -240,6 +241,8 @@ def filter_customers(request):
             "email": u.email,
             "status": "Suspendido" if (u.group and u.group.group_name == "Suspended") else "Activo",
             "created_at": u.created_at.strftime("%d/%m/%Y %H:%M"),
+            "role": u.role.role_name if u.role else "-",
+            "group": u.group.group_name if u.group else "-",
         }
         for u in users
     ]
@@ -273,7 +276,7 @@ def customers_list(request):
         'email': request.user.email,
     }
     customers = User.objects.all()
-    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/customers_list.html', context)
+    return render(request, "tickets/customers_list.html", context)
 
 @login_required
 def reporting(request):
@@ -281,7 +284,7 @@ def reporting(request):
         'username': request.user.name,
         'email': request.user.email,
     }
-    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/reporting.html', context)
+    return render(request, "tickets/reporting.html", context)
 
 @login_required
 def settings(request):
@@ -289,7 +292,7 @@ def settings(request):
         'username': request.user.name,
         'email': request.user.email,
     }
-    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/settings.html', context)
+    return render(request, "tickets/settings.html", context)
    
 @login_required
 def profile(request):
@@ -304,7 +307,7 @@ def profile(request):
     })
 
 def login(request):
-    return render(request, 'C:/Users/molqueda/source/repos/TicketFlow/app/templates/tickets/login.html')
+    return render(request, "tickets/login.html")
 
 @csrf_exempt
 def register(request):
@@ -452,7 +455,7 @@ def create_ticket(request):
             ticket.status      = status
             ticket.save()
             _set_m2m(ticket)
-
+            _notify_users(ticket, f"Ticket #{ticket.id} actualizado")
             if content:
                 requested_public = str((request.POST.get('is_public') or 'true')).lower() in ('true','1','yes','on')
                 final_is_public = requested_public if _is_agent(request.user) else True
@@ -484,7 +487,7 @@ def create_ticket(request):
             category=category,
         )
         _set_m2m(ticket)
-
+        _notify_users(ticket, f"Nuevo ticket #{ticket.id}: {ticket.subject}")
         if content:
             requested_public = str((request.POST.get('is_public') or 'true')).lower() in ('true','1','yes','on')
             final_is_public = requested_public if _is_agent(request.user) else True
@@ -645,7 +648,6 @@ def add_comment(request, ticket_id):
 
     # adjuntos del comentario para el frontend
     atts = Attachment.objects.filter(comment=comment).values('id', 'file_url', 'file_type')
-
     return JsonResponse({
         'id': comment.id,
         'content': comment.content,
@@ -657,6 +659,41 @@ def add_comment(request, ticket_id):
         'attachments': list(atts),
         'new_status': applied_status,  # ← devolver el estado final
     })
+@login_required
+def notifications_api(request):
+    notifs = Notification.objects.filter(user=request.user, read=False).order_by("-created_at")[:20]
+    data = [
+        {
+            "id": n.id,
+            "message": n.message,
+            "ticket_id": n.ticket_id,
+            "created_at": n.created_at.strftime("%d/%m %H:%M"),
+        }
+        for n in notifs
+    ]
+    return JsonResponse({"notifications": data})
+
+def _notify_users(ticket, message):
+    targets = []
+    if ticket.requester:
+        targets.append(ticket.requester)
+    if ticket.assignee:
+        targets.append(ticket.assignee)
+
+    for u in targets:
+        Notification.objects.create(
+            user=u,
+            ticket=ticket,
+            message=message
+        )
+
+@login_required
+@require_POST
+def mark_notification_read(request, notif_id):
+    notif = get_object_or_404(Notification, id=notif_id, user=request.user)
+    notif.read = True
+    notif.save()
+    return JsonResponse({"ok": True})
 
 @login_required
 @require_POST
@@ -691,13 +728,50 @@ def upload_attachment(request, ticket_id):
         'size': getattr(f, 'size', 0),
     })
 
-# Funcionalidades de Gestion de Usuarios
+@login_required
+@require_GET
+def global_search(request):
+    q = (request.GET.get("q") or "").strip()
+    if not q:
+        return JsonResponse({"tickets": [], "users": []})
 
-# Funcionalidades de Notificaciones, Reportes, Busquedas y Etiquetas
+    # --- Tickets ---
+    tickets = Ticket.objects.filter(
+        Q(subject__icontains=q) |
+        Q(description__icontains=q) |
+        Q(service__icontains=q) |
+        Q(status__icontains=q) |
+        Q(priority__icontains=q) |
+        Q(requester__name__icontains=q) |
+        Q(requester__email__icontains=q) |
+        Q(assignee__name__icontains=q) |
+        Q(assignee__email__icontains=q) |
+        Q(tags__name__icontains=q)
+    ).distinct()[:10]
 
-# Las notificaciones y reportes suelen implementarse como funciones que se ejecutan en segundo plano o como vistas especializadas que generan y muestran los resultados.
-# La busqueda y filtrado pueden implementarse como vistas que procesan las consultas del usuario y devuelven los resultados en la misma plantilla.
+    tickets_data = [{
+        "id": t.id,
+        "subject": t.subject,
+        "status": t.status,
+        "requester": t.requester.name if t.requester else "-",
+        "assignee": t.assignee.name if t.assignee else "-",
+        "service": t.service or "-"
+    } for t in tickets]
 
-# Nota: Estas vistas son b�sicas y necesitar�n plantillas HTML para funcionar correctamente.
+    # --- Usuarios ---
+    users = User.objects.filter(
+        Q(name__icontains=q) |
+        Q(email__icontains=q) |
+        Q(role__role_name__icontains=q) |
+        Q(group__group_name__icontains=q)
+    ).distinct()[:10]
 
+    users_data = [{
+        "id": u.id,
+        "name": u.name,
+        "email": u.email,
+        "role": u.role.role_name if u.role else "-",
+        "group": u.group.group_name if u.group else "-"
+    } for u in users]
 
+    return JsonResponse({"tickets": tickets_data, "users": users_data})

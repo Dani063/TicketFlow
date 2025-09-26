@@ -854,3 +854,95 @@ body, html {
     background: #adb5bd;
 }
 /* gris */
+/* ===== Resultados de búsqueda ===== */
+.navbar-center {
+    position: relative; /* necesario para posicionar el dropdown relativo a la barra */
+}
+
+.search-results {
+    position: absolute;
+    top: 100%; /* justo debajo de la barra */
+    left: 19.3%;
+    width: 61.5%; /* ancho dinámico de la barra */
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    margin-top: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    max-height: 350px;
+    overflow-y: auto;
+    z-index: 2000;
+    display: none;
+}
+
+    .search-results ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    .search-results li {
+        padding: 10px 14px;
+        font-size: 14px;
+        color: #333;
+        border-bottom: 1px solid #f1f1f1;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+
+        .search-results li:hover {
+            background: #e9f1f8;
+        }
+
+    .search-results .result-header {
+        font-weight: bold;
+        font-size: 12px;
+        color: #666;
+        text-transform: uppercase;
+        background: #f4f5f7;
+        border-bottom: 1px solid #e0e0e0;
+        cursor: default;
+    }
+
+.notifications-popup {
+    position: absolute;
+    top: 55px;
+    right: 104px;
+    width: 320px;
+    background-color: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 2000;
+    font-size: 14px;
+}
+
+    .notifications-popup ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .notifications-popup li {
+        padding: 12px 14px;
+        border-bottom: 1px solid #f1f1f1;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+
+        .notifications-popup li:hover {
+            background: #f9f9f9;
+        }
+
+    .notifications-popup strong {
+        color: #333;
+        display: block;
+        margin-bottom: 2px;
+    }
+
+    .notifications-popup small {
+        color: #888;
+        font-size: 12px;
+    }

@@ -300,17 +300,74 @@
             if (userIcon) userIcon.classList.toggle('active', which === 'user');
         }
 
-        function loadNotifications() {
+        async function loadNotifications() {
             if (!notifList) return;
-            // Sustituye por tu fetch cuando lo tengas listo
-            const notifications = ['Notificación 1', 'Notificación 2', 'Notificación 3'];
-            notifList.innerHTML = '';
-            notifications.forEach(n => {
-                const li = document.createElement('li');
-                li.textContent = n;
-                notifList.appendChild(li);
-            });
+            try {
+                const res = await fetch("/api/notifications/");
+                const data = await res.json();
+
+                notifList.innerHTML = "";
+                const badge = document.querySelector(".notifications .badge");
+
+                if (!data.notifications.length) {
+                    notifList.innerHTML = "<li>No hay notificaciones</li>";
+                    badge.textContent = "0";
+                    badge.style.display = "none"; // ocultar si no hay
+                    return;
+                }
+
+                badge.textContent = data.notifications.length;
+                badge.style.display = "inline-block";
+
+                data.notifications.forEach(n => {
+                    const li = document.createElement("li");
+                    li.innerHTML = `<strong>${n.message}</strong><br><small>${n.created_at}</small>`;
+                    li.onclick = async () => {
+                        if (n.ticket_id) {
+                            openTicket(n.ticket_id);
+                        }
+                        await fetch(`/api/notifications/${n.id}/read/`, { method: "POST" });
+                        loadNotifications(); // refrescar popup
+                        refreshUpdates();    // refrescar columna home
+                    };
+                    notifList.appendChild(li);
+                });
+            } catch (err) {
+                console.error("Error cargando notificaciones", err);
+            }
         }
+
+        async function refreshUpdates() {
+            try {
+                const res = await fetch("/api/notifications/");
+                const data = await res.json();
+                const list = document.getElementById("updates-list");
+                if (!list) return;
+
+                list.innerHTML = "";
+                data.notifications.forEach(n => {
+                    const li = document.createElement("li");
+                    li.textContent = n.message;
+                    if (n.ticket_id) {
+                        li.onclick = () => openTicket(n.ticket_id);
+                        li.style.cursor = "pointer";
+                    }
+                    list.appendChild(li);
+                });
+            } catch (err) {
+                console.error("Error refrescando updates", err);
+            }
+        }
+
+        // recarga cada 5s
+        setInterval(refreshUpdates, 5000);
+        document.addEventListener("DOMContentLoaded", refreshUpdates);
+
+
+        // recarga cada 5s
+        setInterval(refreshUpdates, 5000);
+        document.addEventListener("DOMContentLoaded", refreshUpdates);
+
 
         // Delegación global: funciona aunque la navbar se re-renderice
         document.addEventListener('click', (e) => {
@@ -359,6 +416,78 @@
             window.location.href = target;
         });
     }
+    function initSearch() {
+        const searchInput = document.querySelector(".search-bar");
+        const resultsBox = document.getElementById("search-results");
+        const resultsList = document.getElementById("results-list");
+        if (!searchInput || !resultsBox || !resultsList) return;
+
+        let timer = null;
+
+        function renderResults(data) {
+            resultsList.innerHTML = "";
+
+            if ((!data.tickets || !data.tickets.length) &&
+                (!data.users || !data.users.length)) {
+                resultsList.innerHTML = "<li>No hay resultados</li>";
+                resultsBox.style.display = "block";
+                return;
+            }
+
+            if (data.tickets && data.tickets.length) {
+                const header = document.createElement("li");
+                header.textContent = "Tickets";
+                header.classList.add("result-header");
+                resultsList.appendChild(header);
+
+                data.tickets.forEach(t => {
+                    const li = document.createElement("li");
+                    li.innerHTML = `<strong>#${t.id}</strong> ${t.subject} 
+                                <small>(${t.status} – ${t.requester})</small>`;
+                    li.onclick = () => openTicket(t.id);
+                    resultsList.appendChild(li);
+                });
+            }
+
+            if (data.users && data.users.length) {
+                const header = document.createElement("li");
+                header.textContent = "Usuarios";
+                header.classList.add("result-header");
+                resultsList.appendChild(header);
+
+                data.users.forEach(u => {
+                    const li = document.createElement("li");
+                    li.innerHTML = `<strong>${u.name}</strong> (${u.email}) 
+                                <small>${u.role} / ${u.group}</small>`;
+                    li.onclick = () => openCustomer(u.id);
+                    resultsList.appendChild(li);
+                });
+            }
+
+            resultsBox.style.display = "block";
+        }
+
+        searchInput.addEventListener("input", () => {
+            clearTimeout(timer);
+            const q = searchInput.value.trim();
+            if (q.length < 2) {
+                resultsBox.style.display = "none";
+                return;
+            }
+            timer = setTimeout(async () => {
+                const res = await fetch(`/search/?q=${encodeURIComponent(q)}`);
+                const data = await res.json();
+                renderResults(data);
+            }, 300);
+        });
+
+        document.addEventListener("click", (e) => {
+            if (!resultsBox.contains(e.target) && e.target !== searchInput) {
+                resultsBox.style.display = "none";
+            }
+        });
+    }
+
     function initOnce() {
         try {
             loadTabs();
@@ -367,12 +496,21 @@
             highlightActiveTab();
             hookGlobalAddButton();
             initPopups();
+            initSearch();
         } catch (e) {
             console.error('[tabs] init error:', e);
         }
     }
 
     document.addEventListener('DOMContentLoaded', initOnce);
+
+    window.openCustomer = function (id) {
+        if (window.urls && window.urls.customer_profile) {
+            Tabs.addTab(`Cliente ${id}`, `${window.urls.customer_profile}?id=${id}`);
+        } else {
+            window.location.href = `/customers/profile/?id=${id}`;
+        }
+    };
 
     window.Tabs = {
         addTab, loadTabs, saveTabs, highlightActiveTab, normalizeUrl,
