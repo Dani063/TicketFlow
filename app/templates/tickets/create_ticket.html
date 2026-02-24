@@ -315,6 +315,7 @@
 <script>
   window.ticketId = {{ ticket.id|default:'null' }};
   window.currentUserId = {{ request.user.id }};
+  window.urls = window.urls || {};
   window.urls.add_comment = window.ticketId ? `/tickets/${window.ticketId}/add_comment/` : null;
 </script>
 <script src="{% static 'tickets/create_ticket.js' %}"></script>
