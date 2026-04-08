@@ -1,0 +1,163 @@
+﻿{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}TicketFlow – Dashboard{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'tickets/home.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="title-bar">
+    <h1>Dashboard</h1>
+</div>
+
+<div class="left-column">
+    <div class="updates">
+        <h3>Actualizaciones recientes</h3>
+        <ul id="updates-list"></ul>
+    </div>
+</div>
+
+<div class="stats-bar">
+    <div class="stats-group">
+        <h2>Tickets Abiertos</h2>
+        <div class="stats-box">
+            <div class="stat" data-filter="you">
+                <div class="stat-content">
+                    <span class="stat-number">{{ stats.abiertos_you }}</span>
+                    <span class="stat-label">YOU</span>
+                </div>
+            </div>
+            <div class="stat" data-filter="groups">
+                <div class="stat-content">
+                    <span class="stat-number">{{ stats.abiertos_groups }}</span>
+                    <span class="stat-label">GROUPS</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="stats-group">
+        <h2>Estadísticas de Tickets</h2>
+        <div class="stats-box">
+            <div class="stat" data-filter="bien">
+                <div class="stat-content">
+                    <span class="stat-number">{{ stats.bien }}</span>
+                    <span class="stat-label">BIEN</span>
+                </div>
+            </div>
+            <div class="stat" data-filter="mal">
+                <div class="stat-content">
+                    <span class="stat-number">{{ stats.mal }}</span>
+                    <span class="stat-label">MAL</span>
+                </div>
+            </div>
+            <div class="stat" data-filter="solventado">
+                <div class="stat-content">
+                    <span class="stat-number">{{ stats.solventado }}</span>
+                    <span class="stat-label">SOLVENTADO</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="stats-group">
+        <h2>Porcentaje de Satisfacción</h2>
+        <div class="stats-box">
+            <div class="stat" data-filter="satisfaccion">
+                <div class="stat-content">
+                    <span class="stat-number">85%</span>
+                    <span class="stat-label">SATISFACCIÓN</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="pending-tickets">
+    <h2>
+        Tickets que requieren tu atención (
+        {% if my_tickets %}{{ my_tickets|length }}{% else %}0{% endif %}
+        )
+    </h2>
+</div>
+
+<div class="tabla">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Asunto</th>
+                <th>Solicitante</th>
+                <th>Solicitante actualizado</th>
+                <th>Servicio</th>
+                <th>Asignado</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% if my_tickets %}
+            {% for ticket in my_tickets %}
+            <tr onclick="openTicket('{{ ticket.id }}')">
+                <td>{{ ticket.id }}</td>
+                <td><span class="status-dot status-{{ ticket.status|lower }}"></span>{{ ticket.subject }}</td>
+                <td>{{ ticket.requester.name }}</td>
+                <td>{{ ticket.updated_at }}</td>
+                <td>{{ ticket.service }}</td>
+                <td>{{ ticket.assignee.name }}</td>
+            </tr>
+            {% endfor %}
+            {% else %}
+            <tr>
+                <td colspan="6">No hay tickets pendientes.</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Abrir ticket en pestaña usando el gestor central (tabs.js)
+    function openTicket(ticketId) {
+        const tabText = "Ticket " + ticketId;
+        const tabUrl = "{% url 'create_ticket' %}?id=" + ticketId;
+        // usa la API global expuesta por tabs.js
+        if (window.Tabs && typeof window.Tabs.addTab === 'function') {
+            window.Tabs.addTab(tabText, tabUrl);
+        } else {
+            // fallback por si tabs aún no cargó
+            window.location.href = tabUrl;
+        }
+    }
+
+    // Filtro de estadísticas → oculta/enseña filas de la tabla
+    document.querySelectorAll('.stat').forEach(stat => {
+        stat.addEventListener('click', () => {
+            const filter = stat.getAttribute('data-filter');
+            filterTable(filter);
+        });
+    });
+
+    function filterTable(filter) {
+        const rows = document.querySelectorAll('.tabla tbody tr');
+        rows.forEach(row => {
+            row.style.display = 'table-row';
+            if (filter === 'you' && !row.innerHTML.includes('YOU')) {
+                row.style.display = 'none';
+            } else if (filter === 'groups' && !row.innerHTML.includes('GROUPS')) {
+                row.style.display = 'none';
+            } else if (filter === 'bien' && !row.innerHTML.includes('BIEN')) {
+                row.style.display = 'none';
+            } else if (filter === 'mal' && !row.innerHTML.includes('MAL')) {
+                row.style.display = 'none';
+            } else if (filter === 'solventado' && !row.innerHTML.includes('SOLVENTADO')) {
+                row.style.display = 'none';
+            } else if (filter === 'satisfaccion' && !row.innerHTML.includes('SATISFACCIÓN')) {
+                row.style.display = 'none';
+            }
+        });
+    }
+</script>
+{% endblock %}

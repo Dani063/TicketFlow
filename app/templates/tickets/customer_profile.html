@@ -1,0 +1,128 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}TicketFlow – Perfil Cliente{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'tickets/home.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="title-bar">
+    <h1>Perfil de Cliente</h1>
+</div>
+<!-- Columna izquierda -->
+<div class="left-column">
+    <h2>Opciones de perfil</h2>
+    <ul id="profileMenu">
+        <li data-section="info-section" class="active">
+            <span class="filter-name">Información general</span>
+        </li>
+        <li data-section="tickets-section">
+            <span class="filter-name">Tickets asociados</span>
+        </li>
+    </ul>
+</div>
+
+<!-- Columna derecha -->
+<div class="tabla profile-content">
+    <div class="stats-group" style="width: 100%; text-align: left;">
+
+        <!-- Sección Información -->
+        <div id="info-section" class="profile-section">
+            <h2>Información general</h2>
+            <div class="profile-header" style="display:flex; align-items:center; margin-bottom:20px;">
+                <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
+                <div>
+                    <h3 style="margin:0;">{{ customer.name }}</h3>
+                    <p style="margin:5px 0 0; color:#666;">{{ customer.email }}</p>
+                </div>
+            </div>
+
+            <div class="profile-details">
+                <div class="detail-card">
+                    <h3>Rol</h3>
+                    <p>{{ customer.role.role_name|default:"-" }}</p>
+                </div>
+                <div class="detail-card">
+                    <h3>Grupo</h3>
+                    <p>{{ customer.group.group_name|default:"-" }}</p>
+                </div>
+                <div class="detail-card">
+                    <h3>Cuenta creada</h3>
+                    <p>{{ customer.created_at|date:"d/m/Y H:i" }}</p>
+                </div>
+                <div class="detail-card">
+                    <h3>Última actualización</h3>
+                    <p>{{ customer.updated_at|date:"d/m/Y H:i" }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sección Tickets -->
+        <div id="tickets-section" class="profile-section" style="display:none;">
+            <h2>Tickets asociados</h2>
+            <div class="tabla">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Asunto</th>
+                            <th>Estado</th>
+                            <th>Prioridad</th>
+                            <th>Última actualización</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if tickets %}
+                        {% for ticket in tickets %}
+                        <tr onclick="openTicket('{{ ticket.id }}')">
+                            <td>{{ ticket.id }}</td>
+                            <td><span class="status-dot status-{{ ticket.status|lower }}"></span>{{ ticket.subject }}</td>
+                            <td>{{ ticket.status }}</td>
+                            <td>{{ ticket.priority }}</td>
+                            <td>{{ ticket.updated_at|date:"d/m/Y H:i" }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% else %}
+                        <tr><td colspan="5">No hay tickets asociados.</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+function openTicket(ticketId) {
+    const tabText = "Ticket " + ticketId;
+    const tabUrl = "{% url 'create_ticket' %}?id=" + ticketId;
+    if (window.Tabs && typeof window.Tabs.addTab === 'function') {
+        window.Tabs.addTab(tabText, tabUrl);
+    } else {
+        window.location.href = tabUrl;
+    }
+}
+
+// toggle secciones del perfil
+document.addEventListener("DOMContentLoaded", () => {
+    const menuItems = document.querySelectorAll("#profileMenu li");
+    const sections = document.querySelectorAll(".profile-section");
+
+    menuItems.forEach(item => {
+        item.addEventListener("click", () => {
+            // reset
+            menuItems.forEach(i => i.classList.remove("active"));
+            sections.forEach(s => s.style.display = "none");
+
+            // activar
+            item.classList.add("active");
+            const target = document.getElementById(item.dataset.section);
+            if (target) target.style.display = "block";
+        });
+    });
+});
+</script>
+{% endblock %}
