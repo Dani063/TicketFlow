@@ -10,9 +10,9 @@ import os
 import sys
 
 if __name__ == '__main__':
-    # Añadimos la ruta de la carpeta 'src' al path de Python para que
-    # Django encuentre los módulos 'TicketFlow' y 'app'.
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
+    # Ya que main.py ahora está dentro de 'src', solo necesitamos agregar su
+    # propio directorio al path (aunque Python suele hacerlo por defecto).
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
     os.environ.setdefault(
         'DJANGO_SETTINGS_MODULE',
