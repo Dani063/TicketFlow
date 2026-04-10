@@ -1,0 +1,52 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>{% block title %}TicketFlow{% endblock %}</title>
+
+    <!-- CSS globales -->
+    <link rel="stylesheet" href="{% static 'tickets/style.css' %}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+
+    {% include 'partials/sidebar.html' %}
+    {% include 'partials/navbar.html' %}
+    {% include 'partials/popups.html' %}
+
+    {% block content %}{% endblock %}
+
+    <!-- JS globales (centralizados) -->
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            document.querySelectorAll(".tabla table tbody").forEach(tbody => {
+                tbody.addEventListener("click", (e) => {
+                    const row = e.target.closest("tr");
+                    if (!row) return;
+                    // limpiar selección previa
+                    tbody.querySelectorAll("tr").forEach(r => r.classList.remove("selected"));
+                    // marcar la nueva
+                    row.classList.add("selected");
+                });
+            });
+        });
+    </script>
+    <script>
+    window.urls = {
+      create_ticket: "{% url 'create_ticket' %}",
+      tickets_list: "{% url 'tickets_list' %}",
+      login: "{% url 'login' %}",
+      logout: "{% url 'logout' %}",
+      customer_profile: "{% url 'customer_profile' %}"
+    };
+    window.static_urls = { logo: "{% static 'tickets/logo.png' %}" };
+    window.currentUserId = {{ request.user.id|default:'null' }};
+    </script>
+    <script src="{% static 'tickets/tabs.js' %}"></script>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
