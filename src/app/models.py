@@ -20,6 +20,17 @@ class UserManager(BaseUserManager):
 
         user.set_password(password)  # Hashear la contraseña
         user.save(using=self._db)
+
+        # Asignar rol por defecto (End user) si existe
+        # Importamos el modelo internamente para evitar circular dependencies si fuera el caso,
+        # aunque aquí ya está en el mismo archivo.
+        try:
+            default_role, _ = Role.objects.get_or_create(role_name="End user")
+            user.role = default_role
+            user.save(using=self._db)
+        except Exception:
+            pass # Si falla al crear el rol (ej. durante la migración inicial), simplemente lo ignoramos
+
         return user
 
     def create_superuser(self, email, name, password=None):

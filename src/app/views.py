@@ -218,10 +218,19 @@ def filter_tickets(request):
 
 @login_required
 def filter_customers(request):
+    if not _is_agent(request.user) and not _is_admin(request.user):
+         return JsonResponse({"error": "No permission"}, status=403)
+
     view = request.GET.get("view")
 
-    # Solo usuarios tipo End user
-    base_queryset = User.objects.filter(role__role_name="End user")
+    # Base para la consulta
+    base_queryset = User.objects.all()
+
+    # Si es solo agente y no admin, podríamos hacer que solo vea "End user" 
+    # pero según requerimientos los agentes deberían ver tanto "end user" como otros operadores.
+    # Por ahora dejamos que vean todos, y el controlador visual filtrará (u otro mecanismo).
+    if not _is_admin(request.user):
+         base_queryset = base_queryset.exclude(role__role_name__in=['admin', 'administrator'])
 
     if view == "suspended":
         users = base_queryset.filter(group__group_name="Suspended")
@@ -252,7 +261,7 @@ def filter_customers(request):
 @login_required
 def customer_profile(request):
     customer_id = request.GET.get("id")
-    customer = get_object_or_404(User, id=customer_id, role__role_name="End user")
+    customer = get_object_or_404(User, id=customer_id)
 
     tickets = Ticket.objects.filter(
     Q(requester__id=customer.id) | Q(assignee__id=customer.id) | Q(ccs__id=customer.id) | Q(created_by_id=customer.id)
@@ -271,11 +280,14 @@ def tags_api(request):
 
 @login_required
 def customers_list(request):
+    if not _is_agent(request.user) and not _is_admin(request.user):
+         return render(request, "tickets/403.html", {"error": "No tienes permisos para ver clientes."}, status=403)
+
     context = {
         'username': request.user.name,
         'email': request.user.email,
+        'is_admin': _is_admin(request.user),
     }
-    customers = User.objects.all()
     return render(request, "tickets/customers_list.html", context)
 
 @login_required
@@ -387,6 +399,10 @@ def _is_agent(user):
     role_name = (getattr(getattr(user, 'role', None), 'role_name', '') or '').lower()
     # tratamos "End user" como cliente; todo lo demás se considera agente/staff
     return role_name not in ('end user', 'end-user', 'cliente', 'customer')
+
+def _is_admin(user):
+    role_name = (getattr(getattr(user, 'role', None), 'role_name', '') or '').lower()
+    return role_name in ('admin', 'administrator', 'administrador')
 
 @login_required
 def create_ticket(request):
