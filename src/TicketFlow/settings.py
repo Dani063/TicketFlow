@@ -16,8 +16,18 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-# Base para referenciar carpetas fuera de src/ (como resources)
-PROJECT_ROOT = BASE_DIR.parent
+
+def find_project_root(current_path, marker=".env"):
+    """Busca dinámicamente la raíz del proyecto hacia arriba."""
+    path = Path(current_path).resolve()
+    for parent in [path] + list(path.parents):
+        if (parent / marker).exists():
+            return parent
+    # Fallback si no encuentra el marcador
+    return path.parent.parent.parent
+
+# Base para referenciar carpetas fuera de src/ de forma dinámica
+PROJECT_ROOT = find_project_root(__file__)
 
 # Buscamos el .env un nivel por encima (raíz del proyecto)
 env_path = PROJECT_ROOT / ".env"
@@ -185,6 +195,7 @@ STATIC_URL = '/static/'
 STATIC_ROOT = PROJECT_ROOT / "staticfiles"
 # Ficheros subidos (adjuntos)
 MEDIA_URL = '/media/'
+
 MEDIA_ROOT = PROJECT_ROOT / "resources" / "media"
 # Configuracion de la URL de inicio de sesi�n
 LOGIN_URL = '/login/'
@@ -192,4 +203,3 @@ DEFAULT_CHARSET = 'utf-8'
 
 # Configuraci�n de la URL de redirecci�n despu�s del inicio de sesi�n
 LOGIN_REDIRECT_URL = '/'
-   
