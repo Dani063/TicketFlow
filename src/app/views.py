@@ -318,8 +318,51 @@ def profile(request):
         "tickets": tickets
     })
 
-def login(request):
-    return render(request, "tickets/login.html")
+def login_redirect(request):
+    """Redirige al login corporativo SSO."""
+    sso_url = getattr(settings, 'SSO_LOGIN_UI_URL', 'https://login.recordia.net/')
+    return redirect(sso_url)
+
+def sso_callback(request):
+    """Vista que carga el frontend para procesar el token SSO."""
+    return render(request, "tickets/sso_callback.html", {
+        "SSO_LOGIN_API_URL": getattr(settings, 'SSO_LOGIN_API_URL', 'https://login-api.agentia365.com')
+    })
+
+@csrf_exempt
+@require_POST
+def sso_complete(request):
+    """
+    Recibe la identidad extraída por el frontend desde Authentication/Me.
+    Verifica o crea el usuario local y genera la sesión de Django.
+    """
+    try:
+        data = json.loads(request.body)
+        email = data.get('email')
+        name = data.get('name', 'Usuario SSO')
+        # claims = data.get('claims', []) # Aquí puedes leer claims si los envías
+
+        if not email:
+            return JsonResponse({'error': 'Email es requerido para completar el SSO'}, status=400)
+
+        # Buscar o crear el usuario localmente
+        user, created = User.objects.get_or_create(email=email)
+        if created or not user.name or user.name == 'Usuario SSO':
+            user.name = name
+            user.save()
+
+        # TODO: Aquí podrías añadir lógica para asignar roles / grupos en base a claims
+        # if "AdminClaim" in claims: ...
+
+        # Iniciar sesión local en Django para emitir la session cookie de Django 
+        # (independiente de la RecordiaAuthToken que usa la API)
+        user.backend = 'app.backends.EmailBackend' 
+        auth_login(request, user)
+
+        return JsonResponse({'status': 'ok', 'message': 'Sesión completada exitosamente'})
+    except Exception as e:
+        logger.error(f"Error en sso_complete: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=500)
 
 @csrf_exempt
 def register(request):

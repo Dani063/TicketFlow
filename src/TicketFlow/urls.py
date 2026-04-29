@@ -31,7 +31,9 @@ urlpatterns = [
     path("api/notifications/", views.notifications_api, name="notifications_api"),
     path("api/notifications/<int:notif_id>/read/", views.mark_notification_read, name="mark_notification_read"),
 
-    path('login/', views.login, name='login'),
+    path('login/', views.login_redirect, name='login'),
+    path('sso/callback/', views.sso_callback, name='sso_callback'),
+    path('api/sso/complete/', views.sso_complete, name='sso_complete'),
     path('api/register/', views.register, name='register'),
     path('api/login/', views.user_login, name='api_login'),
 
