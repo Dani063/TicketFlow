@@ -15,6 +15,29 @@ import posixpath
 from pathlib import Path
 from dotenv import load_dotenv
 
+
+def _get_ssm_db_config(prefix):
+    """Fetches DB credentials from AWS SSM Parameter Store.
+
+    Expects:
+      {prefix}/RDSCredentials  — SecureString JSON: {"username": "...", "password": "..."}
+      {prefix}/RDSEndpoint     — SecureString: hostname
+    """
+    import boto3, json
+    p = prefix.rstrip("/")
+    ssm = boto3.client("ssm", region_name=os.getenv("AWS_REGION", "eu-west-1"))
+    result = ssm.get_parameters(
+        Names=[f"{p}/RDSCredentials", f"{p}/RDSEndpoint"],
+        WithDecryption=True,
+    )
+    by_name = {param["Name"]: param["Value"] for param in result["Parameters"]}
+    creds = json.loads(by_name[f"{p}/RDSCredentials"])
+    return {
+        "USER":     creds["username"],
+        "PASSWORD": creds["password"],
+        "HOST":     by_name[f"{p}/RDSEndpoint"],
+    }
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 def find_project_root(current_path, marker=".env"):
@@ -149,15 +172,26 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'TicketFlow.wsgi.application'
-# Database (desde .env)
+# Database — credenciales desde AWS SSM Parameter Store (prod/dev) o .env (local sin SSM)
+_ssm_prefix = os.getenv("AWS_SSM_PREFIX")
+if _ssm_prefix:
+    _ssm = _get_ssm_db_config(_ssm_prefix)
+    _db_user     = _ssm["USER"]
+    _db_password = _ssm["PASSWORD"]
+    _db_host     = os.getenv("DB_HOST") or _ssm["HOST"]  # DB_HOST en .env permite tunelar
+else:
+    _db_user     = os.getenv("DB_USER",     "root")
+    _db_password = os.getenv("DB_PASSWORD", "")
+    _db_host     = os.getenv("DB_HOST",     "127.0.0.1")
+
 DATABASES = {
     "default": {
-        "ENGINE": os.getenv("DB_ENGINE", "django.db.backends.mysql"),
-        "NAME": os.getenv("DB_NAME", "ticketflow"),
-        "USER": os.getenv("DB_USER", "root"),
-        "PASSWORD": os.getenv("DB_PASSWORD", ""),
-        "HOST": os.getenv("DB_HOST", "127.0.0.1"),
-        "PORT": os.getenv("DB_PORT", "3306"),
+        "ENGINE":   os.getenv("DB_ENGINE", "django.db.backends.mysql"),
+        "NAME":     os.getenv("DB_NAME",   "ticketflow"),
+        "USER":     _db_user,
+        "PASSWORD": _db_password,
+        "HOST":     _db_host,
+        "PORT":     os.getenv("DB_PORT",   "3306"),
         "OPTIONS": {
             "init_command": "SET sql_mode='STRICT_TRANS_TABLES'"
         },
