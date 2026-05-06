@@ -108,7 +108,7 @@ class Ticket(models.Model):
     service = models.CharField(max_length=255, null=True)
     language = models.CharField(max_length=255, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     closed_at = models.DateTimeField(null=True, blank=True)
     category = models.CharField(max_length=255, null=True)
 

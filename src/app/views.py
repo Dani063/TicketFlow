@@ -8,7 +8,7 @@ from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import Ticket, Comment, User, TicketTag, Attachment, TicketHistory, Notification
+from .models import Ticket, Comment, User, TicketTag, Attachment, TicketHistory, Notification, Role
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
@@ -17,6 +17,7 @@ from django.contrib.auth import logout
 from django.views.decorators.csrf import csrf_exempt
 import json
 import logging
+import random
 from django.views.decorators.http import require_POST
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
@@ -27,6 +28,8 @@ from django.conf import settings as DJANGO_SETTINGS
 from django.utils import timezone
 from django.views import View
 from django.views.decorators.http import require_GET
+
+logger = logging.getLogger('app.views')
 
 
 @login_required
@@ -68,6 +71,12 @@ def home(request):
 
 @login_required
 def tickets_list(request):
+    if not _is_agent(request.user):
+        tickets = Ticket.objects.filter(
+            Q(requester=request.user) | Q(ccs=request.user)
+        ).distinct()
+        return render(request, "tickets/tickets_list.html", {"tickets": tickets, "filtros": {}})
+
     tickets = Ticket.objects.all()
 
     filtros = {
@@ -109,7 +118,12 @@ def filter_tickets(request):
     Devuelve los tickets filtrados en formato JSON según el 'view' seleccionado en la barra lateral.
     """
     view = request.GET.get("view")
-    tickets = Ticket.objects.all()
+    if _is_agent(request.user):
+        tickets = Ticket.objects.all()
+    else:
+        tickets = Ticket.objects.filter(
+            Q(requester=request.user) | Q(ccs=request.user)
+        ).distinct()
 
     filtros = {
         "telefonica_mes": tickets.filter(service="Telefonica", created_at__gte=timezone.now()-timedelta(days=30)).count(),
@@ -260,6 +274,8 @@ def filter_customers(request):
 
 @login_required
 def customer_profile(request):
+    if not _is_agent(request.user) and not _is_admin(request.user):
+        return render(request, "tickets/403.html", {"error": "No tienes permisos para ver este perfil."}, status=403)
     customer_id = request.GET.get("id")
     customer = get_object_or_404(User, id=customer_id)
 
@@ -272,6 +288,7 @@ def customer_profile(request):
         "tickets": tickets
     })
 
+@login_required
 def tags_api(request):
     q = request.GET.get('q', '')
     tags = TicketTag.objects.filter(name__icontains=q) if q else TicketTag.objects.all()
@@ -292,6 +309,8 @@ def customers_list(request):
 
 @login_required
 def reporting(request):
+    if not _is_agent(request.user) and not _is_admin(request.user):
+        return render(request, "tickets/403.html", {"error": "No tienes permisos para ver los reportes."}, status=403)
     context = {
         'username': request.user.name,
         'email': request.user.email,
@@ -300,6 +319,8 @@ def reporting(request):
 
 @login_required
 def settings(request):
+    if not _is_agent(request.user) and not _is_admin(request.user):
+        return render(request, "tickets/403.html", {"error": "No tienes permisos para acceder a la configuración."}, status=403)
     context = {
         'username': request.user.name,
         'email': request.user.email,
@@ -349,10 +370,10 @@ def sso_complete(request):
         user, created = User.objects.get_or_create(email=email)
         if created or not user.name or user.name == 'Usuario SSO':
             user.name = name
+            if created:
+                agent_role, _ = Role.objects.get_or_create(role_name='agent')
+                user.role = agent_role
             user.save()
-
-        # TODO: Aquí podrías añadir lógica para asignar roles / grupos en base a claims
-        # if "AdminClaim" in claims: ...
 
         # Iniciar sesión local en Django para emitir la session cookie de Django 
         # (independiente de la RecordiaAuthToken que usa la API)
@@ -406,19 +427,20 @@ def ticket_detail(request, pk):
     ticket = get_object_or_404(Ticket, pk=pk)
     return render(request, 'tickets/ticket_detail.html', {'ticket': ticket})
 
-import random
-
-import random
-from django.utils import timezone
-
-import random
-from django.utils import timezone
-
-import random
-from django.utils import timezone
 
 def ticket_detail_api(request, ticket_id):
     ticket = get_object_or_404(Ticket, id=ticket_id)
+    if not _is_agent(request.user):
+        is_involved = (
+            ticket.requester_id == request.user.id or
+            ticket.ccs.filter(id=request.user.id).exists()
+        )
+        if not is_involved:
+            return JsonResponse({"error": "No tienes acceso a este ticket."}, status=403)
+
+    # Marcar como leídas las notificaciones del usuario para este ticket
+    Notification.objects.filter(user=request.user, ticket=ticket, read=False).update(read=True)
+
     data = {
         'empresa': ticket.brand,
         'solicitante': ticket.requester_id,
@@ -436,7 +458,6 @@ def ticket_detail_api(request, ticket_id):
     }
     return JsonResponse(data)
 
-logger = logging.getLogger('app.views')
 
 def _is_agent(user):
     role_name = (getattr(getattr(user, 'role', None), 'role_name', '') or '').lower()
@@ -514,7 +535,7 @@ def create_ticket(request):
             ticket.status      = status
             ticket.save()
             _set_m2m(ticket)
-            _notify_users(ticket, f"Ticket #{ticket.id} actualizado")
+            _notify_users(ticket, f"Ticket #{ticket.id} actualizado", actor=request.user)
             if content:
                 requested_public = str((request.POST.get('is_public') or 'true')).lower() in ('true','1','yes','on')
                 final_is_public = requested_public if _is_agent(request.user) else True
@@ -546,7 +567,7 @@ def create_ticket(request):
             category=category,
         )
         _set_m2m(ticket)
-        _notify_users(ticket, f"Nuevo ticket #{ticket.id}: {ticket.subject}")
+        _notify_users(ticket, f"Nuevo ticket #{ticket.id}: {ticket.subject}", actor=request.user)
         if content:
             requested_public = str((request.POST.get('is_public') or 'true')).lower() in ('true','1','yes','on')
             final_is_public = requested_public if _is_agent(request.user) else True
@@ -705,6 +726,15 @@ def add_comment(request, ticket_id):
         )
         applied_status = new_status
 
+    # Vincular adjuntos pendientes al comentario
+    attachment_ids = data.get('attachment_ids') or []
+    if attachment_ids:
+        Attachment.objects.filter(
+            id__in=attachment_ids,
+            ticket=ticket,
+            comment__isnull=True
+        ).update(comment=comment)
+
     # adjuntos del comentario para el frontend
     atts = Attachment.objects.filter(comment=comment).values('id', 'file_url', 'file_type')
     return JsonResponse({
@@ -732,12 +762,40 @@ def notifications_api(request):
     ]
     return JsonResponse({"notifications": data})
 
-def _notify_users(ticket, message):
+@login_required
+def recent_activity_api(request):
+    if _is_agent(request.user):
+        tickets = (
+            Ticket.objects
+            .filter(Q(assignee=request.user) | Q(created_by=request.user))
+            .order_by('-updated_at')
+            .distinct()[:10]
+        )
+    else:
+        tickets = (
+            Ticket.objects
+            .filter(Q(requester=request.user) | Q(ccs=request.user))
+            .order_by('-updated_at')
+            .distinct()[:10]
+        )
+    data = [
+        {
+            "ticket_id": t.id,
+            "message": f"#{t.id} {t.subject}",
+            "updated_at": t.updated_at.strftime("%d/%m %H:%M") if t.updated_at else "",
+            "status": t.status,
+        }
+        for t in tickets
+    ]
+    return JsonResponse({"activity": data})
+
+def _notify_users(ticket, message, actor=None):
+    seen = set()
     targets = []
-    if ticket.requester:
-        targets.append(ticket.requester)
-    if ticket.assignee:
-        targets.append(ticket.assignee)
+    for u in [ticket.requester, ticket.assignee]:
+        if u and u != actor and u.id not in seen:
+            seen.add(u.id)
+            targets.append(u)
 
     for u in targets:
         Notification.objects.create(
@@ -770,7 +828,9 @@ def upload_attachment(request, ticket_id):
 
     # Guardar a disco
     saved_path = default_storage.save(rel_path, ContentFile(f.read()))
-    file_url = request.build_absolute_uri(default_storage.url(saved_path))
+    raw_url = default_storage.url(saved_path)
+    # build_absolute_uri solo si la URL es relativa (local dev); S3 ya devuelve URL absoluta
+    file_url = raw_url if raw_url.startswith('http') else request.build_absolute_uri(raw_url)
 
     att = Attachment.objects.create(
         file_url=file_url,
@@ -795,7 +855,10 @@ def global_search(request):
         return JsonResponse({"tickets": [], "users": []})
 
     # --- Tickets ---
-    tickets = Ticket.objects.filter(
+    ticket_qs = Ticket.objects.all() if _is_agent(request.user) else \
+        Ticket.objects.filter(Q(requester=request.user) | Q(ccs=request.user)).distinct()
+
+    tickets = ticket_qs.filter(
         Q(subject__icontains=q) |
         Q(description__icontains=q) |
         Q(service__icontains=q) |
@@ -817,20 +880,22 @@ def global_search(request):
         "service": t.service or "-"
     } for t in tickets]
 
-    # --- Usuarios ---
-    users = User.objects.filter(
-        Q(name__icontains=q) |
-        Q(email__icontains=q) |
-        Q(role__role_name__icontains=q) |
-        Q(group__group_name__icontains=q)
-    ).distinct()[:10]
-
-    users_data = [{
-        "id": u.id,
-        "name": u.name,
-        "email": u.email,
-        "role": u.role.role_name if u.role else "-",
-        "group": u.group.group_name if u.group else "-"
-    } for u in users]
+    # --- Usuarios (solo agentes/admins) ---
+    if _is_agent(request.user):
+        users = User.objects.filter(
+            Q(name__icontains=q) |
+            Q(email__icontains=q) |
+            Q(role__role_name__icontains=q) |
+            Q(group__group_name__icontains=q)
+        ).distinct()[:10]
+        users_data = [{
+            "id": u.id,
+            "name": u.name,
+            "email": u.email,
+            "role": u.role.role_name if u.role else "-",
+            "group": u.group.group_name if u.group else "-"
+        } for u in users]
+    else:
+        users_data = []
 
     return JsonResponse({"tickets": tickets_data, "users": users_data})

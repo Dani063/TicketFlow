@@ -273,6 +273,56 @@
         });
     }
 
+    // ===== Helpers de notificaciones (scope de módulo) =====
+    function getCsrfToken() {
+        const name = 'csrftoken';
+        for (const cookie of document.cookie.split(';')) {
+            const [k, v] = cookie.trim().split('=');
+            if (k === name) return decodeURIComponent(v);
+        }
+        return '';
+    }
+
+    async function updateBadge() {
+        try {
+            const res = await fetch("/api/notifications/");
+            if (!res.ok) return;
+            const data = await res.json();
+            const badge = document.querySelector(".notifications .badge");
+            if (!badge) return;
+            const count = data.notifications.length;
+            badge.textContent = count;
+            badge.style.display = count > 0 ? "inline-block" : "none";
+        } catch (err) {
+            console.error("Error actualizando badge", err);
+        }
+    }
+
+    async function refreshUpdates() {
+        try {
+            const res = await fetch("/api/activity/");
+            if (!res.ok) return;
+            const data = await res.json();
+            const list = document.getElementById("updates-list");
+            if (!list) return;
+
+            list.innerHTML = "";
+            if (!data.activity || !data.activity.length) {
+                list.innerHTML = "<li style='color:#888'>Sin actualizaciones recientes</li>";
+                return;
+            }
+            data.activity.forEach(n => {
+                const li = document.createElement("li");
+                li.textContent = `${n.updated_at}  ${n.message}`;
+                li.onclick = () => openTicket(n.ticket_id);
+                li.style.cursor = "pointer";
+                list.appendChild(li);
+            });
+        } catch (err) {
+            console.error("Error refrescando updates", err);
+        }
+    }
+
     // ===== Popups manager (Perfil / Notificaciones) =====
     function initPopups() {
         // Cache de nodos (si no existen en alguna vista, todo queda no-op)
@@ -283,8 +333,6 @@
 
         // Si no existe ninguno de los popups, no registramos nada
         if (!notifPop && !userPop) {
-            // Opcional: consola para depurar
-            // console.debug('[tabs] initPopups: no popups found');
             return;
         }
 
@@ -311,24 +359,23 @@
 
                 if (!data.notifications.length) {
                     notifList.innerHTML = "<li>No hay notificaciones</li>";
-                    badge.textContent = "0";
-                    badge.style.display = "none"; // ocultar si no hay
+                    if (badge) { badge.textContent = "0"; badge.style.display = "none"; }
                     return;
                 }
 
-                badge.textContent = data.notifications.length;
-                badge.style.display = "inline-block";
+                if (badge) { badge.textContent = data.notifications.length; badge.style.display = "inline-block"; }
 
                 data.notifications.forEach(n => {
                     const li = document.createElement("li");
                     li.innerHTML = `<strong>${n.message}</strong><br><small>${n.created_at}</small>`;
                     li.onclick = async () => {
-                        if (n.ticket_id) {
-                            openTicket(n.ticket_id);
-                        }
-                        await fetch(`/api/notifications/${n.id}/read/`, { method: "POST" });
-                        loadNotifications(); // refrescar popup
-                        refreshUpdates();    // refrescar columna home
+                        await fetch(`/api/notifications/${n.id}/read/`, {
+                            method: "POST",
+                            headers: { 'X-CSRFToken': getCsrfToken() }
+                        });
+                        if (n.ticket_id) openTicket(n.ticket_id);
+                        loadNotifications();
+                        refreshUpdates();
                     };
                     notifList.appendChild(li);
                 });
@@ -336,38 +383,6 @@
                 console.error("Error cargando notificaciones", err);
             }
         }
-
-        async function refreshUpdates() {
-            try {
-                const res = await fetch("/api/notifications/");
-                const data = await res.json();
-                const list = document.getElementById("updates-list");
-                if (!list) return;
-
-                list.innerHTML = "";
-                data.notifications.forEach(n => {
-                    const li = document.createElement("li");
-                    li.textContent = n.message;
-                    if (n.ticket_id) {
-                        li.onclick = () => openTicket(n.ticket_id);
-                        li.style.cursor = "pointer";
-                    }
-                    list.appendChild(li);
-                });
-            } catch (err) {
-                console.error("Error refrescando updates", err);
-            }
-        }
-
-        // recarga cada 5s
-        setInterval(refreshUpdates, 5000);
-        document.addEventListener("DOMContentLoaded", refreshUpdates);
-
-
-        // recarga cada 5s
-        setInterval(refreshUpdates, 5000);
-        document.addEventListener("DOMContentLoaded", refreshUpdates);
-
 
         // Delegación global: funciona aunque la navbar se re-renderice
         document.addEventListener('click', (e) => {
@@ -497,6 +512,9 @@
             hookGlobalAddButton();
             initPopups();
             initSearch();
+            updateBadge();
+            refreshUpdates();
+            setInterval(updateBadge, 30000);
         } catch (e) {
             console.error('[tabs] init error:', e);
         }

@@ -30,6 +30,7 @@ urlpatterns = [
     path('profile/', views.profile, name='profile'),
     path("api/notifications/", views.notifications_api, name="notifications_api"),
     path("api/notifications/<int:notif_id>/read/", views.mark_notification_read, name="mark_notification_read"),
+    path("api/activity/", views.recent_activity_api, name="recent_activity_api"),
 
     path('login/', views.login_redirect, name='login'),
     path('sso/callback/', views.sso_callback, name='sso_callback'),
