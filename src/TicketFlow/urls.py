@@ -13,6 +13,8 @@ from django.conf.urls.static import static
 # -*- coding: utf-8 -*-
 
 urlpatterns = [
+    path("", include("health.urls")),
+
     path('', views.home, name='home'),
     path('tickets/', views.tickets_list, name='tickets_list'),
     path('tickets/create/', views.create_ticket, name='create_ticket'),
