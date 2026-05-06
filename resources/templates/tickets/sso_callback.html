@@ -1,0 +1,228 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Autenticando...</title>
+    <style>
+    :root {
+      --bg: #160824;
+      --purple: #A347DB;
+      --cyan: #58D8F7;
+      --text: #fff;
+      --muted: rgba(255,255,255,.68);
+    }
+    * { box-sizing: border-box; }
+
+    .ticketflow-sso-page {
+      margin: 0;
+      min-height: 100vh;
+      width: 100%;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at 50% 35%, rgba(163, 71, 219, 0.2), transparent 48%),
+        linear-gradient(135deg, #1C0A2D, #2D1A4A 48%, #110521);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Arial, sans-serif;
+    }
+    .loader {
+      width: min(92vw, 420px);
+      padding: 36px 26px;
+      text-align: center;
+    }
+    .loader img {
+      width: 256px;
+      height: 256px;
+      display: block;
+      margin: 0 auto 20px;
+      filter: drop-shadow(0 24px 36px rgba(0,0,0,.28));
+    }
+    .loader h1 {
+      margin: 0;
+      font-size: clamp(22px, 4vw, 28px);
+      letter-spacing: -.02em;
+    }
+    .loader p {
+      margin: 10px auto 0;
+      max-width: 340px;
+      color: var(--muted);
+      line-height: 1.55;
+      font-size: 15px;
+    }
+    .pulse-line {
+      width: 174px;
+      height: 4px;
+      margin: 24px auto 0;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(255,255,255,.12);
+    }
+    .pulse-line::before {
+      content: "";
+      display: block;
+      width: 68px;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--cyan), var(--purple));
+      animation: loading 1.35s ease-in-out infinite;
+    }
+    @keyframes loading {
+      0% { transform: translateX(-72px); }
+      100% { transform: translateX(184px); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .pulse-line::before { animation: none; transform: translateX(52px); }
+    }
+
+    #sso-error {
+        display: none;
+        width: min(420px, 100%);
+        margin: 20px auto 0;
+        padding: 14px 16px;
+        border-radius: 14px;
+        color: #fff;
+        background: rgba(239, 68, 68, 0.18);
+        border: 1px solid rgba(239, 68, 68, 0.38);
+        font-size: 14px;
+        line-height: 1.45;
+        text-align: center;
+    }
+
+    #retry-btn {
+        display: none;
+        margin: 16px auto 0;
+        border: 0;
+        border-radius: 999px;
+        padding: 11px 22px;
+        background: linear-gradient(135deg, var(--cyan), var(--purple));
+        color: white;
+        font-weight: 800;
+        cursor: pointer;
+        box-shadow: 0 12px 28px rgba(163, 71, 219, 0.32);
+    }
+
+    #retry-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 16px 34px rgba(163, 71, 219, 0.42);
+    }
+</style>
+</head>
+<body>
+<div class="ticketflow-sso-page">
+    <main class="loader" aria-live="polite">
+        <img src="{% static 'tickets/ticketflow_brand_loader.svg' %}" alt="Ticketflow" />
+        <h1 id="sso-status">Estableciendo conexión...</h1>
+        <p>Validando credenciales y preparando el flujo de tickets.</p>
+        <div class="pulse-line" aria-hidden="true"></div>
+
+        <div id="sso-error"></div>
+        <button id="retry-btn" onclick="window.location.href='/login/'">Reintentar Login</button>
+    </main>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", async () => {
+        const errorDiv = document.getElementById("sso-error");
+        const retryBtn = document.getElementById("retry-btn");
+        const statusText = document.getElementById("sso-status");
+        const SSO_API_URL = "{{ SSO_LOGIN_API_URL }}";
+
+        function updateStatus(msg) {
+            if (statusText) {
+                statusText.textContent = msg;
+            }
+        }
+
+        function showError(msg) {
+            updateStatus("Error de autenticación");
+            errorDiv.textContent = msg;
+            errorDiv.style.display = "block";
+            retryBtn.style.display = "inline-block";
+            console.error(msg);
+        }
+
+        try {
+            const delay = ms => new Promise(res => setTimeout(res, ms));
+
+            // 1. Leer parámetros URL
+            updateStatus("Leyendo token SSO");
+            await delay(50); // Pausa artificial decorativa
+
+            const params = new URLSearchParams(window.location.search);
+            const token = params.get("token");
+            const theme = params.get("theme") ?? "recordia";
+
+            if (!token) {
+                throw new Error("No se ha recibido el token de SSO en la URL.");
+            }
+
+            // 2. Intercambio del token temporal
+            updateStatus("Validando credenciales");
+            await delay(50);
+
+            const tokenRes = await fetch(`${SSO_API_URL}/Authentication/issueAppToken/${token}`, {
+                method: "GET",
+                credentials: "include"
+            });
+
+            if (!tokenRes.ok) {
+                throw new Error("No se pudo intercambiar el token de la aplicación. Es posible que haya expirado o ya haya sido usado.");
+            }
+
+            const tokenData = await tokenRes.json();
+
+            // 3. Consulta de identidad autenticada
+            updateStatus("Resolviendo identidad");
+            await delay(50);
+
+            const meRes = await fetch(`${SSO_API_URL}/Authentication/Me`, {
+                method: "GET",
+                credentials: "include"
+            });
+
+            if (!meRes.ok) {
+                throw new Error("No se pudo resolver la identidad del usuario.");
+            }
+
+            const meData = await meRes.json();
+
+            if (!meData.response || !meData.response.email) {
+                throw new Error("La respuesta de identidad no contiene email.");
+            }
+
+            // 4. Integración con Django local
+            updateStatus("Creando sesión segura");
+            await delay(50);
+
+            const completeRes = await fetch("/api/sso/complete/", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    email: meData.response.email,
+                    name: meData.response.name || meData.response.email
+                    // claims: tokenData.response.claims
+                })
+            });
+
+            if (!completeRes.ok) {
+                const completeErr = await completeRes.json();
+                throw new Error(completeErr.error || "Fallo en la validación local.");
+            }
+
+            // 5. Todo OK
+            updateStatus("Acceso concedido");
+            await delay(450);
+
+            window.location.href = "/";
+
+        } catch (err) {
+            showError(err.message);
+        }
+    });
+</script>
+</body>
+</html>
