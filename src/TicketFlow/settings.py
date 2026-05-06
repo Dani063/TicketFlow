@@ -16,6 +16,17 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
+def _ssm_client():
+    import boto3
+    return boto3.client("ssm", region_name=os.getenv("AWS_REGION", "eu-west-1"))
+
+
+def _get_ssm_parameter(name):
+    """Fetches a single SecureString parameter from AWS SSM Parameter Store."""
+    result = _ssm_client().get_parameter(Name=name, WithDecryption=True)
+    return result["Parameter"]["Value"]
+
+
 def _get_ssm_db_config(prefix):
     """Fetches DB credentials from AWS SSM Parameter Store.
 
@@ -23,10 +34,9 @@ def _get_ssm_db_config(prefix):
       {prefix}/RDSCredentials  — SecureString JSON: {"username": "...", "password": "..."}
       {prefix}/RDSEndpoint     — SecureString: hostname
     """
-    import boto3, json
+    import json
     p = prefix.rstrip("/")
-    ssm = boto3.client("ssm", region_name=os.getenv("AWS_REGION", "eu-west-1"))
-    result = ssm.get_parameters(
+    result = _ssm_client().get_parameters(
         Names=[f"{p}/RDSCredentials", f"{p}/RDSEndpoint"],
         WithDecryption=True,
     )
@@ -74,10 +84,18 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 # === Seguridad y entorno ===
-# SECRET_KEY obligatorio: si no está, levantamos error para no arrancar inseguro
+# Prioridad: variable de entorno (local/dev) → SSM (producción)
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
-    raise RuntimeError("SECRET_KEY no definido. Configúralo en .env")
+    _ssm_prefix_early = os.getenv("AWS_SSM_PREFIX", "").rstrip("/")
+    _secret_key_path = f"{_ssm_prefix_early}/SecretKey"
+    try:
+        SECRET_KEY = _get_ssm_parameter(_secret_key_path)
+    except Exception as exc:
+        raise RuntimeError(
+            f"SECRET_KEY no definido y no se pudo obtener de SSM ({_secret_key_path}). "
+            f"Configúralo en .env o verifica permisos IAM. Causa: {exc}"
+        ) from exc
 
 # DEBUG por entorno
 DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes", "on")
