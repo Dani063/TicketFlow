@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/2.1/ref/settings/
 
 import os
 import posixpath
+import logging as _logging
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -65,8 +66,9 @@ PROJECT_ROOT = find_project_root(__file__)
 # Buscamos el .env un nivel por encima (raíz del proyecto)
 env_path = PROJECT_ROOT / ".env"
 if env_path.exists():
-    load_dotenv(env_path)
-
+    _logging.getLogger(__name__).warning(f".env cargado desde: {env_path}")
+    _logging.getLogger(__name__).warning(f"SSO_LOGIN_UI_URL = {os.getenv('SSO_LOGIN_UI_URL')}")
+    load_dotenv(env_path, override=True)
 
 # BASE_DIR is now resolved by Path.
 
@@ -249,9 +251,12 @@ STATIC_URL = '/static/'
 STATIC_ROOT = PROJECT_ROOT / "staticfiles"
 # Ficheros subidos (adjuntos)
 MEDIA_URL = '/media/'
+SSO_LOGIN_API_URL = os.getenv("SSO_LOGIN_API_URL", "https://dev-login-api.agentia365.com")
+SSO_LOGIN_UI_URL = os.getenv("SSO_LOGIN_UI_URL", "https://dev-login.recordia.net/")
+_logging.getLogger(__name__).warning(f"SSO_LOGIN_API_URL: {SSO_LOGIN_API_URL}, SSO_LOGIN_UI_URL: {SSO_LOGIN_UI_URL}")
 
 MEDIA_ROOT = PROJECT_ROOT / "resources" / "media"
-# Configuracion de la URL de inicio de sesi�n
+# Configuracion de la URL de inicio de sesión
 LOGIN_URL = '/login/'
 DEFAULT_CHARSET = 'utf-8'
 

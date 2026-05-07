@@ -341,13 +341,13 @@ def profile(request):
 
 def login_redirect(request):
     """Redirige al login corporativo SSO."""
-    sso_url = getattr(settings, 'SSO_LOGIN_UI_URL', 'https://login.recordia.net/')
+    sso_url = getattr(DJANGO_SETTINGS, 'SSO_LOGIN_UI_URL', 'https://login.recordia.net/')
     return redirect(sso_url)
 
 def sso_callback(request):
     """Vista que carga el frontend para procesar el token SSO."""
     return render(request, "tickets/sso_callback.html", {
-        "SSO_LOGIN_API_URL": getattr(settings, 'SSO_LOGIN_API_URL', 'https://login-api.agentia365.com')
+        "SSO_LOGIN_API_URL": getattr(DJANGO_SETTINGS, 'SSO_LOGIN_API_URL', 'https://login-api.agentia365.com')
     })
 
 @csrf_exempt
