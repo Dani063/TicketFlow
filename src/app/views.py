@@ -344,6 +344,31 @@ def login_redirect(request):
     sso_url = getattr(DJANGO_SETTINGS, 'SSO_LOGIN_UI_URL', 'https://login.recordia.net/')
     return redirect(sso_url)
 
+
+def dev_login(request):
+    """Login simplificado sin SSO. Solo disponible cuando DEBUG=True.
+    Permite trabajar en local sin pasar por dev-login.recordia.net."""
+    from django.http import Http404
+    if not DJANGO_SETTINGS.DEBUG:
+        raise Http404()
+
+    error = None
+    if request.method == 'POST':
+        email = (request.POST.get('email') or '').strip()
+        try:
+            user = User.objects.get(email=email)
+            user.backend = 'app.backends.EmailBackend'
+            auth_login(request, user)
+            return redirect('home')
+        except User.DoesNotExist:
+            error = f"No existe usuario con email '{email}' en la base de datos local."
+
+    users = User.objects.order_by('email').values_list('email', flat=True)[:50]
+    return render(request, 'tickets/dev_login.html', {
+        'error': error,
+        'users': list(users),
+    })
+
 def sso_callback(request):
     """Vista que carga el frontend para procesar el token SSO."""
     return render(request, "tickets/sso_callback.html", {

@@ -35,6 +35,7 @@ urlpatterns = [
     path("api/activity/", views.recent_activity_api, name="recent_activity_api"),
 
     path('login/', views.login_redirect, name='login'),
+    path('dev-login/', views.dev_login, name='dev_login'),
     path('sso/callback/', views.sso_callback, name='sso_callback'),
     path('api/sso/complete/', views.sso_complete, name='sso_complete'),
     path('api/register/', views.register, name='register'),

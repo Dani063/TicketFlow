@@ -2,7 +2,7 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}TicketFlow – Ticket{% endblock %}
+{% block title %}{% if ticket %}{{ ticket.subject }} – TicketFlow{% else %}Nuevo ticket – TicketFlow{% endif %}{% endblock %}
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/css/select2.min.css">
@@ -10,7 +10,7 @@
 
 {% block content %}
 <div class="title-bar">
-    <h1>{% if ticket %}Ticket {{ ticket.id }}{% else %}Nuevo ticket{% endif %}</h1>
+    <h1>{% if ticket %}{{ ticket.subject }}{% else %}Nuevo ticket{% endif %}</h1>
 </div>
 
 <form id="ticket-form" method="post"
@@ -258,13 +258,13 @@
             <h3>Historial de interacciones</h3>
             <ul class="timeline user-timeline">
                 {% for t in user_timeline %}
-                <li class="tl-item {% if ticket and t.id == ticket.id %}active{% endif %}" onclick="openTicket('{{ t.id }}')">
+                <li class="tl-item {% if ticket and t.id == ticket.id %}active{% endif %}" onclick="openTicket('{{ t.id }}', '{{ t.subject|escapejs }}')">
                     <span class="tl-dot status-{{ t.status|lower }}"></span>
                     <div class="tl-content">
                         <div class="tl-top">
                             <strong class="tl-subject">{{ t.subject }}</strong>
                             <small class="tl-when">{{ t.updated_at }}</small>
-                            <a class="tl-open" title="Abrir en pestaña" onclick="event.stopPropagation(); openTicket('{{ t.id }}')">
+                            <a class="tl-open" title="Abrir en pestaña" onclick="event.stopPropagation(); openTicket('{{ t.id }}', '{{ t.subject|escapejs }}')">
                                 <i class="fas fa-external-link-alt"></i>
                             </a>
                         </div>
@@ -299,8 +299,8 @@
 {% endblock %}
 {% block extra_js %}
 <script>
-    function openTicket(ticketId) {
-        const tabText = "Ticket " + ticketId;
+    function openTicket(ticketId, subject) {
+        const tabText = subject || "Ticket " + ticketId;
         const tabUrl = "{% url 'create_ticket' %}?id=" + ticketId;
         if (window.Tabs && typeof window.Tabs.addTab === 'function') {
             window.Tabs.addTab(tabText, tabUrl);

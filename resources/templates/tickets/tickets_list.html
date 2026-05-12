@@ -217,7 +217,7 @@
             } else {
                 data.tickets.forEach(t => {
                     const row = document.createElement("tr");
-                    row.onclick = () => openTicket(t.id);
+                    row.onclick = () => openTicket(t.id, t.subject);
                     row.innerHTML = `
                       <td>${t.id}</td>
                       <td><span class="status-dot status-${t.status}"></span>${t.subject}</td>
@@ -278,8 +278,8 @@
     });
 
     // función para abrir un ticket en pestaña
-    function openTicket(ticketId) {
-        const tabText = "Ticket " + ticketId;
+    function openTicket(ticketId, subject) {
+        const tabText = subject || "Ticket " + ticketId;
         const tabUrl = "{% url 'create_ticket' %}?id=" + ticketId;
         if (window.Tabs && typeof window.Tabs.addTab === 'function') {
             window.Tabs.addTab(tabText, tabUrl);

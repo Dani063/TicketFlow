@@ -320,6 +320,9 @@ body {
     background-color: #983dd4;
     float: left;
     text-align: center;
+    position: relative;
+    z-index: 100;
+    isolation: isolate;
 }
 
     .sidebar-navigation img {
@@ -333,13 +336,14 @@ body {
     }
 
         .sidebar-navigation ul li {
-            padding: 20px 0;
             cursor: pointer;
             transition: all ease-out 120ms;
             position: relative;
         }
 
             .sidebar-navigation ul li a {
+                display: block;
+                padding: 20px 0;
                 text-decoration: none;
                 color: inherit;
             }
@@ -369,6 +373,7 @@ body {
                 visibility: hidden;
                 font-size: 13px;
                 letter-spacing: .5px;
+                z-index: 9999;
             }
 
                 .sidebar-navigation ul li .tooltip:before {

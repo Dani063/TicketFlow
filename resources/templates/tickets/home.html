@@ -98,7 +98,7 @@
         <tbody>
             {% if my_tickets %}
             {% for ticket in my_tickets %}
-            <tr onclick="openTicket('{{ ticket.id }}')">
+            <tr onclick="openTicket('{{ ticket.id }}', '{{ ticket.subject|escapejs }}')">
                 <td>{{ ticket.id }}</td>
                 <td><span class="status-dot status-{{ ticket.status|lower }}"></span>{{ ticket.subject }}</td>
                 <td>{{ ticket.requester.name }}</td>
@@ -120,14 +120,12 @@
 {% block extra_js %}
 <script>
     // Abrir ticket en pestaña usando el gestor central (tabs.js)
-    function openTicket(ticketId) {
-        const tabText = "Ticket " + ticketId;
+    function openTicket(ticketId, subject) {
+        const tabText = subject || "Ticket " + ticketId;
         const tabUrl = "{% url 'create_ticket' %}?id=" + ticketId;
-        // usa la API global expuesta por tabs.js
         if (window.Tabs && typeof window.Tabs.addTab === 'function') {
             window.Tabs.addTab(tabText, tabUrl);
         } else {
-            // fallback por si tabs aún no cargó
             window.location.href = tabUrl;
         }
     }
