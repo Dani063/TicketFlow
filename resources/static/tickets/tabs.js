@@ -325,21 +325,15 @@
 
     // ===== Popups manager (Perfil / Notificaciones) =====
     function initPopups() {
-        // Cache de nodos (si no existen en alguna vista, todo queda no-op)
-        const notifPop = document.getElementById('notificationsPopup');
-        const userPop = document.getElementById('userPopup');
-        const closeBtn = document.getElementById('closePopup');
-        const notifList = document.getElementById('notificationsList');
-
-        // Si no existe ninguno de los popups, no registramos nada
-        if (!notifPop && !userPop) {
-            return;
-        }
+        // Lookup lazy en cada acción para evitar referencias null si el DOM
+        // aún no estaba completo en el momento del primer initPopups()
+        const getNotifPop = () => document.getElementById('notificationsPopup');
+        const getUserPop  = () => document.getElementById('userPopup');
 
         const show = el => el && (el.style.display = 'block');
         const hide = el => el && (el.style.display = 'none');
         const isOpen = el => el && el.style.display === 'block';
-        const hideAll = () => { hide(notifPop); hide(userPop); toggleActive(null); };
+        const hideAll = () => { hide(getNotifPop()); hide(getUserPop()); toggleActive(null); };
 
         function toggleActive(which) {
             const notifIcon = document.querySelector('.navbar-right .notifications');
@@ -349,6 +343,7 @@
         }
 
         async function loadNotifications() {
+            const notifList = document.getElementById('notificationsList');
             if (!notifList) return;
             try {
                 const res = await fetch("/api/notifications/");
@@ -358,7 +353,7 @@
                 const badge = document.querySelector(".notifications .badge");
 
                 if (!data.notifications.length) {
-                    notifList.innerHTML = "<li>No hay notificaciones</li>";
+                    notifList.innerHTML = "<li class='notif-empty'>No hay notificaciones</li>";
                     if (badge) { badge.textContent = "0"; badge.style.display = "none"; }
                     return;
                 }
@@ -386,8 +381,17 @@
 
         // Delegación global: funciona aunque la navbar se re-renderice
         document.addEventListener('click', (e) => {
+            const notifPop = getNotifPop();
+            const userPop  = getUserPop();
             const notifBtn = e.target.closest('.notifications');
-            const userBtn = e.target.closest('.user-profile');
+            const userBtn  = e.target.closest('.user-profile');
+            const closeBtn = e.target.closest('#closePopup');
+
+            if (closeBtn) {
+                e.preventDefault(); e.stopPropagation();
+                hide(notifPop); toggleActive(null);
+                return;
+            }
 
             if (notifBtn) {
                 e.preventDefault(); e.stopPropagation();
@@ -411,14 +415,8 @@
 
             // Clic fuera de los popups → cerrar
             const withinNotif = notifPop && notifPop.contains(e.target);
-            const withinUser = userPop && userPop.contains(e.target);
+            const withinUser  = userPop  && userPop.contains(e.target);
             if (!withinNotif && !withinUser) hideAll();
-        });
-
-        // Botón cerrar de notificaciones (si existe)
-        closeBtn && closeBtn.addEventListener('click', (e) => {
-            e.preventDefault(); e.stopPropagation();
-            hide(notifPop); toggleActive(null);
         });
 
         const logoutBtn = document.getElementById('logoutButton');

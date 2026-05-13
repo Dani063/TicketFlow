@@ -43,6 +43,7 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(verbose_name='Correo electronico', max_length=255, unique=True)
     name = models.CharField(max_length=255)
+    zendesk_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     group = models.ForeignKey('Group', on_delete=models.SET_NULL, null=True, blank=True, related_name='user_group')
@@ -93,6 +94,7 @@ class Group(models.Model):
         return self.group_name
 
 class Ticket(models.Model):
+    zendesk_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)
     subject = models.CharField(max_length=255, null=False)
     description = models.TextField(null=False)
     status = models.CharField(max_length=255, choices=[('open', 'Open'), ('pending', 'Pending'), ('closed', 'Closed'), ('resolved', 'Resolved')])
@@ -113,6 +115,7 @@ class Ticket(models.Model):
     category = models.CharField(max_length=255, null=True)
 
 class Comment(models.Model):
+    zendesk_id = models.BigIntegerField(null=True, blank=True, db_index=True)
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     content = models.TextField(null=False)

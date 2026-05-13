@@ -256,6 +256,12 @@ SSO_LOGIN_UI_URL = os.getenv("SSO_LOGIN_UI_URL", "https://dev-login.recordia.net
 _logging.getLogger(__name__).warning(f"SSO_LOGIN_API_URL: {SSO_LOGIN_API_URL}, SSO_LOGIN_UI_URL: {SSO_LOGIN_UI_URL}")
 
 MEDIA_ROOT = PROJECT_ROOT / "resources" / "media"
+
+# === Zendesk (importación de tickets) ===
+ZENDESK_SUBDOMAIN = os.getenv("ZENDESK_SUBDOMAIN")
+ZENDESK_EMAIL = os.getenv("ZENDESK_EMAIL")
+ZENDESK_API_TOKEN = os.getenv("ZENDESK_API_TOKEN")
+
 # Configuracion de la URL de inicio de sesión
 LOGIN_URL = '/login/'
 DEFAULT_CHARSET = 'utf-8'

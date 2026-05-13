@@ -607,8 +607,8 @@ def create_ticket(request):
         return redirect(f'{request.path}?id={ticket.id}')
 
     # GET .
-    usuarios = User.objects.filter(group=1)
-    agentes = User.objects.filter(group=2)
+    usuarios = User.objects.filter(is_active=True).order_by('name')
+    agentes = User.objects.filter(group=2).order_by('name')
     tags = TicketTag.objects.all()
     todos = User.objects.all()
 
