@@ -30,6 +30,7 @@ urlpatterns = [
     path('reporting/', views.reporting, name='reporting'),
     path('settings/', views.settings, name='settings'),
     path('profile/', views.profile, name='profile'),
+    path("api/users/<int:user_id>/notes/", views.update_user_notes, name="update_user_notes"),
     path("api/notifications/", views.notifications_api, name="notifications_api"),
     path("api/notifications/<int:notif_id>/read/", views.mark_notification_read, name="mark_notification_read"),
     path("api/activity/", views.recent_activity_api, name="recent_activity_api"),
@@ -44,6 +45,7 @@ urlpatterns = [
     path('logout/', views.user_logout, name='logout'),
 
     path("search/", views.global_search, name="global_search"),
+    path("api/macros/", views.macros_api, name="macros_api"),
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

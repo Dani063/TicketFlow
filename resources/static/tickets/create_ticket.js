@@ -543,20 +543,259 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch(`/api/tickets/${ticketId}/`)
             .then(response => response.json())
             .then(data => {
-                $('#empresa').val(data.empresa).trigger('change');
+                $('#empresa').val(data.empresa || '').trigger('change');
                 $('#solicitante').val(data.solicitante).trigger('change');
-                $('#asignado').val(data.asignado).trigger('change');
+                $('#asignado').val(data.asignado || '').trigger('change');
+                $('#grupo').val(data.grupo || '').trigger('change');
                 $('#ccs').val(data.ccs).trigger('change');
                 $('#tags').val(data.tags).trigger('change');
                 $('#tipo').val(data.tipo).trigger('change');
-                $('#prioridad').val(data.prioridad).trigger('change');
+                $('#prioridad').val(data.prioridad || '').trigger('change');
                 $('#servicio').val(data.servicio).trigger('change');
                 $('#canal').val(data.canal).trigger('change');
                 $('#idioma').val(data.idioma).trigger('change');
                 $('#categoria').val(data.categoria).trigger('change');
+                $('#security_related').prop('checked', !!data.security_related);
+                $('#monitoring').prop('checked', !!data.monitoring);
+                $('#approval_status').val(data.approval_status || '');
                 $('#subject').val(data.subject);
                 
             })
             .catch(error => console.error('Error al cargar el ticket:', error));
     }
+
+    // ---- Scroll al último comentario ----
+    const messagesBox = document.getElementById('messagesBox');
+    if (messagesBox) messagesBox.scrollTop = messagesBox.scrollHeight;
+
+    // ---- Avatares: color por nombre ----
+    function avatarColor(name) {
+        const palette = [
+            '#5b67ca','#e06c75','#56b6c2','#98c379',
+            '#d19a66','#c678dd','#61afef','#e5c07b',
+        ];
+        let hash = 0;
+        for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+        return palette[Math.abs(hash) % palette.length];
+    }
+
+    document.querySelectorAll('.msg-avatar').forEach(el => {
+        const authorName = el.closest('.message')?.querySelector('.msg-author')?.textContent.trim() || '?';
+        el.style.background = avatarColor(authorName);
+    });
+
+    // Avatar del side panel del solicitante (gris neutro fijo, sin color por nombre)
+    document.querySelectorAll('.rq-avatar-initials').forEach(el => {
+        el.style.background = '#8a9ba8';
+    });
+
+    // Auto-guardar notas del solicitante al perder el foco
+    document.querySelectorAll('.rq-notes-input').forEach(textarea => {
+        let original = textarea.value;
+        textarea.addEventListener('blur', () => {
+            if (textarea.value === original) return;
+            const userId = textarea.dataset.userId;
+            fetch(`/api/users/${userId}/notes/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                },
+                body: JSON.stringify({ notes: textarea.value }),
+            })
+            .then(r => { if (r.ok) original = textarea.value; })
+            .catch(() => {});
+        });
+    });
+
+    // ---- Blockquotes colapsables ----
+    document.querySelectorAll('.msg-body').forEach(body => {
+        const quotes = body.querySelectorAll('blockquote');
+        if (!quotes.length) return;
+        quotes.forEach(q => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'quote-toggle';
+            btn.innerHTML = '<i class="fas fa-ellipsis-h"></i> Ver mensaje anterior';
+            btn.addEventListener('click', () => {
+                const expanded = q.classList.toggle('quote-expanded');
+                btn.innerHTML = expanded
+                    ? '<i class="fas fa-minus"></i> Ocultar'
+                    : '<i class="fas fa-ellipsis-h"></i> Ver mensaje anterior';
+            });
+            q.before(btn);
+        });
+    });
+
+    // ---- Macros panel ----
+    const macroBtn    = document.getElementById('macro-btn');
+    const macroPanel  = document.getElementById('macro-panel');
+    const macroList   = document.getElementById('macro-list');
+    const macroSearch = document.getElementById('macro-search');
+    const macroCaret  = document.getElementById('macro-caret');
+
+    if (macroBtn && macroPanel) {
+        let macrosCache = null;
+
+        function renderMacros(list) {
+            macroList.innerHTML = '';
+            if (!list.length) {
+                macroList.innerHTML = '<li class="macro-empty">Sin resultados</li>';
+                return;
+            }
+            list.forEach(m => {
+                const li = document.createElement('li');
+                li.className = 'macro-item';
+                li.innerHTML = `<div class="macro-item-name">${m.name}</div>
+                    ${m.description ? `<div class="macro-item-desc">${m.description}</div>` : ''}`;
+                li.addEventListener('click', () => applyMacro(m));
+                macroList.appendChild(li);
+            });
+        }
+
+        function applyMacro(m) {
+            const a = m.actions || {};
+
+            // Status
+            if (a.status) {
+                const statusSpan = document.getElementById('selected-status');
+                if (statusSpan) statusSpan.textContent = a.status;
+            }
+
+            // Priority
+            if (a.priority && typeof $ !== 'undefined') {
+                $('#prioridad').val(a.priority).trigger('change');
+            }
+
+            // Assignee
+            if (a.assignee_id != null && typeof $ !== 'undefined') {
+                $('#asignado').val(String(a.assignee_id)).trigger('change');
+            }
+
+            // Canned comment
+            if (a.comment) {
+                const ta = document.getElementById('new-message');
+                if (ta) { ta.value = a.comment; ta.focus(); }
+            }
+
+            closeMacroPanel();
+        }
+
+        function closeMacroPanel() {
+            macroPanel.classList.remove('open');
+            macroBtn.classList.remove('open');
+        }
+
+        macroBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const isOpen = macroPanel.classList.toggle('open');
+            macroBtn.classList.toggle('open', isOpen);
+            if (isOpen && !macrosCache) {
+                macroList.innerHTML = '<li class="macro-empty">Cargando…</li>';
+                try {
+                    const res = await fetch('/api/macros/');
+                    const data = await res.json();
+                    macrosCache = data.macros || [];
+                    renderMacros(macrosCache);
+                } catch {
+                    macroList.innerHTML = '<li class="macro-empty">Error al cargar</li>';
+                }
+            } else if (isOpen) {
+                renderMacros(macrosCache);
+            }
+        });
+
+        macroSearch && macroSearch.addEventListener('input', () => {
+            if (!macrosCache) return;
+            const q = macroSearch.value.toLowerCase();
+            renderMacros(macrosCache.filter(m =>
+                m.name.toLowerCase().includes(q) ||
+                (m.description || '').toLowerCase().includes(q)
+            ));
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!macroPanel.contains(e.target) && !macroBtn.contains(e.target)) {
+                closeMacroPanel();
+            }
+        });
+    }
+
+    // ---- Historial de interacciones: popup en hover ----
+    const tlPopup = document.createElement('div');
+    tlPopup.id = 'tl-popup';
+    tlPopup.innerHTML = `
+        <div class="tlp-header">
+            <span class="tlp-badge" id="tlp-badge"></span>
+            <span class="tlp-ticket-num" id="tlp-ticket-num"></span>
+            <button class="tlp-close" type="button" title="Cerrar">&#x2715;</button>
+        </div>
+        <div class="tlp-subject" id="tlp-subject"></div>
+        <div class="tlp-desc" id="tlp-desc"></div>
+        <div class="tlp-sep" id="tlp-sep">Latest comment</div>
+        <div class="tlp-comment" id="tlp-comment"></div>
+    `;
+    document.body.appendChild(tlPopup);
+
+    let tlHideTimer = null;
+
+    function showTlPopup(item) {
+        clearTimeout(tlHideTimer);
+        const status   = item.dataset.status  || '';
+        const id       = item.dataset.id      || '';
+        const zid      = item.dataset.zid     || '';
+        const subject  = item.dataset.subject || '';
+        const desc     = item.dataset.desc    || '';
+        const comment  = item.dataset.comment || '';
+        const displayId = zid ? `#${zid}` : `#${id}`;
+
+        tlPopup.querySelector('#tlp-badge').textContent = status.toUpperCase();
+        tlPopup.querySelector('#tlp-badge').className = `tlp-badge status-${status.toLowerCase()}`;
+        tlPopup.querySelector('#tlp-ticket-num').textContent = `Ticket ${displayId}`;
+        tlPopup.querySelector('#tlp-subject').textContent = subject;
+        tlPopup.querySelector('#tlp-desc').textContent = desc;
+
+        const sepEl     = tlPopup.querySelector('#tlp-sep');
+        const commentEl = tlPopup.querySelector('#tlp-comment');
+        if (comment) {
+            commentEl.textContent = comment;
+            sepEl.style.display = '';
+            commentEl.style.display = '';
+        } else {
+            commentEl.textContent = '';
+            sepEl.style.display = 'none';
+            commentEl.style.display = 'none';
+        }
+
+        // Position to the left of the hovered item
+        const rect = item.getBoundingClientRect();
+        const popW = 320;
+        const gap  = 10;
+        let left = rect.left - popW - gap;
+        if (left < 8) left = rect.right + gap; // fallback: show to the right
+        let top = rect.top;
+        const popH = tlPopup.offsetHeight || 260;
+        if (top + popH > window.innerHeight - 8) top = window.innerHeight - popH - 8;
+        if (top < 8) top = 8;
+
+        tlPopup.style.left = left + 'px';
+        tlPopup.style.top  = top  + 'px';
+        tlPopup.classList.add('visible');
+    }
+
+    function hideTlPopup() {
+        tlHideTimer = setTimeout(() => tlPopup.classList.remove('visible'), 150);
+    }
+
+    document.querySelectorAll('.tl-item').forEach(item => {
+        item.addEventListener('mouseenter', () => showTlPopup(item));
+        item.addEventListener('mouseleave', hideTlPopup);
+    });
+    tlPopup.addEventListener('mouseenter', () => clearTimeout(tlHideTimer));
+    tlPopup.addEventListener('mouseleave', hideTlPopup);
+    tlPopup.querySelector('.tlp-close').addEventListener('click', () => {
+        clearTimeout(tlHideTimer);
+        tlPopup.classList.remove('visible');
+    });
+
 });

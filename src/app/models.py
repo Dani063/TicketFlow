@@ -48,6 +48,12 @@ class User(AbstractBaseUser, PermissionsMixin):
     updated_at = models.DateTimeField(auto_now=True)
     group = models.ForeignKey('Group', on_delete=models.SET_NULL, null=True, blank=True, related_name='user_group')
     role = models.ForeignKey('Role', on_delete=models.SET_NULL, null=True, blank=True, related_name='user_role')
+    phone = models.CharField(max_length=64, null=True, blank=True)
+    time_zone = models.CharField(max_length=100, null=True, blank=True)
+    locale = models.CharField(max_length=20, null=True, blank=True)
+    notes = models.TextField(null=True, blank=True)
+    photo_url = models.URLField(max_length=500, null=True, blank=True)
+    organization = models.CharField(max_length=255, null=True, blank=True)
     groups = models.ManyToManyField(
         'auth.Group',
         related_name='custom_user_set',  # Cambia el related_name para evitar conflictos
@@ -98,7 +104,7 @@ class Ticket(models.Model):
     subject = models.CharField(max_length=255, null=False)
     description = models.TextField(null=False)
     status = models.CharField(max_length=255, choices=[('open', 'Open'), ('pending', 'Pending'), ('closed', 'Closed'), ('resolved', 'Resolved')])
-    priority = models.CharField(max_length=255, choices=[('low', 'Low'), ('normal', 'Normal'), ('high', 'High'), ('urgent', 'Urgent')])
+    priority = models.CharField(max_length=255, choices=[('low', 'Low'), ('normal', 'Normal'), ('high', 'High'), ('urgent', 'Urgent')], null=True, blank=True)
     requester = models.ForeignKey(User, on_delete=models.CASCADE, related_name='requested_tickets')
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='assigned_tickets')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_tickets')
@@ -109,16 +115,42 @@ class Ticket(models.Model):
     channel = models.CharField(max_length=255, null=True)
     service = models.CharField(max_length=255, null=True)
     language = models.CharField(max_length=255, null=True)
+    assigned_group = models.ForeignKey('Group', on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     closed_at = models.DateTimeField(null=True, blank=True)
     category = models.CharField(max_length=255, null=True)
+    security_related = models.BooleanField(null=True, blank=True)
+    monitoring = models.BooleanField(null=True, blank=True)
+    approval_status = models.CharField(max_length=255, null=True, blank=True)
+    resolution_type = models.CharField(max_length=255, null=True, blank=True)
+    required_tasks = models.CharField(max_length=255, null=True, blank=True)
+
+
+class ZendeskFieldMap(models.Model):
+    """Mapea custom fields de Zendesk con atributos del modelo Ticket.
+
+    Permite tanto importar (zendesk_id -> ticketflow_attr) como exportar
+    (ticketflow_attr -> zendesk_id en el payload PUT /tickets/{id}).
+    Se popula con el management command `sync_zendesk_fields`.
+    """
+    zendesk_field_id = models.BigIntegerField(unique=True, db_index=True)
+    zendesk_title = models.CharField(max_length=255)
+    zendesk_type = models.CharField(max_length=50)  # tagger, checkbox, integer, date, ...
+    ticketflow_attr = models.CharField(max_length=100, null=True, blank=True)
+    active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.zendesk_title} (#{self.zendesk_field_id}) -> {self.ticketflow_attr or '(unmapped)'}"
+
 
 class Comment(models.Model):
     zendesk_id = models.BigIntegerField(null=True, blank=True, db_index=True)
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     content = models.TextField(null=False)
+    html_body = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     is_public = models.BooleanField(default=True)
 
@@ -133,6 +165,20 @@ class TicketHistory(models.Model):
     new_status = models.CharField(max_length=255, choices=[('open', 'Open'), ('pending', 'Pending'), ('closed', 'Closed'), ('resolved', 'Resolved')])
     changed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     changed_at = models.DateTimeField(auto_now_add=True)
+
+
+class TicketEvent(models.Model):
+    """Registro de cambios en un ticket (Zendesk audits o cambios locales)."""
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='events')
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='ticket_events')
+    field_name = models.CharField(max_length=100)   # status, assignee_id, priority, group_id, tags…
+    old_value = models.TextField(null=True, blank=True)
+    new_value = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField()
+    zendesk_event_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)
+
+    class Meta:
+        ordering = ['created_at']
 
 class Attachment(models.Model):
     file_url = models.URLField(null=False, help_text='URL of the attached file')
@@ -152,3 +198,15 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.user.name} → {self.message}"
+
+
+class Macro(models.Model):
+    name = models.CharField(max_length=255)
+    description = models.CharField(max_length=500, blank=True, null=True)
+    actions = models.JSONField(default=dict, help_text='JSON: {status, comment, priority, assignee_id}')
+    active = models.BooleanField(default=True)
+    zendesk_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name

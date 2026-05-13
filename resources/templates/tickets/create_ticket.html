@@ -22,11 +22,10 @@
             <div class="form-group">
                 <label for="empresa">Empresa</label>
                 <select id="empresa" name="empresa" class="select2">
-                    <option value="" disabled selected>-</option>
-                    <option value="Audio Simple Notification Service">Audio Simple Notification Service</option>
-                    <option value="Comunycarse Helpdesk">Comunycarse Helpdesk</option>
-                    <option value="EcomFax">EcomFax</option>
-                    <option value="Recordia">Recordia</option>
+                    <option value="" selected>-</option>
+                    {% for brand in empresas %}
+                    <option value="{{ brand }}">{{ brand }}</option>
+                    {% endfor %}
                 </select>
             </div>
             <div class="form-group">
@@ -41,9 +40,18 @@
             <div class="form-group">
                 <label for="asignado">Asignado</label>
                 <select id="asignado" name="asignado" class="select2">
-                    <option value="" disabled selected>-</option>
+                    <option value="" selected>-</option>
                     {% for user in agentes %}
                     <option value="{{ user.id }}">{{ user.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="grupo">Grupo</label>
+                <select id="grupo" name="grupo" class="select2">
+                    <option value="" selected>-</option>
+                    {% for g in grupos %}
+                    <option value="{{ g.id }}">{{ g.group_name }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -67,7 +75,7 @@
                 <div class="form-group">
                     <label for="tipo">Tipo</label>
                     <select id="tipo" name="tipo" class="select2">
-                        <option value="-" selected>-</option>
+                        <option value="" selected>-</option>
                         <option value="incidencia">Incidencia</option>
                         <option value="consulta">Consulta</option>
                         <option value="mejora">Problema</option>
@@ -77,8 +85,9 @@
                 <div class="form-group">
                     <label for="prioridad">Prioridad</label>
                     <select id="prioridad" name="prioridad" class="select2">
+                        <option value="" selected>-</option>
                         <option value="low">Baja</option>
-                        <option value="normal" selected>Media</option>
+                        <option value="normal">Media</option>
                         <option value="high">Alta</option>
                         <option value="urgent">Urgente</option>
                     </select>
@@ -87,7 +96,7 @@
             <div class="form-group">
                 <label for="servicio">Servicio</label>
                 <select id="servicio" name="servicio" class="select2">
-                    <option value="-">-</option>
+                    <option value="" selected>-</option>
                     <option value="ecomfax">EcomFax</option>
                     <option value="ecomfaxpro">EcomFaxPro</option>
                     <option value="recordia">Recordia</option>
@@ -97,14 +106,14 @@
                     <option value="rightfax">Rightfax</option>
                     <option value="internocomuny">InternoComuny</option>
                     <option value="rts">RTS</option>
-                    <option value="otros" selected>Otros</option>
+                    <option value="otros">Otros</option>
                     <option value="cognitia">Cognitia</option>
                 </select>
             </div>
             <div class="form-group">
                 <label for="canal">Canal</label>
                 <select id="canal" name="canal" class="select2">
-                    <option value="-" selected>-</option>
+                    <option value="" selected>-</option>
                     <option value="email">Email</option>
                     <option value="telefono">Teléfono</option>
                     <option value="web">Web</option>
@@ -114,14 +123,17 @@
             <div class="form-group">
                 <label for="idioma">Idioma</label>
                 <select id="idioma" name="idioma" class="select2">
+                    <option value="" selected>-</option>
                     <option value="es">Español</option>
                     <option value="en">Inglés</option>
+                    <option value="español">Español (Zendesk)</option>
+                    <option value="inglés">Inglés (Zendesk)</option>
                 </select>
             </div>
             <div class="margin-bottom-large">
                 <label for="categoria">Categoría</label>
                 <select id="categoria" name="categoria" class="select2">
-                    <option value="-" selected>-</option>
+                    <option value="" selected>-</option>
                     <option value="communication">Communication</option>
                     <option value="hardware">Hardware</option>
                     <option value="base_software">Base software</option>
@@ -133,6 +145,16 @@
                     <option value="others">Others</option>
                     <option value="information">Information</option>
                 </select>
+            </div>
+            <div class="form-group form-checkbox">
+                <label><input type="checkbox" id="security_related" name="security_related" value="1"> Security related</label>
+            </div>
+            <div class="form-group form-checkbox">
+                <label><input type="checkbox" id="monitoring" name="monitoring" value="1"> Monitoring</label>
+            </div>
+            <div class="form-group">
+                <label for="approval_status">Approval status</label>
+                <input type="text" id="approval_status" name="approval_status" placeholder="-">
             </div>
             <hr class="margin-bottom-large">
         </div>
@@ -146,13 +168,32 @@
             <!-- Cuadro de Mensajes -->
             <div class="messages-box" id="messagesBox">
                 {% if ticket %}
-                {% for c in comments %}
-                <div class="message{% if c.user_id == request.user.id %} me{% endif %}{% if not c.is_public %} internal{% endif %}">
-                    {% if not c.is_public and can_use_internal %}
-                    <span class="badge-internal">Interno</span>
-                    {% endif %}
-                    <p><strong>{{ c.user.name }}:</strong> {{ c.content }}</p>
-                    <span class="timestamp">{{ c.created_at }}</span>
+                {% for item in feed %}
+                {% if item.item_type == 'comment' %}
+                {% with c=item.obj %}
+                <div class="message{% if not c.is_public %} internal{% endif %}" data-comment-id="{{ c.pk }}">
+                    <div class="msg-header">
+                        <div class="msg-avatar" data-initials="{{ c.user.name|slice:':1'|upper }}">{{ c.user.name|slice:':1'|upper }}</div>
+                        <div class="msg-meta">
+                            {% if can_use_internal %}
+                            <a class="msg-author" href="{% url 'customer_profile' %}?id={{ c.user.id }}">{{ c.user.name }}</a>
+                            {% else %}
+                            <span class="msg-author">{{ c.user.name }}</span>
+                            {% endif %}
+                            {% if c.user.role %}<span class="msg-role">{{ c.user.role.role_name }}</span>{% endif %}
+                        </div>
+                        <div class="msg-right">
+                            {% if not c.is_public and can_use_internal %}<span class="badge-internal">Interno</span>{% endif %}
+                            <span class="msg-timestamp" title="{{ c.created_at|date:'d/m/Y H:i' }}">{{ c.created_at|date:'d/m/Y H:i' }}</span>
+                        </div>
+                    </div>
+                    <div class="msg-body">
+                        {% if c.html_body %}
+                            {{ c.html_body|safe }}
+                        {% else %}
+                            {{ c.content|linebreaks }}
+                        {% endif %}
+                    </div>
                     {% with atts=c.attachment_set.all %}
                     {% if atts %}
                     <div class="attachments">
@@ -169,6 +210,20 @@
                     {% endif %}
                     {% endwith %}
                 </div>
+                {% endwith %}
+                {% else %}
+                {% with e=item.obj %}
+                <div class="sys-event">
+                    <span class="sys-text">
+                        <span class="sys-actor">{{ e.actor.name|default:"Sistema" }}</span>
+                        cambió <span class="sys-field">{{ item.field_label }}</span>
+                        {% if e.old_value %}<span class="sys-old">{{ e.old_value }}</span> →{% endif %}
+                        <span class="sys-new">{{ e.new_value|default:"(vacío)" }}</span>
+                    </span>
+                    <span class="sys-time">{{ e.created_at|date:'d/m/Y H:i' }}</span>
+                </div>
+                {% endwith %}
+                {% endif %}
                 {% empty %}
                 <div class="message"><em>Sin mensajes aún.</em></div>
                 {% endfor %}
@@ -230,68 +285,94 @@
             <!-- Columna solicitante -->
             {% if ticket and ticket.requester %}
         <div class="column3 requester-info">
-            <div class="profile-header" style="display:flex; align-items:center; margin-bottom:20px;">
-                <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
-                <div style="margin-left:10px;">
-                    <h3 style="margin:0;">{{ ticket.requester.name }}</h3>
-                    <p style="margin:5px 0 0; color:#666;">{{ ticket.requester.email }}</p>
-                    <a href="{% url 'customer_profile' %}?id={{ ticket.requester.id }}" class="view-profile">Ver perfil completo</a>
+            {% with u=ticket.requester %}
+            <!-- Cabecera -->
+            <div class="rq-header">
+                {% if u.photo_url %}
+                <img src="{{ u.photo_url }}" alt="Avatar" class="rq-avatar rq-avatar-img">
+                {% else %}
+                <div class="rq-avatar rq-avatar-initials" data-name="{{ u.name }}">{{ u.name|slice:":1"|upper }}</div>
+                {% endif %}
+                <div class="rq-header-meta">
+                    <div class="rq-name-row">
+                        <span class="rq-name">{{ u.name }}</span>
+                        <a href="{% url 'customer_profile' %}?id={{ u.id }}" class="rq-ext-link" title="Ver perfil completo"><i class="fas fa-external-link-alt"></i></a>
+                    </div>
                 </div>
             </div>
 
-            <div class="profile-details">
-                <div class="detail-card">
-                    <h3>Rol</h3>
-                    <p>{{ ticket.requester.role.role_name|default:"-" }}</p>
-                </div>
-                <div class="detail-card">
-                    <h3>Grupo</h3>
-                    <p>{{ ticket.requester.group.group_name|default:"-" }}</p>
-                </div>
-                <div class="detail-card">
-                    <h3>Cuenta creada</h3>
-                    <p>{{ ticket.requester.created_at|date:"d/m/Y H:i" }}</p>
+            <!-- Datos rápidos -->
+            <div class="rq-details">
+                <div class="rq-row"><span class="rq-label">Email</span><span class="rq-value rq-link">{{ u.email }}</span></div>
+                {% if u.phone %}<div class="rq-row"><span class="rq-label">Teléfono</span><span class="rq-value">{{ u.phone }}</span></div>{% endif %}
+                {% if u.organization %}<div class="rq-row"><span class="rq-label">Org.</span><span class="rq-value rq-link">{{ u.organization }}</span></div>{% endif %}
+                {% if u.time_zone %}<div class="rq-row"><span class="rq-label">Zona horaria</span><span class="rq-value">{{ u.time_zone }}</span></div>{% endif %}
+                {% if u.locale %}<div class="rq-row"><span class="rq-label">Idioma</span><span class="rq-value">{{ u.locale }}</span></div>{% endif %}
+                {% if u.role %}<div class="rq-row"><span class="rq-label">Rol</span><span class="rq-value">{{ u.role.role_name }}</span></div>{% endif %}
+                <div class="rq-row rq-notes-row">
+                    <span class="rq-label">Notas</span>
+                    <textarea class="rq-notes-input" placeholder="Añadir nota sobre el usuario..." data-user-id="{{ u.id }}">{{ u.notes|default:'' }}</textarea>
                 </div>
             </div>
 
-            <h3>Últimos tickets</h3>
-            <h3>Historial de interacciones</h3>
+            <div class="rq-section-title">
+                Historial de interacciones
+            </div>
             <ul class="timeline user-timeline">
                 {% for t in user_timeline %}
-                <li class="tl-item {% if ticket and t.id == ticket.id %}active{% endif %}" onclick="openTicket('{{ t.id }}', '{{ t.subject|escapejs }}')">
-                    <span class="tl-dot status-{{ t.status|lower }}"></span>
+                <li class="tl-item {% if ticket and t.id == ticket.id %}active{% endif %}"
+                    onclick="openTicket('{{ t.id }}', '{{ t.subject|escapejs }}')"
+                    data-id="{{ t.id }}"
+                    data-zid="{{ t.zendesk_id|default:'' }}"
+                    data-subject="{{ t.subject }}"
+                    data-status="{{ t.status }}"
+                    data-desc="{{ t.description }}"
+                    data-comment="{{ t.last_comment }}">
+                    <span class="tl-badge status-{{ t.status|lower }}">{{ t.status|slice:":1"|upper }}</span>
                     <div class="tl-content">
-                        <div class="tl-top">
-                            <strong class="tl-subject">{{ t.subject }}</strong>
-                            <small class="tl-when">{{ t.updated_at }}</small>
-                            <a class="tl-open" title="Abrir en pestaña" onclick="event.stopPropagation(); openTicket('{{ t.id }}', '{{ t.subject|escapejs }}')">
-                                <i class="fas fa-external-link-alt"></i>
-                            </a>
-                        </div>
-                        {% if t.last_comment %}
-                        <div class="tl-snippet">{{ t.last_comment }}</div>
-                        {% endif %}
+                        <div class="tl-subject">{{ t.subject }}</div>
+                        <div class="tl-when">{{ t.updated_at }}</div>
                     </div>
                 </li>
                 {% empty %}
                 <li class="tl-empty">Sin tickets previos.</li>
                 {% endfor %}
             </ul>
+            {% endwith %}
         </div>
             {% endif %}
         </div>
     <!-- Barra de Pie de Formulario -->
     <div class="footer-bar">
         <div class="footer-right">
-            <button type="button" id="publish-button" class="main-btn">
-                Publicar como <span id="selected-status">{{ ticket.status|default:"open" }}</span>
-            </button>
-            <button id="dropdown-button" class="dropdown-btn"><i class="fas fa-caret-down"></i></button>
-            <div id="dropdown-content" class="dropdown-content">
-                <a href="#" data-status="open">Open</a>
-                <a href="#" data-status="pending">Pending</a>
-                <a href="#" data-status="resolved">Resolved</a>
-                <a href="#" data-status="closed">Closed</a>
+            {% if ticket and can_use_internal %}
+            <div class="macro-wrap">
+                <button type="button" class="macro-btn" id="macro-btn">
+                    <i class="fas fa-magic"></i> Macros <i class="fas fa-chevron-up macro-caret" id="macro-caret"></i>
+                </button>
+                <div class="macro-panel" id="macro-panel">
+                    <div class="macro-search-wrap">
+                        <i class="fas fa-search macro-search-icon"></i>
+                        <input type="text" class="macro-search" id="macro-search" placeholder="Buscar macro…">
+                    </div>
+                    <ul class="macro-list" id="macro-list">
+                        <li class="macro-empty">Cargando…</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-sep"></div>
+            {% endif %}
+            <div class="publish-group">
+                <button type="button" id="publish-button" class="main-btn">
+                    Publicar como <span id="selected-status">{{ ticket.status|default:"open" }}</span>
+                </button>
+                <button id="dropdown-button" class="dropdown-btn"><i class="fas fa-caret-down"></i></button>
+                <div id="dropdown-content" class="dropdown-content">
+                    <a href="#" data-status="open">Open</a>
+                    <a href="#" data-status="pending">Pending</a>
+                    <a href="#" data-status="resolved">Resolved</a>
+                    <a href="#" data-status="closed">Closed</a>
+                </div>
             </div>
         </div>
     </div>

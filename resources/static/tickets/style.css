@@ -131,6 +131,11 @@ body {
         flex-grow: 1;
         color: #000000;
         margin-right: 5px;
+        max-width: 160px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        min-width: 0;
     }
 
         .tab .tab-text:hover {

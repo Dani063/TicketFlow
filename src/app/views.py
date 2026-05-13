@@ -8,7 +8,7 @@ from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import Ticket, Comment, User, TicketTag, Attachment, TicketHistory, Notification, Role
+from .models import Ticket, Comment, User, TicketTag, Attachment, TicketHistory, TicketEvent, Notification, Role, Group, Macro
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
@@ -470,6 +470,7 @@ def ticket_detail_api(request, ticket_id):
         'empresa': ticket.brand,
         'solicitante': ticket.requester_id,
         'asignado': ticket.assignee_id,
+        'grupo': ticket.assigned_group_id,
         'ccs': [user.id for user in ticket.ccs.all()],
         'tags': [tag.id for tag in ticket.tags.all()],
         'tipo': ticket.type,
@@ -478,6 +479,11 @@ def ticket_detail_api(request, ticket_id):
         'canal': ticket.channel,
         'idioma': ticket.language,
         'categoria': ticket.category,
+        'security_related': ticket.security_related,
+        'monitoring': ticket.monitoring,
+        'approval_status': ticket.approval_status,
+        'resolution_type': ticket.resolution_type,
+        'required_tasks': ticket.required_tasks,
         'subject': ticket.subject,
         'content': ticket.description,
     }
@@ -502,13 +508,13 @@ def create_ticket(request):
         subject = (request.POST.get('subject') or '').strip()
         content = ((request.POST.get('content') or request.POST.get('message')) or '').strip()
         status  = (request.POST.get('status')  or 'open').strip().lower()
-        priority = (request.POST.get('prioridad') or 'normal').strip().lower()
+        priority = (request.POST.get('prioridad') or '').strip().lower()
 
         # Mapear placeholders o valores no válidos a defaults
         if status not in ('open', 'pending', 'closed', 'resolved'):
             status = 'open'
         if priority not in ('low', 'normal', 'high', 'urgent'):
-            priority = 'normal'
+            priority = None
         if not subject:
             subject = '(sin asunto)'          # nunca NULL en DB
         # description en modelo es not null: mínimo cadena vacía
@@ -523,6 +529,13 @@ def create_ticket(request):
 
         solicitante_id = request.POST.get('solicitante') or request.user.id
         asignado_id    = request.POST.get('asignado')
+        grupo_id       = request.POST.get('grupo') or None
+
+        security_related = request.POST.get('security_related') in ('1', 'true', 'on')
+        monitoring       = request.POST.get('monitoring')       in ('1', 'true', 'on')
+        approval_status  = (request.POST.get('approval_status') or '').strip() or None
+        resolution_type  = (request.POST.get('resolution_type') or '').strip() or None
+        required_tasks   = (request.POST.get('required_tasks')  or '').strip() or None
         if not asignado_id:
             agentes = User.objects.filter(group_id='2')
             asignado_id = random.choice(list(agentes)).id if agentes.exists() else None
@@ -547,6 +560,14 @@ def create_ticket(request):
         # --- Actualizar ticket existente (id numérico) ---
         if id_param and id_param.isdigit():
             ticket = get_object_or_404(Ticket, id=int(id_param))
+
+            # Capture original values for change tracking
+            _orig_status     = ticket.status
+            _orig_priority   = ticket.priority
+            _orig_subject    = ticket.subject
+            _orig_assignee   = ticket.assignee_id
+            _orig_group      = ticket.assigned_group_id
+
             ticket.subject     = subject
             ticket.description = description
             ticket.assignee_id = asignado_id
@@ -558,8 +579,32 @@ def create_ticket(request):
             ticket.category    = category
             ticket.priority    = priority
             ticket.status      = status
+            ticket.assigned_group_id = grupo_id if grupo_id else None
+            ticket.security_related = security_related
+            ticket.monitoring = monitoring
+            ticket.approval_status = approval_status
+            ticket.resolution_type = resolution_type
+            ticket.required_tasks = required_tasks
             ticket.save()
             _set_m2m(ticket)
+
+            # Record field changes as TicketEvents
+            _now = timezone.now()
+            _str = lambda v: str(v) if v is not None else None
+            for _fname, _old, _new in [
+                ('status',      _orig_status,          ticket.status),
+                ('priority',    _orig_priority,         ticket.priority),
+                ('subject',     _orig_subject,          ticket.subject),
+                ('assignee_id', _str(_orig_assignee),   _str(ticket.assignee_id)),
+                ('group_id',    _str(_orig_group),      _str(ticket.assigned_group_id)),
+            ]:
+                if _old != _new:
+                    TicketEvent.objects.create(
+                        ticket=ticket, actor=request.user,
+                        field_name=_fname, old_value=_old, new_value=_new,
+                        created_at=_now,
+                    )
+
             _notify_users(ticket, f"Ticket #{ticket.id} actualizado", actor=request.user)
             if content:
                 requested_public = str((request.POST.get('is_public') or 'true')).lower() in ('true','1','yes','on')
@@ -582,6 +627,7 @@ def create_ticket(request):
             priority=priority,
             requester_id=solicitante_id,
             assignee_id=asignado_id,
+            assigned_group_id=grupo_id if grupo_id else None,
             created_by_id=request.user.id,
             brand=empresa,
             type=tipo,
@@ -590,6 +636,11 @@ def create_ticket(request):
             language=language,
             created_at=timezone.now(),
             category=category,
+            security_related=security_related,
+            monitoring=monitoring,
+            approval_status=approval_status,
+            resolution_type=resolution_type,
+            required_tasks=required_tasks,
         )
         _set_m2m(ticket)
         _notify_users(ticket, f"Nuevo ticket #{ticket.id}: {ticket.subject}", actor=request.user)
@@ -611,6 +662,20 @@ def create_ticket(request):
     agentes = User.objects.filter(group=2).order_by('name')
     tags = TicketTag.objects.all()
     todos = User.objects.all()
+    grupos = Group.objects.all().order_by('group_name')
+
+    # Marcas: combinamos las hardcoded con las que ya existen en BD (p.ej. importadas de Zendesk)
+    hardcoded_brands = [
+        "Audio Simple Notification Service",
+        "Comunycarse Helpdesk",
+        "EcomFax",
+        "Recordia",
+    ]
+    db_brands = list(
+        Ticket.objects.exclude(brand__isnull=True).exclude(brand__exact='')
+        .values_list('brand', flat=True).distinct()
+    )
+    empresas = sorted(set(hardcoded_brands + db_brands))
 
     ticket_obj = get_object_or_404(Ticket, id=int(id_param)) if id_param and id_param.isdigit() else None
 
@@ -633,31 +698,59 @@ def create_ticket(request):
             snippet = ''
             if last_pub:
                 raw = last_pub['content'] or ''
-                snippet = (raw[:140] + '…') if len(raw) > 140 else raw
+                snippet = (raw[:160] + '…') if len(raw) > 160 else raw
+
+            desc_raw = t.description or ''
+            desc_snippet = (desc_raw[:200] + '…') if len(desc_raw) > 200 else desc_raw
 
             user_timeline.append({
                 'id': t.id,
+                'zendesk_id': t.zendesk_id,
                 'subject': t.subject,
                 'status': t.status,
                 'updated_at': t.updated_at.strftime('%d/%m/%Y %H:%M'),
+                'description': desc_snippet,
                 'last_comment': snippet,
             })
-    # prepara comentarios según rol
+    # Build combined feed: comments + audit events, sorted by created_at
+    _FIELD_LABEL = {
+        'status': 'estado', 'assignee_id': 'asignado', 'group_id': 'grupo',
+        'priority': 'prioridad', 'tags': 'tags', 'subject': 'asunto',
+        'requester_id': 'solicitante',
+    }
     if ticket_obj:
-        comments_qs = ticket_obj.comment_set.order_by("created_at") if _is_agent(request.user) \
-                      else ticket_obj.comment_set.filter(is_public=True).order_by("created_at")
+        if _is_agent(request.user):
+            comments_list = list(
+                ticket_obj.comment_set.select_related('user', 'user__role').order_by('created_at')
+            )
+        else:
+            comments_list = list(
+                ticket_obj.comment_set.filter(is_public=True)
+                .select_related('user', 'user__role').order_by('created_at')
+            )
+        events_list = list(ticket_obj.events.select_related('actor').order_by('created_at'))
+
+        feed = []
+        for c in comments_list:
+            feed.append({'item_type': 'comment', 'obj': c})
+        for e in events_list:
+            feed.append({'item_type': 'event', 'obj': e,
+                         'field_label': _FIELD_LABEL.get(e.field_name, e.field_name)})
+        feed.sort(key=lambda x: x['obj'].created_at)
     else:
-        comments_qs = Comment.objects.none()
+        feed = []
 
     context = {
         'usuarios': usuarios,
         'agentes': agentes,
         'tags': tags,
         'todos': todos,
+        'empresas': empresas,
+        'grupos': grupos,
         'username': request.user.name,
         'email': request.user.email,
         'ticket': ticket_obj,
-        'comments': comments_qs,                    
+        'feed': feed,
         'can_use_internal': _is_agent(request.user),
         'user_timeline': user_timeline,
     }
@@ -774,6 +867,23 @@ def add_comment(request, ticket_id):
         'new_status': applied_status,  # ← devolver el estado final
     })
 @login_required
+@login_required
+def update_user_notes(request, user_id):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    if not _is_agent(request.user):
+        return JsonResponse({'error': 'Forbidden'}, status=403)
+    import json as _json
+    try:
+        body = _json.loads(request.body)
+    except ValueError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+    user = get_object_or_404(User, pk=user_id)
+    user.notes = (body.get('notes') or '').strip() or None
+    user.save(update_fields=['notes'])
+    return JsonResponse({'ok': True})
+
+
 def notifications_api(request):
     notifs = Notification.objects.filter(user=request.user, read=False).order_by("-created_at")[:20]
     data = [
@@ -871,6 +981,15 @@ def upload_attachment(request, ticket_id):
         'filename': safe_name,
         'size': getattr(f, 'size', 0),
     })
+
+@login_required
+@require_GET
+def macros_api(request):
+    if not _is_agent(request.user):
+        return JsonResponse({'error': 'Forbidden'}, status=403)
+    macros = Macro.objects.filter(active=True).order_by('name').values('id', 'name', 'description', 'actions')
+    return JsonResponse({'macros': list(macros)})
+
 
 @login_required
 @require_GET
