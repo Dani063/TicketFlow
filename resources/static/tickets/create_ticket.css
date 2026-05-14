@@ -4,13 +4,121 @@
     padding: 15px 85px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     margin-bottom: 0.5px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
     .title-bar h1 {
         font-size: 15px;
         color: #000;
         font-weight: 600;
+        margin: 0;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
+
+.title-bar .ticket-status-badge,
+.title-bar .ticket-zd-id,
+.title-bar .ticket-meta-dates,
+.title-bar .sat-badge {
+    flex-shrink: 0;
+}
+
+/* Satisfaction badge in ticket header */
+.sat-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: default;
+}
+.sat-badge.sat-good {
+    background: #dcfce7;
+    color: #15803d;
+    border: 1px solid #bbf7d0;
+}
+.sat-badge.sat-bad {
+    background: #fee2e2;
+    color: #dc2626;
+    border: 1px solid #fecaca;
+}
+
+/* Status badge in ticket header */
+.ticket-status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.status-badge-open     { background: #dbeafe; color: #1d4ed8; border: 1px solid #bfdbfe; }
+.status-badge-pending  { background: #fef9c3; color: #854d0e; border: 1px solid #fde68a; }
+.status-badge-resolved { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+.status-badge-closed   { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+
+/* Zendesk ID in header */
+.ticket-zd-id {
+    font-size: 12px;
+    color: #888;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-family: monospace;
+    white-space: nowrap;
+}
+
+/* Dates row in header */
+.ticket-meta-dates {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #666;
+    white-space: nowrap;
+    margin-left: 4px;
+}
+.ticket-meta-dates strong { color: #333; font-weight: 500; }
+.meta-sep { color: #ccc; }
+
+/* Take it button */
+.take-it-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    border-radius: 12px;
+    border: 1px solid #C18BE5;
+    background: transparent;
+    color: #7c3aed;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.take-it-btn:hover:not(:disabled) {
+    background: #C18BE5;
+    color: #fff;
+}
+.take-it-btn.take-it-done {
+    border-color: #bbf7d0;
+    color: #15803d;
+    background: #dcfce7;
+    cursor: default;
+}
 
 .ticket-form {
     display: flex;
@@ -235,6 +343,33 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
     font-size: 11px;
     color: #aaa;
     white-space: nowrap;
+}
+
+.msg-channel {
+    font-size: 11px;
+    color: #94a3b8;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+/* Datetime-local input in ticket form */
+.form-control-input {
+    width: 100%;
+    padding: 6px 10px;
+    font-size: 13px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background: #fff;
+    color: #333;
+    font-family: inherit;
+    box-sizing: border-box;
+}
+.form-control-input:focus {
+    outline: none;
+    border-color: #C18BE5;
+    box-shadow: 0 0 0 2px rgba(193, 139, 229, 0.15);
 }
 
 /* ---- Cuerpo del comentario ---- */
@@ -666,10 +801,10 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
     flex-shrink: 0;
     margin-top: 1px;
 }
-.tl-badge.status-open     { background: #e67e22; }
-.tl-badge.status-pending  { background: #3b82f6; }
-.tl-badge.status-resolved { background: #6b7280; }
-.tl-badge.status-closed   { background: #374151; }
+.tl-badge.status-open     { background: #3b82f6; }
+.tl-badge.status-pending  { background: #f59e0b; }
+.tl-badge.status-resolved { background: #22c55e; }
+.tl-badge.status-closed   { background: #6b7280; }
 
 .tl-content { flex: 1; min-width: 0; }
 
@@ -1014,21 +1149,10 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 }
 
 /* Colores por estado */
-.status-open {
-    background: #2ecc71;
-}
-/* verde */
-.status-pending {
-    background: #f1c40f;
-}
-/* amarillo */
-.status-resolved {
-    background: #339af0;
-}
-/* azul */
-.status-closed {
-    background: #adb5bd;
-}
+.status-open     { background: #3b82f6; }
+.status-pending  { background: #f59e0b; }
+.status-resolved { background: #22c55e; }
+.status-closed   { background: #6b7280; }
 /* gris */
 
 /* System event divider (audit trail) */

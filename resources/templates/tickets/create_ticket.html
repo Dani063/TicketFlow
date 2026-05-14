@@ -11,6 +11,26 @@
 {% block content %}
 <div class="title-bar">
     <h1>{% if ticket %}{{ ticket.subject }}{% else %}Nuevo ticket{% endif %}</h1>
+    {% if ticket %}
+    <span class="ticket-status-badge status-badge-{{ ticket.status }}">{{ ticket.get_status_display }}</span>
+    {% if ticket.zendesk_id %}<span class="ticket-zd-id">#{{ ticket.zendesk_id }}</span>{% endif %}
+    <span class="ticket-meta-dates">
+        <span title="Creado">Creado: <strong>{{ ticket.created_at|date:"d/m/Y H:i" }}</strong></span>
+        <span class="meta-sep">·</span>
+        <span title="Última actualización">Actualizado: <strong>{{ ticket.updated_at|date:"d/m/Y H:i" }}</strong></span>
+    </span>
+    {% if can_use_internal and ticket.assignee_id != current_user_id %}
+    <button type="button" id="take-it-btn" class="take-it-btn" data-ticket-id="{{ ticket.id }}">
+        <i class="fas fa-hand-point-right"></i> Take it
+    </button>
+    {% endif %}
+    {% endif %}
+    {% if ticket_satisfaction %}
+    <span class="sat-badge sat-{{ ticket_satisfaction.score }}" {% if ticket_satisfaction.comment %}title="{{ ticket_satisfaction.comment|escapejs }}"{% endif %}>
+        <i class="fas {% if ticket_satisfaction.score == 'good' %}fa-thumbs-up{% else %}fa-thumbs-down{% endif %}"></i>
+        {% if ticket_satisfaction.score == 'good' %}Buena valoración{% else %}Mala valoración{% endif %}
+    </span>
+    {% endif %}
 </div>
 
 <form id="ticket-form" method="post"
@@ -121,6 +141,11 @@
                 </select>
             </div>
             <div class="form-group">
+                <label for="due_at">Fecha límite</label>
+                <input type="datetime-local" id="due_at" name="due_at" class="form-control-input"
+                       {% if ticket and ticket.due_at %}value="{{ ticket.due_at|date:'Y-m-d' }}T{{ ticket.due_at|date:'H:i' }}"{% endif %}>
+            </div>
+            <div class="form-group">
                 <label for="idioma">Idioma</label>
                 <select id="idioma" name="idioma" class="select2">
                     <option value="" selected>-</option>
@@ -184,7 +209,8 @@
                         </div>
                         <div class="msg-right">
                             {% if not c.is_public and can_use_internal %}<span class="badge-internal">Interno</span>{% endif %}
-                            <span class="msg-timestamp" title="{{ c.created_at|date:'d/m/Y H:i' }}">{{ c.created_at|date:'d/m/Y H:i' }}</span>
+                            {% if c.via_channel %}<span class="msg-channel" title="Canal: {{ c.via_channel }}"><i class="fas {% if c.via_channel == 'email' %}fa-envelope{% elif c.via_channel == 'web' %}fa-globe{% elif c.via_channel == 'api' %}fa-code{% elif c.via_channel == 'twitter' %}fa-hashtag{% elif c.via_channel == 'voice' or c.via_channel == 'phone' %}fa-phone{% elif c.via_channel == 'chat' %}fa-comment{% else %}fa-circle{% endif %}"></i> {{ c.via_channel }}</span>{% endif %}
+                            <span class="msg-timestamp" data-ts="{{ c.created_at|date:'c' }}" title="{{ c.created_at|date:'d/m/Y H:i' }}">{{ c.created_at|date:'d/m/Y H:i' }}</span>
                         </div>
                     </div>
                     <div class="msg-body">
@@ -220,7 +246,7 @@
                         {% if e.old_value %}<span class="sys-old">{{ e.old_value }}</span> →{% endif %}
                         <span class="sys-new">{{ e.new_value|default:"(vacío)" }}</span>
                     </span>
-                    <span class="sys-time">{{ e.created_at|date:'d/m/Y H:i' }}</span>
+                    <span class="sys-time" data-ts="{{ e.created_at|date:'c' }}" title="{{ e.created_at|date:'d/m/Y H:i' }}">{{ e.created_at|date:'d/m/Y H:i' }}</span>
                 </div>
                 {% endwith %}
                 {% endif %}

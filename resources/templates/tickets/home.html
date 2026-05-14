@@ -1,4 +1,4 @@
-﻿{% extends 'base.html' %}
+{% extends 'base.html' %}
 {% load static %}
 
 {% block title %}TicketFlow – Dashboard{% endblock %}
@@ -43,13 +43,13 @@
         <div class="stats-box">
             <div class="stat" data-filter="bien">
                 <div class="stat-content">
-                    <span class="stat-number">{{ stats.bien }}</span>
+                    <span class="stat-number sat-good-num">{{ stats.bien }}</span>
                     <span class="stat-label">BIEN</span>
                 </div>
             </div>
             <div class="stat" data-filter="mal">
                 <div class="stat-content">
-                    <span class="stat-number">{{ stats.mal }}</span>
+                    <span class="stat-number sat-bad-num">{{ stats.mal }}</span>
                     <span class="stat-label">MAL</span>
                 </div>
             </div>
@@ -67,8 +67,9 @@
         <div class="stats-box">
             <div class="stat" data-filter="satisfaccion">
                 <div class="stat-content">
-                    <span class="stat-number">85%</span>
+                    <span class="stat-number">{% if stats.total_rated %}{{ stats.satisfaccion_pct }}%{% else %}—{% endif %}</span>
                     <span class="stat-label">SATISFACCIÓN</span>
+                    {% if stats.total_rated %}<span class="stat-sub">{{ stats.total_rated }} valorados</span>{% endif %}
                 </div>
             </div>
         </div>
@@ -93,23 +94,35 @@
                 <th>Solicitante actualizado</th>
                 <th>Servicio</th>
                 <th>Asignado</th>
+                <th>Val.</th>
             </tr>
         </thead>
         <tbody>
             {% if my_tickets %}
             {% for ticket in my_tickets %}
-            <tr onclick="openTicket('{{ ticket.id }}', '{{ ticket.subject|escapejs }}')">
+            <tr onclick="openTicket('{{ ticket.id }}', '{{ ticket.subject|escapejs }}')"
+                data-status="{{ ticket.status }}"
+                data-satisfaction="{{ ticket.satisfaction_score|default:'' }}"
+                data-assignee="{{ ticket.assignee_id|default:'' }}"
+                data-assignee-group="{{ ticket.assignee.group_id|default:'' }}">
                 <td>{{ ticket.id }}</td>
                 <td><span class="status-dot status-{{ ticket.status|lower }}"></span>{{ ticket.subject }}</td>
                 <td>{{ ticket.requester.name }}</td>
                 <td>{{ ticket.updated_at }}</td>
                 <td>{{ ticket.service }}</td>
                 <td>{{ ticket.assignee.name }}</td>
+                <td>
+                    {% if ticket.satisfaction_score == 'good' %}
+                    <span class="sat-chip sat-chip-good" title="Buena valoración"><i class="fas fa-thumbs-up"></i></span>
+                    {% elif ticket.satisfaction_score == 'bad' %}
+                    <span class="sat-chip sat-chip-bad" title="Mala valoración"><i class="fas fa-thumbs-down"></i></span>
+                    {% else %}<span class="sat-chip-none">—</span>{% endif %}
+                </td>
             </tr>
             {% endfor %}
             {% else %}
             <tr>
-                <td colspan="6">No hay tickets pendientes.</td>
+                <td colspan="7">No hay tickets pendientes.</td>
             </tr>
             {% endif %}
         </tbody>
@@ -119,7 +132,9 @@
 
 {% block extra_js %}
 <script>
-    // Abrir ticket en pestaña usando el gestor central (tabs.js)
+    const CURRENT_USER_ID = {{ current_user_id }};
+    const CURRENT_USER_GROUP_ID = {% if current_user_group_id %}{{ current_user_group_id }}{% else %}null{% endif %};
+
     function openTicket(ticketId, subject) {
         const tabText = subject || "Ticket " + ticketId;
         const tabUrl = "{% url 'create_ticket' %}?id=" + ticketId;
@@ -130,31 +145,34 @@
         }
     }
 
-    // Filtro de estadísticas → oculta/enseña filas de la tabla
     document.querySelectorAll('.stat').forEach(stat => {
-        stat.addEventListener('click', () => {
-            const filter = stat.getAttribute('data-filter');
-            filterTable(filter);
-        });
+        stat.addEventListener('click', () => filterTable(stat.getAttribute('data-filter')));
     });
 
     function filterTable(filter) {
-        const rows = document.querySelectorAll('.tabla tbody tr');
+        const rows = document.querySelectorAll('.tabla tbody tr[data-status]');
         rows.forEach(row => {
-            row.style.display = 'table-row';
-            if (filter === 'you' && !row.innerHTML.includes('YOU')) {
-                row.style.display = 'none';
-            } else if (filter === 'groups' && !row.innerHTML.includes('GROUPS')) {
-                row.style.display = 'none';
-            } else if (filter === 'bien' && !row.innerHTML.includes('BIEN')) {
-                row.style.display = 'none';
-            } else if (filter === 'mal' && !row.innerHTML.includes('MAL')) {
-                row.style.display = 'none';
-            } else if (filter === 'solventado' && !row.innerHTML.includes('SOLVENTADO')) {
-                row.style.display = 'none';
-            } else if (filter === 'satisfaccion' && !row.innerHTML.includes('SATISFACCIÓN')) {
-                row.style.display = 'none';
+            const sat      = row.dataset.satisfaction || '';
+            const status   = row.dataset.status || '';
+            const assignee = row.dataset.assignee || '';
+            const aGroup   = row.dataset.assigneeGroup || '';
+            let show = true;
+
+            if (filter === 'you') {
+                show = assignee === String(CURRENT_USER_ID);
+            } else if (filter === 'groups') {
+                show = CURRENT_USER_GROUP_ID != null && aGroup === String(CURRENT_USER_GROUP_ID);
+            } else if (filter === 'bien') {
+                show = sat === 'good';
+            } else if (filter === 'mal') {
+                show = sat === 'bad';
+            } else if (filter === 'solventado') {
+                show = status === 'closed' || status === 'resolved';
+            } else if (filter === 'satisfaccion') {
+                show = sat === 'good' || sat === 'bad';
             }
+
+            row.style.display = show ? 'table-row' : 'none';
         });
     }
 </script>

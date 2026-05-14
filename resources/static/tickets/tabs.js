@@ -298,6 +298,70 @@
         }
     }
 
+    // ---- Updates popup ----
+    const updPopup = document.createElement('div');
+    updPopup.id = 'upd-popup';
+    updPopup.innerHTML = `
+        <div class="tlp-header">
+            <span class="tlp-badge" id="upd-badge"></span>
+            <span class="tlp-ticket-num" id="upd-ticket-num"></span>
+            <button class="tlp-close" type="button" title="Cerrar">&#x2715;</button>
+        </div>
+        <div class="tlp-subject" id="upd-subject"></div>
+        <div class="upd-meta" id="upd-meta"></div>
+    `;
+    document.body.appendChild(updPopup);
+
+    let updHideTimer = null;
+
+    const STATUS_LABELS = { open:'Open', pending:'Pending', resolved:'Resolved', closed:'Closed' };
+    const PRIORITY_LABELS = { low:'Baja', normal:'Normal', high:'Alta', urgent:'Urgente' };
+
+    function showUpdPopup(item) {
+        clearTimeout(updHideTimer);
+        const status   = item.dataset.status   || '';
+        const id       = item.dataset.id       || '';
+        const subject  = item.dataset.subject  || '';
+        const requester= item.dataset.requester|| '';
+        const assignee = item.dataset.assignee || '';
+        const priority = item.dataset.priority || '';
+
+        updPopup.querySelector('#upd-badge').textContent  = (STATUS_LABELS[status] || status).toUpperCase();
+        updPopup.querySelector('#upd-badge').className    = `tlp-badge status-${status.toLowerCase()}`;
+        updPopup.querySelector('#upd-ticket-num').textContent = `Ticket #${id}`;
+        updPopup.querySelector('#upd-subject').textContent = subject;
+
+        const rows = [];
+        if (requester) rows.push(`<span class="upd-meta-row"><span class="upd-lbl">Solicitante</span> ${requester}</span>`);
+        if (assignee)  rows.push(`<span class="upd-meta-row"><span class="upd-lbl">Asignado</span> ${assignee}</span>`);
+        if (priority)  rows.push(`<span class="upd-meta-row"><span class="upd-lbl">Prioridad</span> ${PRIORITY_LABELS[priority] || priority}</span>`);
+        updPopup.querySelector('#upd-meta').innerHTML = rows.join('');
+
+        const rect = item.getBoundingClientRect();
+        const popW = 300;
+        const gap  = 10;
+        let left = rect.right + gap;
+        if (left + popW > window.innerWidth - 8) left = rect.left - popW - gap;
+        let top = rect.top;
+        const popH = updPopup.offsetHeight || 150;
+        if (top + popH > window.innerHeight - 8) top = window.innerHeight - popH - 8;
+        if (top < 8) top = 8;
+        updPopup.style.left = left + 'px';
+        updPopup.style.top  = top  + 'px';
+        updPopup.classList.add('visible');
+    }
+
+    function hideUpdPopup() {
+        updHideTimer = setTimeout(() => updPopup.classList.remove('visible'), 150);
+    }
+
+    updPopup.addEventListener('mouseenter', () => clearTimeout(updHideTimer));
+    updPopup.addEventListener('mouseleave', hideUpdPopup);
+    updPopup.querySelector('.tlp-close').addEventListener('click', () => {
+        clearTimeout(updHideTimer);
+        updPopup.classList.remove('visible');
+    });
+
     async function refreshUpdates() {
         try {
             const res = await fetch("/api/activity/");
@@ -308,14 +372,28 @@
 
             list.innerHTML = "";
             if (!data.activity || !data.activity.length) {
-                list.innerHTML = "<li style='color:#888'>Sin actualizaciones recientes</li>";
+                list.innerHTML = "<li class='upd-empty'>Sin actualizaciones recientes</li>";
                 return;
             }
             data.activity.forEach(n => {
                 const li = document.createElement("li");
-                li.textContent = `${n.updated_at}  ${n.message}`;
-                li.onclick = () => openTicket(n.ticket_id);
-                li.style.cursor = "pointer";
+                li.className = "upd-item";
+                li.dataset.id        = n.ticket_id;
+                li.dataset.status    = n.status    || '';
+                li.dataset.subject   = n.subject   || '';
+                li.dataset.requester = n.requester || '';
+                li.dataset.assignee  = n.assignee  || '';
+                li.dataset.priority  = n.priority  || '';
+                li.innerHTML = `
+                    <span class="tl-badge status-${(n.status||'').toLowerCase()}">${(n.status||'').slice(0,1).toUpperCase()}</span>
+                    <div class="tl-content">
+                        <div class="tl-subject">#${n.ticket_id} ${n.subject || ''}</div>
+                        <div class="tl-when">${n.updated_at}</div>
+                    </div>
+                `;
+                li.addEventListener('click',       () => openTicket(n.ticket_id));
+                li.addEventListener('mouseenter',  () => showUpdPopup(li));
+                li.addEventListener('mouseleave',  hideUpdPopup);
                 list.appendChild(li);
             });
         } catch (err) {

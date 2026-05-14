@@ -2,13 +2,14 @@
 Definition of views.
 """
 # -*- coding: utf-8 -*-
-from django.db.models import Q
+from django.db.models import Q, OuterRef, Subquery, Count
+from django.utils.dateparse import parse_datetime
 from datetime import datetime, timedelta
 from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import Ticket, Comment, User, TicketTag, Attachment, TicketHistory, TicketEvent, Notification, Role, Group, Macro
+from .models import Ticket, Comment, User, TicketTag, Attachment, TicketHistory, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
@@ -31,191 +32,228 @@ from django.views.decorators.http import require_GET
 
 logger = logging.getLogger('app.views')
 
+_DEFAULT_PAGE_SIZE = 50
+_ALLOWED_PAGE_SIZES = {10, 20, 50, 100, 150}
+
+_TICKET_SORT_FIELDS = {
+    'id':         'id',
+    'subject':    'subject',
+    'requester':  'requester__name',
+    'updated_at': 'updated_at',
+    'service':    'service',
+    'assignee':   'assignee__name',
+}
+
+_CUSTOMER_SORT_FIELDS = {
+    'id':         'id',
+    'name':       'name',
+    'email':      'email',
+    'status':     'group__group_name',
+    'role':       'role__role_name',
+    'group':      'group__group_name',
+    'created_at': 'created_at',
+}
+
+def _parse_page_size(raw):
+    try:
+        size = int(raw or _DEFAULT_PAGE_SIZE)
+        return size if size in _ALLOWED_PAGE_SIZES else _DEFAULT_PAGE_SIZE
+    except (ValueError, TypeError):
+        return _DEFAULT_PAGE_SIZE
+
 
 @login_required
 def home(request):
     user = request.user
 
-    # Tickets asociados al usuario
-    tickets = Ticket.objects.filter(
+    tickets_qs = Ticket.objects.filter(
         Q(requester=user) | Q(assignee=user) | Q(ccs=user)
     ).distinct()
 
-    # --- Sección "Tickets Abiertos" ---
-    abiertos_you = tickets.filter(status="open").count()
+    # --- Tickets Abiertos ---
+    abiertos_you = tickets_qs.filter(status="open").count()
     abiertos_groups = 0
-    if user.group:  # si pertenece a un grupo
+    if user.group:
         abiertos_groups = Ticket.objects.filter(
             assignee__group=user.group, status="open"
         ).distinct().count()
 
-    # --- Sección "Estadísticas de Tickets" ---
-    bien = "-"        # aún no implementado
-    mal = "-"         # aún no implementado
-    solventado = tickets.filter(status="closed").count()
+    solventado = tickets_qs.filter(status__in=["closed", "resolved"]).count()
+
+    # Annotate each ticket with its latest good/bad satisfaction score
+    rating_sub = SatisfactionRating.objects.filter(
+        ticket=OuterRef('pk'), score__in=['good', 'bad']
+    ).order_by('-created_at').values('score')[:1]
+
+    tickets_list = list(
+        tickets_qs
+        .annotate(satisfaction_score=Subquery(rating_sub))
+        .select_related('requester', 'assignee')
+        .order_by('-updated_at')
+        [:100]
+    )
+
+    # Global satisfaction stats (all Zendesk-imported ratings)
+    bien = SatisfactionRating.objects.filter(score='good').count()
+    mal  = SatisfactionRating.objects.filter(score='bad').count()
+    total_rated = bien + mal
+    satisfaccion_pct = round((bien / total_rated) * 100) if total_rated > 0 else None
 
     context = {
         "username": user.name,
         "email": user.email,
-        "tickets": tickets,
-        "my_tickets": tickets,
+        "tickets": tickets_list,
+        "my_tickets": tickets_list,
+        "current_user_id": user.id,
+        "current_user_group_id": user.group_id,
         "stats": {
             "abiertos_you": abiertos_you,
             "abiertos_groups": abiertos_groups,
             "bien": bien,
             "mal": mal,
             "solventado": solventado,
+            "satisfaccion_pct": satisfaccion_pct,
+            "total_rated": total_rated,
         }
     }
     return render(request, "tickets/home.html", context)
 
 @login_required
 def tickets_list(request):
-    if not _is_agent(request.user):
-        tickets = Ticket.objects.filter(
-            Q(requester=request.user) | Q(ccs=request.user)
-        ).distinct()
-        return render(request, "tickets/tickets_list.html", {"tickets": tickets, "filtros": {}})
-
-    tickets = Ticket.objects.all()
-
-    filtros = {
-        "telefonica_mes": tickets.filter(service="Telefonica", created_at__gte=timezone.now()-timedelta(days=30)).count(),
-        "unsolved_no_tareas": tickets.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea")).count(),
-        "unassigned": tickets.filter(assignee__isnull=True).count(),
-        "all_unsolved_no_tareas": tickets.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea")).count(),
-        "recently_updated": tickets.order_by("-updated_at")[:100].count(),
-        "recently_solved": tickets.filter(status="resolved").order_by("-updated_at")[:100].count(),
-        "pendientes": tickets.filter(status="pending").count(),
-        "tareas": tickets.filter(type="tarea").count(),
-        "unsolved_groups": tickets.filter(~Q(status__in=["closed", "resolved"]),assignee__group=request.user.group).count(),
-        "rated_last7": 0,
-        "internos_comuny": tickets.filter(service="Comunycarse", status="open").count(),
-        "abiertos_ecomfax": tickets.filter(service="ecomfax", status="open").count(),
-        "recordia_sgsd": tickets.filter(service="Recordia SGSD", status="open").count(),
-        "closed": tickets.filter(status="closed").count(),
-        "sus_pendientes": tickets.filter(requester=request.user, status="pending").count(),
-        "espera": tickets.filter(status="espera").count() if hasattr(Ticket, "espera") else 0,
-        "abiertos": tickets.filter(status="open").count(),
-        "sus_no_cerrados": tickets.filter(requester=request.user).exclude(status="closed").count(),
-        "ultimos_cerrados": tickets.filter(status="closed").order_by("-updated_at")[:100].count(),
-        "no_resueltos": tickets.exclude(status="resolved").count(),
-        "twitter": tickets.filter(channel="twitter").count(),
-        "twitter_dm": tickets.filter(channel="twitter_dm").count(),
-        "twitter_like": tickets.filter(channel="twitter_like").count(),
-        "sus_tareas": tickets.filter(requester=request.user, type="tarea").count(),
-        "resueltos": tickets.filter(status="resolved").count(),
-        "new_in_groups": tickets.filter(assignee__group=request.user.group,created_at__gte=timezone.now()-timedelta(days=7)).count(),
-        "open": tickets.filter(status="open").count(),
-        "no_update_48h": tickets.filter(updated_at__lte=timezone.now()-timedelta(hours=48)).count(),
-    }
-
-    return render(request, "tickets/tickets_list.html", {"tickets": tickets, "filtros": filtros})
+    # Los filtros se cargan de forma asíncrona desde filter_tickets?counts=1
+    return render(request, "tickets/tickets_list.html", {})
 
 @login_required
 def filter_tickets(request):
     """
-    Devuelve los tickets filtrados en formato JSON según el 'view' seleccionado en la barra lateral.
+    Devuelve tickets paginados en JSON según el 'view' seleccionado.
+    Parámetros: view, page (1-based), counts=1 (opcional, activa el cálculo de contadores).
     """
     view = request.GET.get("view")
-    if _is_agent(request.user):
-        tickets = Ticket.objects.all()
-    else:
-        tickets = Ticket.objects.filter(
-            Q(requester=request.user) | Q(ccs=request.user)
-        ).distinct()
+    compute_counts = request.GET.get("counts", "0") == "1"
+    sort_by  = request.GET.get("sort_by", "")
+    sort_dir = request.GET.get("sort_dir", "asc") if request.GET.get("sort_dir") in ("asc", "desc") else "asc"
+    try:
+        page = max(1, int(request.GET.get("page", 1) or 1))
+    except (ValueError, TypeError):
+        page = 1
+    page_size = _parse_page_size(request.GET.get("page_size"))
 
-    filtros = {
-        "telefonica_mes": tickets.filter(service="Telefonica", created_at__gte=timezone.now()-timedelta(days=30)).count(),
-        "unsolved_no_tareas": tickets.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea")).count(),
-        "unassigned": tickets.filter(assignee__isnull=True).count(),
-        "all_unsolved_no_tareas": tickets.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea")).count(),
-        "recently_updated": tickets.order_by("-updated_at")[:100].count(),
-        "recently_solved": tickets.filter(status="resolved").order_by("-updated_at")[:100].count(),
-        "pendientes": tickets.filter(status="pending").count(),
-        "tareas": tickets.filter(type="tarea").count(),
-        "unsolved_groups": tickets.filter(~Q(status__in=["closed", "resolved"]),assignee__group=request.user.group).count(),
-        "rated_last7": 0,
-        "internos_comuny": tickets.filter(service="Comunycarse", status="open").count(),
-        "abiertos_ecomfax": tickets.filter(service="ecomfax", status="open").count(),
-        "recordia_sgsd": tickets.filter(service="Recordia SGSD", status="open").count(),
-        "closed": tickets.filter(status="closed").count(),
-        "sus_pendientes": tickets.filter(requester=request.user, status="pending").count(),
-        "espera": tickets.filter(status="espera").count() if hasattr(Ticket, "espera") else 0,
-        "abiertos": tickets.filter(status="open").count(),
-        "sus_no_cerrados": tickets.filter(requester=request.user).exclude(status="closed").count(),
-        "ultimos_cerrados": tickets.filter(status="closed").order_by("-updated_at")[:100].count(),
-        "no_resueltos": tickets.exclude(status="resolved").count(),
-        "twitter": tickets.filter(channel="twitter").count(),
-        "twitter_dm": tickets.filter(channel="twitter_dm").count(),
-        "twitter_like": tickets.filter(channel="twitter_like").count(),
-        "sus_tareas": tickets.filter(requester=request.user, type="tarea").count(),
-        "resueltos": tickets.filter(status="resolved").count(),
-        "new_in_groups": tickets.filter(assignee__group=request.user.group,created_at__gte=timezone.now()-timedelta(days=7)).count(),
-        "open": tickets.filter(status="open").count(),
-        "no_update_48h": tickets.filter(updated_at__lte=timezone.now()-timedelta(hours=48)).count(),
-    }
+    if _is_agent(request.user):
+        base_qs = Ticket.objects.order_by('-updated_at')
+    else:
+        base_qs = Ticket.objects.filter(
+            Q(requester=request.user) | Q(ccs=request.user)
+        ).distinct().order_by('-updated_at')
+
+    # Los contadores son costosos (25 COUNTs). Solo se calculan cuando counts=1.
+    filtros = {}
+    if compute_counts:
+        filtros = {
+            "telefonica_mes": base_qs.filter(service="Telefonica", created_at__gte=timezone.now()-timedelta(days=30)).count(),
+            "unsolved_no_tareas": base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea")).count(),
+            "unassigned": base_qs.filter(assignee__isnull=True).count(),
+            "all_unsolved_no_tareas": base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea")).count(),
+            "recently_updated": base_qs.count(),
+            "recently_solved": base_qs.filter(status="resolved").count(),
+            "pendientes": base_qs.filter(status="pending").count(),
+            "tareas": base_qs.filter(type="tarea").count(),
+            "unsolved_groups": base_qs.filter(~Q(status__in=["closed", "resolved"]), assignee__group=request.user.group).count(),
+            "rated_last7": 0,
+            "internos_comuny": base_qs.filter(service="Comunycarse", status="open").count(),
+            "abiertos_ecomfax": base_qs.filter(service="ecomfax", status="open").count(),
+            "recordia_sgsd": base_qs.filter(service="Recordia SGSD", status="open").count(),
+            "closed": base_qs.filter(status="closed").count(),
+            "sus_pendientes": base_qs.filter(requester=request.user, status="pending").count(),
+            "espera": base_qs.filter(status="espera").count() if hasattr(Ticket, "espera") else 0,
+            "abiertos": base_qs.filter(status="open").count(),
+            "sus_no_cerrados": base_qs.filter(requester=request.user).exclude(status="closed").count(),
+            "ultimos_cerrados": base_qs.filter(status="closed").count(),
+            "no_resueltos": base_qs.exclude(status="resolved").count(),
+            "twitter": base_qs.filter(channel="twitter").count(),
+            "twitter_dm": base_qs.filter(channel="twitter_dm").count(),
+            "twitter_like": base_qs.filter(channel="twitter_like").count(),
+            "sus_tareas": base_qs.filter(requester=request.user, type="tarea").count(),
+            "resueltos": base_qs.filter(status="resolved").count(),
+            "new_in_groups": base_qs.filter(assignee__group=request.user.group, created_at__gte=timezone.now()-timedelta(days=7)).count(),
+            "open": base_qs.filter(status="open").count(),
+            "no_update_48h": base_qs.filter(updated_at__lte=timezone.now()-timedelta(hours=48)).count(),
+        }
 
     if view == "telefonica_mes":
-        tickets = tickets.filter(service="Telefonica", created_at__gte=timezone.now()-timedelta(days=30))
+        tickets = base_qs.filter(service="Telefonica", created_at__gte=timezone.now()-timedelta(days=30))
     elif view == "unsolved_no_tareas":
-        tickets = tickets.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea"))
+        tickets = base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea"))
     elif view == "unassigned":
-        tickets = tickets.filter(assignee__isnull=True)
+        tickets = base_qs.filter(assignee__isnull=True)
     elif view == "all_unsolved_no_tareas":
-        tickets = tickets.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea"))
+        tickets = base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea"))
     elif view == "recently_updated":
-        tickets = tickets.order_by("-updated_at")[:100]
+        tickets = base_qs
     elif view == "recently_solved":
-        tickets = tickets.filter(status="resolved").order_by("-updated_at")[:100]
+        tickets = base_qs.filter(status="resolved")
     elif view == "pendientes":
-        tickets = tickets.filter(status="pending")
+        tickets = base_qs.filter(status="pending")
     elif view == "tareas":
-        tickets = tickets.filter(type="tarea")
+        tickets = base_qs.filter(type="tarea")
     elif view == "unsolved_groups":
-        tickets = tickets.filter(~Q(status__in=["closed", "resolved"]), assignee__group=request.user.group)
+        tickets = base_qs.filter(~Q(status__in=["closed", "resolved"]), assignee__group=request.user.group)
     elif view == "rated_last7":
-        tickets = tickets.none()  # placeholder si aún no tienes ratings
+        since = timezone.now() - timedelta(days=7)
+        rated_ids = SatisfactionRating.objects.filter(
+            created_at__gte=since, score__in=['good', 'bad']
+        ).values_list('ticket_id', flat=True)
+        tickets = base_qs.filter(id__in=rated_ids)
     elif view == "internos_comuny":
-        tickets = tickets.filter(service="Comunycarse", status="open")
+        tickets = base_qs.filter(service="Comunycarse", status="open")
     elif view == "abiertos_ecomfax":
-        tickets = tickets.filter(service="ecomfax", status="open")
+        tickets = base_qs.filter(service="ecomfax", status="open")
     elif view == "recordia_sgsd":
-        tickets = tickets.filter(service="Recordia SGSD", status="open")
+        tickets = base_qs.filter(service="Recordia SGSD", status="open")
     elif view == "closed":
-        tickets = tickets.filter(status="closed")
+        tickets = base_qs.filter(status="closed")
     elif view == "sus_pendientes":
-        tickets = tickets.filter(requester=request.user, status="pending")
+        tickets = base_qs.filter(requester=request.user, status="pending")
     elif view == "espera":
-        tickets = tickets.filter(status="espera") if hasattr(Ticket, "espera") else tickets.none()
+        tickets = base_qs.filter(status="espera") if hasattr(Ticket, "espera") else base_qs.none()
     elif view == "abiertos":
-        tickets = tickets.filter(status="open")
+        tickets = base_qs.filter(status="open")
     elif view == "sus_no_cerrados":
-        tickets = tickets.filter(requester=request.user).exclude(status="closed")
+        tickets = base_qs.filter(requester=request.user).exclude(status="closed")
     elif view == "ultimos_cerrados":
-        tickets = tickets.filter(status="closed").order_by("-updated_at")[:100]
+        tickets = base_qs.filter(status="closed")
     elif view == "no_resueltos":
-        tickets = tickets.exclude(status="resolved")
+        tickets = base_qs.exclude(status="resolved")
     elif view == "twitter":
-        tickets = tickets.filter(channel="twitter")
+        tickets = base_qs.filter(channel="twitter")
     elif view == "twitter_dm":
-        tickets = tickets.filter(channel="twitter_dm")
+        tickets = base_qs.filter(channel="twitter_dm")
     elif view == "twitter_like":
-        tickets = tickets.filter(channel="twitter_like")
+        tickets = base_qs.filter(channel="twitter_like")
     elif view == "sus_tareas":
-        tickets = tickets.filter(requester=request.user, type="tarea")
+        tickets = base_qs.filter(requester=request.user, type="tarea")
     elif view == "resueltos":
-        tickets = tickets.filter(status="resolved")
+        tickets = base_qs.filter(status="resolved")
     elif view == "new_in_groups":
-        tickets = tickets.filter(assignee__group=request.user.group, created_at__gte=timezone.now()-timedelta(days=7))
+        tickets = base_qs.filter(assignee__group=request.user.group, created_at__gte=timezone.now()-timedelta(days=7))
     elif view == "open":
-        tickets = tickets.filter(status="open")
+        tickets = base_qs.filter(status="open")
     elif view == "no_update_48h":
-        tickets = tickets.filter(updated_at__lte=timezone.now()-timedelta(hours=48))
+        tickets = base_qs.filter(updated_at__lte=timezone.now()-timedelta(hours=48))
     else:
-        tickets = Ticket.objects.all()  # fallback
+        tickets = base_qs
 
-    # serialización para la tabla
+    db_sort = _TICKET_SORT_FIELDS.get(sort_by)
+    if db_sort:
+        tickets = tickets.order_by(f'-{db_sort}' if sort_dir == 'desc' else db_sort)
+
+    total = tickets.count()
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = min(page, total_pages)
+    offset = (page - 1) * page_size
+
+    page_qs = tickets.select_related('requester', 'assignee')[offset:offset + page_size]
+
     data = [
         {
             "id": t.id,
@@ -226,9 +264,19 @@ def filter_tickets(request):
             "assignee": t.assignee.name if t.assignee else "-",
             "status": t.status,
         }
-        for t in tickets
+        for t in page_qs
     ]
-    return JsonResponse({"tickets": data, "filtros": filtros})
+    return JsonResponse({
+        "tickets": data,
+        "filtros": filtros,
+        "pagination": {
+            "total": total,
+            "page": page,
+            "total_pages": total_pages,
+            "page_size": page_size,
+        },
+        "sort": {"sort_by": sort_by if db_sort else "", "sort_dir": sort_dir},
+    })
 
 @login_required
 def filter_customers(request):
@@ -236,13 +284,15 @@ def filter_customers(request):
          return JsonResponse({"error": "No permission"}, status=403)
 
     view = request.GET.get("view")
+    sort_by  = request.GET.get("sort_by", "")
+    sort_dir = request.GET.get("sort_dir", "asc") if request.GET.get("sort_dir") in ("asc", "desc") else "asc"
+    try:
+        page = max(1, int(request.GET.get("page", 1) or 1))
+    except (ValueError, TypeError):
+        page = 1
+    page_size = _parse_page_size(request.GET.get("page_size"))
 
-    # Base para la consulta
-    base_queryset = User.objects.all()
-
-    # Si es solo agente y no admin, podríamos hacer que solo vea "End user" 
-    # pero según requerimientos los agentes deberían ver tanto "end user" como otros operadores.
-    # Por ahora dejamos que vean todos, y el controlador visual filtrará (u otro mecanismo).
+    base_queryset = User.objects.select_related('role', 'group').order_by('name')
     if not _is_admin(request.user):
          base_queryset = base_queryset.exclude(role__role_name__in=['admin', 'administrator'])
 
@@ -251,11 +301,21 @@ def filter_customers(request):
     else:  # "all"
         users = base_queryset.exclude(group__group_name="Suspended")
 
-    # contadores
     filtros = {
         "all": base_queryset.exclude(group__group_name="Suspended").count(),
         "suspended": base_queryset.filter(group__group_name="Suspended").count(),
     }
+
+    db_sort = _CUSTOMER_SORT_FIELDS.get(sort_by)
+    if db_sort:
+        users = users.order_by(f'-{db_sort}' if sort_dir == 'desc' else db_sort)
+
+    total = users.count()
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = min(page, total_pages)
+    offset = (page - 1) * page_size
+
+    page_qs = users[offset:offset + page_size]
 
     data = [
         {
@@ -267,10 +327,20 @@ def filter_customers(request):
             "role": u.role.role_name if u.role else "-",
             "group": u.group.group_name if u.group else "-",
         }
-        for u in users
+        for u in page_qs
     ]
 
-    return JsonResponse({"customers": data, "filtros": filtros})
+    return JsonResponse({
+        "customers": data,
+        "filtros": filtros,
+        "pagination": {
+            "total": total,
+            "page": page,
+            "total_pages": total_pages,
+            "page_size": page_size,
+        },
+        "sort": {"sort_by": sort_by if db_sort else "", "sort_dir": sort_dir},
+    })
 
 @login_required
 def customer_profile(request):
@@ -531,6 +601,9 @@ def create_ticket(request):
         asignado_id    = request.POST.get('asignado')
         grupo_id       = request.POST.get('grupo') or None
 
+        due_at_raw = (request.POST.get('due_at') or '').strip()
+        due_at = parse_datetime(due_at_raw.replace('T', ' ')) if due_at_raw else None
+
         security_related = request.POST.get('security_related') in ('1', 'true', 'on')
         monitoring       = request.POST.get('monitoring')       in ('1', 'true', 'on')
         approval_status  = (request.POST.get('approval_status') or '').strip() or None
@@ -580,6 +653,7 @@ def create_ticket(request):
             ticket.priority    = priority
             ticket.status      = status
             ticket.assigned_group_id = grupo_id if grupo_id else None
+            ticket.due_at = due_at
             ticket.security_related = security_related
             ticket.monitoring = monitoring
             ticket.approval_status = approval_status
@@ -636,6 +710,7 @@ def create_ticket(request):
             language=language,
             created_at=timezone.now(),
             category=category,
+            due_at=due_at,
             security_related=security_related,
             monitoring=monitoring,
             approval_status=approval_status,
@@ -658,10 +733,10 @@ def create_ticket(request):
         return redirect(f'{request.path}?id={ticket.id}')
 
     # GET .
-    usuarios = User.objects.filter(is_active=True).order_by('name')
-    agentes = User.objects.filter(group=2).order_by('name')
-    tags = TicketTag.objects.all()
-    todos = User.objects.all()
+    usuarios = User.objects.filter(is_active=True).only('id', 'name', 'email').order_by('name')
+    agentes = User.objects.filter(group=2).only('id', 'name', 'email').order_by('name')
+    tags = TicketTag.objects.only('id', 'name').all()
+    todos = User.objects.only('id', 'name', 'email').order_by('name')
     grupos = Group.objects.all().order_by('group_name')
 
     # Marcas: combinamos las hardcoded con las que ya existen en BD (p.ej. importadas de Zendesk)
@@ -682,23 +757,21 @@ def create_ticket(request):
     # --- Historial (interacciones) del solicitante: sus tickets más recientes ---
     user_timeline = []
     if ticket_obj and ticket_obj.requester_id:
-        # Trae los 30 más recientes; incluye el actual
+        # Subquery para obtener el último comentario público en una sola consulta (evita N+1)
+        last_comment_sub = Comment.objects.filter(
+            ticket=OuterRef('pk'),
+            is_public=True,
+        ).order_by('-created_at').values('content')[:1]
+
         related = (Ticket.objects
                    .filter(requester_id=ticket_obj.requester_id)
                    .select_related('requester', 'assignee')
+                   .annotate(last_pub_content=Subquery(last_comment_sub))
                    .order_by('-updated_at')[:30])
 
         for t in related:
-            # Último comentario público (snippet)
-            last_pub = (Comment.objects
-                        .filter(ticket_id=t.id, is_public=True)
-                        .order_by('-created_at')
-                        .values('content', 'created_at')
-                        .first())
-            snippet = ''
-            if last_pub:
-                raw = last_pub['content'] or ''
-                snippet = (raw[:160] + '…') if len(raw) > 160 else raw
+            raw = t.last_pub_content or ''
+            snippet = (raw[:160] + '…') if len(raw) > 160 else raw
 
             desc_raw = t.description or ''
             desc_snippet = (desc_raw[:200] + '…') if len(desc_raw) > 200 else desc_raw
@@ -740,6 +813,15 @@ def create_ticket(request):
     else:
         feed = []
 
+    ticket_satisfaction = None
+    if ticket_obj:
+        ticket_satisfaction = (
+            SatisfactionRating.objects
+            .filter(ticket=ticket_obj, score__in=['good', 'bad'])
+            .order_by('-created_at')
+            .first()
+        )
+
     context = {
         'usuarios': usuarios,
         'agentes': agentes,
@@ -753,6 +835,8 @@ def create_ticket(request):
         'feed': feed,
         'can_use_internal': _is_agent(request.user),
         'user_timeline': user_timeline,
+        'ticket_satisfaction': ticket_satisfaction,
+        'current_user_id': request.user.id,
     }
     return render(request, 'tickets/create_ticket.html', context)
 
@@ -800,6 +884,25 @@ def reopen_ticket(request, pk):
     ticket.status = 'open'
     ticket.save()
     return redirect('ticket_detail', pk=pk)
+
+@login_required
+@require_POST
+def take_ticket(request, ticket_id):
+    ticket = get_object_or_404(Ticket, id=ticket_id)
+    if ticket.assignee_id == request.user.id:
+        return JsonResponse({'success': False, 'error': 'already_assigned'})
+    prev = str(ticket.assignee_id) if ticket.assignee_id else None
+    ticket.assignee = request.user
+    ticket.save(update_fields=['assignee'])
+    TicketEvent.objects.create(
+        ticket=ticket, actor=request.user,
+        field_name='assignee_id',
+        old_value=prev,
+        new_value=str(request.user.id),
+    )
+    _notify_users(ticket, f"Ticket #{ticket.id} asignado a {request.user.name}", actor=request.user)
+    return JsonResponse({'success': True, 'assignee_id': request.user.id, 'assignee_name': request.user.name})
+
 
 # Funcionalidades de Comentarios
 
@@ -903,6 +1006,7 @@ def recent_activity_api(request):
         tickets = (
             Ticket.objects
             .filter(Q(assignee=request.user) | Q(created_by=request.user))
+            .select_related('requester', 'assignee')
             .order_by('-updated_at')
             .distinct()[:10]
         )
@@ -910,15 +1014,19 @@ def recent_activity_api(request):
         tickets = (
             Ticket.objects
             .filter(Q(requester=request.user) | Q(ccs=request.user))
+            .select_related('requester', 'assignee')
             .order_by('-updated_at')
             .distinct()[:10]
         )
     data = [
         {
             "ticket_id": t.id,
-            "message": f"#{t.id} {t.subject}",
+            "subject": t.subject,
             "updated_at": t.updated_at.strftime("%d/%m %H:%M") if t.updated_at else "",
             "status": t.status,
+            "priority": t.priority or "",
+            "requester": t.requester.name if t.requester else "",
+            "assignee": t.assignee.name if t.assignee else "",
         }
         for t in tickets
     ]

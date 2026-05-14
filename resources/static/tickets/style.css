@@ -864,6 +864,39 @@ body, html {
         background-color: #d6eaff;
         font-weight: bold;
     }
+/* === Sortable column headers === */
+.tabla th.sortable {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
+}
+
+.tabla th.sortable:hover {
+    background: #f3ecfa;
+    color: #6b1fa3;
+}
+
+.tabla th.sort-asc,
+.tabla th.sort-desc {
+    background: #ede0f7;
+    color: #6b1fa3;
+}
+
+.tabla th .sort-icon {
+    margin-left: 5px;
+    font-size: 10px;
+    opacity: 0.45;
+    vertical-align: middle;
+}
+
+.tabla th.sortable:hover .sort-icon,
+.tabla th.sort-asc .sort-icon,
+.tabla th.sort-desc .sort-icon {
+    opacity: 1;
+    color: #983dd4;
+}
+
 /* === Ticket status indicator (shared) === */
 .status-dot {
     display: inline-block;
@@ -874,22 +907,10 @@ body, html {
     vertical-align: middle;
 }
 
-.status-open {
-    background: #2ecc71;
-}
-/* verde */
-.status-pending {
-    background: #f1c40f;
-}
-/* amarillo */
-.status-resolved {
-    background: #339af0;
-}
-/* azul */
-.status-closed {
-    background: #adb5bd;
-}
-/* gris */
+.status-open     { background: #3b82f6; }
+.status-pending  { background: #f59e0b; }
+.status-resolved { background: #22c55e; }
+.status-closed   { background: #6b7280; }
 /* ===== Resultados de búsqueda ===== */
 .navbar-center {
     position: relative; /* necesario para posicionar el dropdown relativo a la barra */

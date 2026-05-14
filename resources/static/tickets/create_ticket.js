@@ -798,4 +798,56 @@ document.addEventListener('DOMContentLoaded', () => {
         tlPopup.classList.remove('visible');
     });
 
+    // ---- Timestamps relativos ----
+    function timeAgo(isoString) {
+        const diff = Math.floor((Date.now() - new Date(isoString)) / 1000);
+        if (diff < 60)        return 'hace un momento';
+        if (diff < 3600)      return `hace ${Math.floor(diff / 60)} min`;
+        if (diff < 86400)     return `hace ${Math.floor(diff / 3600)} h`;
+        if (diff < 2592000)   return `hace ${Math.floor(diff / 86400)} días`;
+        return null;
+    }
+
+    function updateRelativeTimestamps() {
+        document.querySelectorAll('[data-ts]').forEach(el => {
+            const rel = timeAgo(el.dataset.ts);
+            if (rel) el.textContent = rel;
+        });
+    }
+
+    updateRelativeTimestamps();
+    setInterval(updateRelativeTimestamps, 60000);
+
+    // ---- Botón Take it ----
+    const takeItBtn = document.getElementById('take-it-btn');
+    if (takeItBtn) {
+        takeItBtn.addEventListener('click', async () => {
+            const ticketId = takeItBtn.dataset.ticketId;
+            takeItBtn.disabled = true;
+            try {
+                const resp = await fetch(`/tickets/${ticketId}/take/`, {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': getCookie('csrftoken') },
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    const sel = document.getElementById('asignado');
+                    if (sel) {
+                        if (!sel.querySelector(`option[value="${data.assignee_id}"]`)) {
+                            const opt = new Option(data.assignee_name, data.assignee_id, true, true);
+                            sel.append(opt);
+                        }
+                        $(sel).val(data.assignee_id).trigger('change');
+                    }
+                    takeItBtn.innerHTML = '<i class="fas fa-check"></i> Asignado a ti';
+                    takeItBtn.classList.add('take-it-done');
+                    takeItBtn.disabled = true;
+                }
+            } catch (e) {
+                takeItBtn.disabled = false;
+                console.error('take_ticket error', e);
+            }
+        });
+    }
+
 });

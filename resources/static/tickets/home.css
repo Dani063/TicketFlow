@@ -88,7 +88,7 @@
 }
 
     .stat:hover {
-        background-color: #e0e0e0; /* Cambia el color de fondo al pasar el ratón */
+        background-color: #e0e0e0; /* Cambia el color de fondo al pasar el ratï¿½n */
     }
 
 .stat-content {
@@ -126,9 +126,14 @@
 
 .tabla {
     display: flex;
-    flex-grow: 1; 
-    overflow: auto; 
-    max-height: calc(100vh - 150px); 
+    flex-grow: 1;
+    overflow: auto;
+    max-height: calc(100vh - 150px);
+}
+
+/* Tabla en vistas con barra de paginaciÃ³n: deja espacio para ella */
+.with-pagination .tabla {
+    max-height: calc(100vh - 200px);
 }
 
     .tabla table {
@@ -152,19 +157,281 @@
             background-color: #ffffff;
             font-weight: bold;
         }
+/* Satisfaction chips in table */
+.sat-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    font-size: 11px;
+}
+.sat-chip-good  { background: #dcfce7; color: #15803d; }
+.sat-chip-bad   { background: #fee2e2; color: #dc2626; }
+.sat-chip-none  { color: #bbb; font-size: 13px; }
+
+/* Good/bad number colors in stats */
+.sat-good-num { color: #15803d; }
+.sat-bad-num  { color: #dc2626; }
+
+/* Small subtitle under a stat */
+.stat-sub {
+    font-size: 10px;
+    color: #999;
+    margin-top: 2px;
+}
+
 .updates ul {
     list-style: none;
     padding: 0;
     margin: 0;
 }
 
-.updates li {
+/* Styled update items */
+.upd-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
     padding: 8px 10px;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid #f0f0f0;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.15s;
+}
+.upd-item:hover { background: #f9fafb; }
+
+.upd-empty {
+    font-size: 12px;
+    color: #aaa;
+    padding: 8px 10px;
 }
 
-    .updates li:hover {
-        background: #f5f5f5;
-    }
+/* Shared tl-badge and tl-content styles (also in create_ticket.css for ticket page) */
+.upd-item .tl-badge {
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+.upd-item .tl-badge.status-open     { background: #3b82f6; }
+.upd-item .tl-badge.status-pending  { background: #f59e0b; }
+.upd-item .tl-badge.status-resolved { background: #22c55e; }
+.upd-item .tl-badge.status-closed   { background: #6b7280; }
+
+.upd-item .tl-content { flex: 1; min-width: 0; }
+
+.upd-item .tl-subject {
+    font-size: 12.5px;
+    color: #1f2937;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.upd-item .tl-when {
+    font-size: 11px;
+    color: #9ca3af;
+    margin-top: 2px;
+}
+
+/* Shared popup header styles (reused from create_ticket.css) */
+.tlp-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.tlp-badge {
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+.tlp-badge.status-open     { background: #3b82f6; }
+.tlp-badge.status-pending  { background: #f59e0b; }
+.tlp-badge.status-resolved { background: #22c55e; }
+.tlp-badge.status-closed   { background: #6b7280; }
+.tlp-ticket-num {
+    font-size: 12px;
+    color: #475569;
+    flex: 1;
+}
+.tlp-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #94a3b8;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 2px;
+}
+.tlp-close:hover { color: #334155; }
+.tlp-subject {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 4px;
+    line-height: 1.4;
+}
+
+/* Updates hover popup */
+#upd-popup {
+    position: fixed;
+    z-index: 1200;
+    width: 300px;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.13);
+    padding: 14px 16px;
+    display: none;
+    pointer-events: auto;
+}
+#upd-popup.visible { display: block; }
+
+.upd-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 10px;
+    border-top: 1px solid #f1f5f9;
+    padding-top: 8px;
+}
+.upd-meta-row {
+    font-size: 12px;
+    color: #475569;
+    display: flex;
+    gap: 6px;
+}
+.upd-lbl {
+    font-size: 11px;
+    color: #94a3b8;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: .4px;
+    white-space: nowrap;
+    min-width: 70px;
+}
+
+/* Pagination bar */
+.pagination-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    background: #fff;
+    border-top: 1px solid #e8e8e8;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.page-numbers {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.page-num-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    padding: 0 5px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    font-size: 13px;
+    cursor: pointer;
+    color: #444;
+    transition: background 0.15s, color 0.15s;
+    line-height: 1;
+    font-family: inherit;
+}
+
+.page-num-btn:hover:not(:disabled):not(.active) {
+    background: #e8eef5;
+}
+
+.page-num-btn.active {
+    background: #C18BE5;
+    color: #fff;
+    font-weight: 600;
+}
+
+.page-num-btn.page-arrow {
+    font-size: 17px;
+    font-weight: 300;
+}
+
+.page-num-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.page-ellipsis {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    font-size: 13px;
+    color: #888;
+    user-select: none;
+}
+
+.page-size-sep {
+    font-size: 13px;
+    color: #555;
+    border-left: 1px solid #ddd;
+    padding-left: 10px;
+    margin-left: 4px;
+}
+
+.page-size-wrapper {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.page-size-wrapper select {
+    -webkit-appearance: none;
+    appearance: none;
+    padding: 3px 22px 3px 8px;
+    font-size: 13px;
+    border: 1px solid #c8c8c8;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+    min-width: 48px;
+    color: #333;
+    font-family: inherit;
+}
+
+.page-size-wrapper::after {
+    content: '';
+    position: absolute;
+    right: 7px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #555;
+    pointer-events: none;
+}
+
+.registros-info {
+    font-size: 12px;
+    color: #666;
+    white-space: nowrap;
+}

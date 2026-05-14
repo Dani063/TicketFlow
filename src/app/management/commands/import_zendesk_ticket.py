@@ -467,6 +467,9 @@ class Command(BaseCommand):
                 ts_updates["updated_at"] = updated_at
             if mapped_status in ("closed", "resolved") and updated_at:
                 ts_updates["closed_at"] = updated_at
+            due_at = parse_datetime(zt["due_at"]) if zt.get("due_at") else None
+            if due_at:
+                ts_updates["due_at"] = due_at
             if ts_updates:
                 Ticket.objects.filter(pk=ticket.pk).update(**ts_updates)
 
@@ -499,6 +502,7 @@ class Command(BaseCommand):
                     html_body=zc.get("html_body") or "",
                     is_public=bool(zc.get("public")),
                     zendesk_id=zc_id,
+                    via_channel=(zc.get("via") or {}).get("channel") or "",
                 )
                 c_created = parse_datetime(zc["created_at"]) if zc.get("created_at") else None
                 if c_created:

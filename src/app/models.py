@@ -119,6 +119,7 @@ class Ticket(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     closed_at = models.DateTimeField(null=True, blank=True)
+    due_at = models.DateTimeField(null=True, blank=True)
     category = models.CharField(max_length=255, null=True)
     security_related = models.BooleanField(null=True, blank=True)
     monitoring = models.BooleanField(null=True, blank=True)
@@ -151,6 +152,7 @@ class Comment(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     content = models.TextField(null=False)
     html_body = models.TextField(null=True, blank=True)
+    via_channel = models.CharField(max_length=100, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     is_public = models.BooleanField(default=True)
 
@@ -210,3 +212,29 @@ class Macro(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class SatisfactionRating(models.Model):
+    SCORE_CHOICES = [
+        ('offered',    'Offered'),
+        ('unoffered',  'Unoffered'),
+        ('good',       'Good'),
+        ('bad',        'Bad'),
+    ]
+    zendesk_id      = models.BigIntegerField(unique=True, db_index=True)
+    ticket          = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True,
+                                        related_name='satisfaction_ratings')
+    zendesk_ticket_id = models.BigIntegerField(db_index=True)
+    score           = models.CharField(max_length=50, choices=SCORE_CHOICES)
+    comment         = models.TextField(null=True, blank=True)
+    reason          = models.CharField(max_length=255, null=True, blank=True)
+    requester_zendesk_id = models.BigIntegerField(null=True, blank=True)
+    assignee_zendesk_id  = models.BigIntegerField(null=True, blank=True)
+    created_at      = models.DateTimeField()
+    updated_at      = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Rating #{self.zendesk_id}: {self.score}"
