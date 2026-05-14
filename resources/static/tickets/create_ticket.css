@@ -120,47 +120,195 @@
     cursor: default;
 }
 
+/* ===== Panel layout system ===== */
 .ticket-form {
+    --panel-left-w: 320px;
+    --panel-right-w: 360px;
+    --compose-h: 190px;
     display: flex;
-    height: 100vh; /* Ocupa toda la altura de la ventana */
-    gap: 10px;
-    padding: 0px;
-    background-color: #f8f9f9;
+    height: calc(100vh - 130px); /* fallback — JS corrige el valor real en initPanels */
+    gap: 0;
+    padding: 4px;
+    background-color: #f0f2f5;
+    box-sizing: border-box;
 }
 
-
+/* Side panels */
 .column {
-    flex: 1;
-    max-width: 350px;
-    min-width: 280px;
-    background-color: #ffffff;
-    padding: 15px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    border-radius: 5px;
-    /* Scroll en la columna */
-    overflow-y: auto;
-    height: calc(100vh - 40px); /* Ajuste de altura dinámico */
+    flex: 0 0 var(--panel-left-w);
+    width: var(--panel-left-w);
+    min-width: 36px;
+    position: relative;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    border-radius: 6px;
+    overflow: visible;          /* permite que el botón tab sobresalga */
+    z-index: 2;                 /* por encima de column2 para el botón */
+    transition: flex-basis .25s ease, width .25s ease;
+    margin-right: 4px;
 }
 
-    /* Asegurar que la columna pueda desplazarse */
-    .column > div {
-        min-height: 7%;
-        margin-bottom: 10px; /* Añadir margen inferior para espacio en blanco */
-    }
+.column.collapsed {
+    flex-basis: 36px !important;
+    width: 36px !important;
+}
 
-    /* Personalización de la barra de desplazamiento */
-    .column::-webkit-scrollbar {
-        width: 8px;
-    }
+.column3.requester-info {
+    flex: 0 0 var(--panel-right-w);
+    width: var(--panel-right-w);
+    min-width: 36px;
+    position: relative;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    border-radius: 6px;
+    overflow: visible;          /* permite que el botón tab sobresalga */
+    z-index: 2;
+    transition: flex-basis .25s ease, width .25s ease;
+    margin-left: 4px;
+}
 
-    .column::-webkit-scrollbar-thumb {
-        background-color: #ccc;
-        border-radius: 4px;
-    }
+.column3.requester-info.collapsed {
+    flex-basis: 36px !important;
+    width: 36px !important;
+}
 
-        .column::-webkit-scrollbar-thumb:hover {
-            background-color: #999;
-        }
+/* Panel inner scroll container — clips content, el .column puede overflow: visible */
+.panel-inner {
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 15px;
+    box-sizing: border-box;
+    opacity: 1;
+    transition: opacity .15s ease;
+}
+
+.column.collapsed .panel-inner,
+.column3.collapsed .panel-inner {
+    opacity: 0;
+    pointer-events: none;
+    visibility: hidden;
+}
+
+.panel-inner::-webkit-scrollbar { width: 6px; }
+.panel-inner::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
+.panel-inner::-webkit-scrollbar-thumb:hover { background: #bbb; }
+
+/* Panel toggle tab */
+.panel-tab {
+    position: absolute;
+    top: 50%;
+    right: -14px;      /* arrow centered on panel edge */
+    transform: translateY(-50%);
+    z-index: 20;
+    padding: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    opacity: 0;
+    transition: opacity .2s ease;
+}
+
+/* Show on panel hover or when collapsed */
+.column:hover .panel-tab,
+.column.collapsed .panel-tab,
+.column3:hover .panel-tab,
+.column3.collapsed .panel-tab { opacity: 1; }
+
+/* Label — hidden by default, slides in on button hover */
+.panel-tab-label {
+    background: #1f2937;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    font-family: inherit;
+    line-height: 1;
+    border-radius: 6px;     /* todas las esquinas redondeadas */
+    padding: 5px 0;
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    margin-right: 6px;      /* separación entre label y círculo */
+    transition: max-width .2s ease, opacity .15s ease, padding .15s ease, margin .15s ease;
+}
+
+.panel-tab:hover .panel-tab-label {
+    max-width: 110px;
+    opacity: 1;
+    padding: 5px 10px;
+}
+
+/* Right panel — label is to the RIGHT of arrow, so margin is on the left */
+.panel-tab-right .panel-tab-label {
+    margin-right: 0;
+    margin-left: 6px;
+}
+
+/* Round arrow circle */
+.panel-tab-arrow {
+    background: #1f2937;
+    color: #fff;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 12px;
+    line-height: 1;
+    flex-shrink: 0;
+    box-shadow: 0 1px 4px rgba(0,0,0,.25);
+    transition: background .15s;
+}
+
+.panel-tab:hover .panel-tab-label { background: #6d28d9; }
+.panel-tab:hover .panel-tab-arrow  { background: #7c3aed; }
+
+/* Right panel — arrow sticks out from the LEFT edge; label appears to the right */
+.panel-tab-right {
+    right: auto;
+    left: -14px;
+}
+
+/* Resize handle between panels */
+.resize-handle {
+    width: 5px;
+    flex-shrink: 0;
+    background: transparent;
+    cursor: col-resize;
+    border-radius: 3px;
+    transition: background .15s;
+    position: relative;
+    z-index: 10;
+}
+.resize-handle:hover,
+.resize-handle.dragging { background: rgba(193,139,229,.5); }
+
+/* ===== Responsive breakpoints ===== */
+@media (max-width: 1280px) {
+    .ticket-form { --panel-right-w: 300px; }
+}
+@media (max-width: 1100px) {
+    .ticket-form { --panel-left-w: 280px; --panel-right-w: 280px; }
+}
+/* Auto-collapse right panel on narrow screens */
+@media (max-width: 960px) {
+    #panelRight { flex-basis: 36px !important; width: 36px !important; }
+    #panelRight .panel-inner { opacity: 0; pointer-events: none; visibility: hidden; }
+    #panelRight .panel-tab-right .fas { transform: rotate(180deg); }
+}
+@media (max-width: 720px) {
+    #panelLeft { flex-basis: 36px !important; width: 36px !important; }
+    #panelLeft .panel-inner { opacity: 0; pointer-events: none; visibility: hidden; }
+    #panelLeft .panel-tab .fas { transform: rotate(180deg); }
+}
+
+/* Legacy selectors still used inside .panel-inner */
+.column > div { margin-bottom: 0; }
 
 .form-group {
     margin-bottom: 15px;
@@ -229,17 +377,19 @@ input, select {
     margin-bottom: 300px;
 }
 
-/* Estilos para la segunda columna */
+/* Center column — fills remaining space, flex column so messages-box expands */
 .column2 {
-    flex: 1;
-    max-width: 1000px;
-    min-width: 450px;
-    background-color: #ffffff;
-    padding: 15px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    border-radius: 5px;
-    overflow-y: auto;
-    height: calc(100vh - 40px); /* Ajuste de altura dinámico */
+    flex: 1 1 0;
+    min-width: 380px;
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    border-radius: 6px;
+    padding: 12px 15px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100%;
+    box-sizing: border-box;
 }
 
 /* Barra de Subject */
@@ -255,19 +405,19 @@ input, select {
         font-size: 14px;
     }
 
-/* Cuadro de mensajes */
+/* Cuadro de mensajes — ocupa todo el espacio disponible en .column2 */
 .messages-box {
     flex: 1;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 8px;
     background-color: #f8f9f9;
     padding: 12px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    margin-bottom: 15px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    margin-bottom: 10px;
     overflow-y: auto;
-    height: calc(100vh - 500px);
 }
 
 .message {
@@ -415,38 +565,91 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 }
 .quote-toggle:hover { background: #e4e4e4; }
 
+/* Horizontal drag handle between messages and compose */
+.compose-resize-handle {
+    height: 5px;
+    flex-shrink: 0;
+    cursor: ns-resize;
+    background: transparent;
+    border-radius: 3px;
+    margin: 2px 0;
+    transition: background .15s;
+}
+.compose-resize-handle:hover,
+.compose-resize-handle.dragging { background: rgba(193,139,229,.5); }
+
 /* Sección para escribir mensajes */
 .message-input {
-    position: relative;
     display: flex;
-    align-items: end;
+    flex-direction: column;
+    flex-shrink: 0;
 }
 
-    .message-input textarea {
-        flex: 1;
-        padding: 8px;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-        resize: none;
-        height: 190px;
-        padding-right: 40px; /* Espacio para el botón de enviar */
-    }
+.message-input textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #ccc;
+    border-radius: 4px 4px 0 0;
+    border-bottom: none;
+    resize: none;
+    height: var(--compose-h, 190px);
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.5;
+}
 
-    .message-input #send-message-btn {
-        position: absolute;
-        right: 10px;
-        background-color: transparent;
-        border: none;
-        cursor: pointer;
-        bottom: 10px;
-        font-size: 20px;
-        color: #007bff;
-        transition: color 0.3s;
-    }
+/* Barra inferior del compose */
+.compose-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 8px;
+    background: #f8f9fa;
+    border: 1px solid #ccc;
+    border-top: 1px solid #e9ecef;
+    border-radius: 0 0 4px 4px;
+    flex-shrink: 0;
+}
 
-        .message-input #send-message-btn:hover {
-            color: #0056b3;
-        }
+.compose-toolbar #send-message-btn {
+    margin-left: auto;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 20px;
+    color: #007bff;
+    padding: 2px 4px;
+    line-height: 1;
+    transition: color 0.3s;
+}
+.compose-toolbar #send-message-btn:hover { color: #0056b3; }
+
+.compose-toolbar .attach-btn {
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    font-size: 17px;
+    color: #6b7280;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: color 0.15s;
+}
+.compose-toolbar .attach-btn:hover { color: #374151; }
+
+.compose-toolbar .pending-attachments {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0;
+    scrollbar-width: thin;
+}
+
 .footer-bar {
     position: fixed;
     bottom: 0;
@@ -646,18 +849,6 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
     display: block;
 }
 
-.column3 {
-    flex: 1;
-    max-width: 390px;
-    min-width: 280px;
-    background-color: #ffffff;
-    padding: 15px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    border-radius: 5px;
-    overflow-y: auto;
-    height: calc(100vh - 40px);
-}
-
 /* ---- Side panel del solicitante (estilo Zendesk) ---- */
 .rq-header {
     display: flex;
@@ -847,10 +1038,7 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 }
 /* ---- Desplegable Público/Interno ---- */
 .visibility-control {
-    position: absolute;
-    left: 14px;
-    bottom: 12px;
-    z-index: 1000; /* por encima del textarea y demás */
+    position: relative; /* el .vis-menu se abre hacia arriba desde aquí */
 }
 
 .vis-btn {
@@ -930,43 +1118,15 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
         display: none;
     }
 }
-/* --- Adjuntos en composer --- */
-.message-input {
-    position: relative;
-}
-
-    /* Botón Adjuntar (izquierda) */
-    .message-input .attach-btn {
-        position: absolute;
-        left: 120px;
-        bottom: 10px;
-        border: 0;
-        background: transparent;
-        cursor: pointer;
-        font-size: 18px;
-        color: #495057;
-    }
-
-        .message-input .attach-btn:hover {
-            color: #212529;
-        }
-
-/* Pills ARRIBA en una sola fila + scroll */
+/* --- Adjuntos en composer (Pills) --- */
 .pending-attachments {
-    position: absolute;
-    top: 8px;
-    left: 12px; /* mueve a 180px si quieres alinearlas con el texto */
-    right: 56px; /* deja un poco de aire a la derecha */
     display: flex;
     align-items: center;
-    gap: 8px;
-    flex-wrap: nowrap; /* UNA sola fila */
-    overflow-x: auto; /* ← scroll horizontal */
+    gap: 6px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
     overflow-y: hidden;
-    height: 32px; /* alto fijo de la tira */
-    padding-bottom: 2px; /* aire para la barra */
-    z-index: 2;
-    scrollbar-width: thin; /* Firefox */
+    scrollbar-width: thin;
 }
 
     .pending-attachments::-webkit-scrollbar {
@@ -1017,12 +1177,6 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
                 color: #dc3545;
             }
 
-/* Reserva un hueco arriba para la tira con scroll */
-.message-input textarea {
-    padding-top: 44px; /* ~32px de alto + margen */
-    padding-left: 10px; /* lo dejas como lo tenías */
-    padding-right: 44px; /* botón enviar */
-}
 
 /* --- Adjuntos en los mensajes (renderizados) --- */
 .message .attachments {

@@ -36,8 +36,13 @@
 <form id="ticket-form" method="post"
       action="{% url 'create_ticket' %}{% if ticket %}?id={{ ticket.id }}{% elif request.GET.id %}?id={{ request.GET.id }}{% endif %}">
     {% csrf_token %}
-    <div class="ticket-form">
-        <div class="column">
+    <div class="ticket-form" id="ticketLayout">
+        <div class="column" id="panelLeft">
+            <button type="button" class="panel-tab" id="toggleLeft">
+                <span class="panel-tab-label" id="labelLeft">Hide panel</span>
+                <span class="panel-tab-arrow"><i class="fas fa-chevron-left" id="iconLeft"></i></span>
+            </button>
+            <div class="panel-inner" id="panelLeftInner">
             <!-- Campos del Formulario -->
             <div class="form-group">
                 <label for="empresa">Empresa</label>
@@ -182,7 +187,9 @@
                 <input type="text" id="approval_status" name="approval_status" placeholder="-">
             </div>
             <hr class="margin-bottom-large">
-        </div>
+            </div><!-- /.panel-inner -->
+        </div><!-- /#panelLeft -->
+        <div class="resize-handle" id="resizerLeft"></div>
 
         <div class="column2">
             <!-- Barra de Subject -->
@@ -257,60 +264,68 @@
                 <div class="message"><em>Guarda el ticket para comenzar a comentar.</em></div>
                 {% endif %}
             </div>
+            <!-- Resize handle compose -->
+            <div class="compose-resize-handle" id="composeResizer"></div>
             <!-- Input de Mensaje -->
             <div class="message-input">
                 <textarea id="new-message" name="message" placeholder="Escribe un mensaje..."></textarea>
-                <button type="button" id="send-message-btn" title="Enviar">
-                    <i class="fas fa-paper-plane"></i>
-                </button>
-                {# Solo agentes ven el toggle Público/Interno #}
-                {% if can_use_internal %}
-                <div class="visibility-control dropdown">
-                    <button type="button" class="vis-btn" id="visBtn" aria-haspopup="true" aria-expanded="false">
-                        <i class="fas fa-eye"></i>
-                        <span class="vis-label">Público</span>
-                        <i class="fas fa-chevron-down caret"></i>
+                <div class="compose-toolbar">
+                    {# Solo agentes ven el toggle Público/Interno #}
+                    {% if can_use_internal %}
+                    <div class="visibility-control dropdown">
+                        <button type="button" class="vis-btn" id="visBtn" aria-haspopup="true" aria-expanded="false">
+                            <i class="fas fa-eye"></i>
+                            <span class="vis-label">Público</span>
+                            <i class="fas fa-chevron-down caret"></i>
+                        </button>
+                        <ul class="vis-menu" id="visMenu" role="menu" aria-labelledby="visBtn">
+                            <li role="menuitem">
+                                <button type="button" class="vis-option" data-public="true">
+                                    <i class="fas fa-eye"></i>
+                                    <div class="txt">
+                                        <strong>Público</strong>
+                                        <small>visible al cliente</small>
+                                    </div>
+                                </button>
+                            </li>
+                            <li role="menuitem">
+                                <button type="button" class="vis-option" data-public="false">
+                                    <i class="fas fa-user-shield"></i>
+                                    <div class="txt">
+                                        <strong>Interno</strong>
+                                        <small>solo agentes</small>
+                                    </div>
+                                </button>
+                            </li>
+                        </ul>
+                        <input type="hidden" name="is_public" id="is_public_input" value="true">
+                    </div>
+                    {% endif %}
+                    <!-- Botón y input de adjuntos -->
+                    <button type="button" class="attach-btn" id="attach-btn" title="Adjuntar">
+                        <i class="fas fa-paperclip"></i>
                     </button>
-
-                    <ul class="vis-menu" id="visMenu" role="menu" aria-labelledby="visBtn">
-                        <li role="menuitem">
-                            <button type="button" class="vis-option" data-public="true">
-                                <i class="fas fa-eye"></i>
-                                <div class="txt">
-                                    <strong>Público</strong>
-                                    <small>visible al cliente</small>
-                                </div>
-                            </button>
-                        </li>
-                        <li role="menuitem">
-                            <button type="button" class="vis-option" data-public="false">
-                                <i class="fas fa-user-shield"></i>
-                                <div class="txt">
-                                    <strong>Interno</strong>
-                                    <small>solo agentes</small>
-                                </div>
-                            </button>
-                        </li>
-                    </ul>
-
-                    <input type="hidden" name="is_public" id="is_public_input" value="true">
+                    <input type="file" id="attach-input"
+                           accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt"
+                           multiple hidden>
+                    <!-- Previsualización de adjuntos pendientes de enviar -->
+                    <div class="pending-attachments" id="pending-attachments"></div>
+                    <!-- Enviar -->
+                    <button type="button" id="send-message-btn" title="Enviar">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
                 </div>
-                {% endif %}
-                <!-- Botón y input de adjuntos -->
-                <button type="button" class="attach-btn" id="attach-btn" title="Adjuntar">
-                    <i class="fas fa-paperclip"></i>
-                </button>
-                <input type="file" id="attach-input"
-                       accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt"
-                       multiple hidden>
-
-                <!-- Previsualización de adjuntos pendientes de enviar -->
-                <div class="pending-attachments" id="pending-attachments"></div>
             </div>
         </div>
             <!-- Columna solicitante -->
             {% if ticket and ticket.requester %}
-        <div class="column3 requester-info">
+        <div class="resize-handle" id="resizerRight"></div>
+        <div class="column3 requester-info" id="panelRight">
+            <button type="button" class="panel-tab panel-tab-right" id="toggleRight">
+                <span class="panel-tab-arrow"><i class="fas fa-chevron-right" id="iconRight"></i></span>
+                <span class="panel-tab-label" id="labelRight">Hide panel</span>
+            </button>
+            <div class="panel-inner" id="panelRightInner">
             {% with u=ticket.requester %}
             <!-- Cabecera -->
             <div class="rq-header">
@@ -365,9 +380,10 @@
                 {% endfor %}
             </ul>
             {% endwith %}
-        </div>
+            </div><!-- /.panel-inner -->
+        </div><!-- /#panelRight -->
             {% endif %}
-        </div>
+        </div><!-- /.ticket-form -->
     <!-- Barra de Pie de Formulario -->
     <div class="footer-bar">
         <div class="footer-right">

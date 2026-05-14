@@ -798,6 +798,176 @@ document.addEventListener('DOMContentLoaded', () => {
         tlPopup.classList.remove('visible');
     });
 
+    // ===== Ajuste dinámico de altura del layout =====
+    function fitLayout() {
+        const layout = document.getElementById('ticketLayout');
+        if (!layout) return;
+        const top     = layout.getBoundingClientRect().top;
+        const footer  = document.querySelector('.footer-bar');
+        const footerH = footer ? footer.offsetHeight : 44;
+        const h = Math.max(200, window.innerHeight - top - footerH);
+        layout.style.height = h + 'px';
+    }
+    fitLayout();
+    window.addEventListener('resize', fitLayout);
+
+    // ===== Panel collapse + resize =====
+    (function initPanels() {
+        const layout    = document.getElementById('ticketLayout');
+        if (!layout) return;
+
+        const panelLeft  = document.getElementById('panelLeft');
+        const panelRight = document.getElementById('panelRight');
+        const toggleLeft  = document.getElementById('toggleLeft');
+        const toggleRight = document.getElementById('toggleRight');
+        const iconLeft    = document.getElementById('iconLeft');
+        const iconRight   = document.getElementById('iconRight');
+        const labelLeft   = document.getElementById('labelLeft');
+        const labelRight  = document.getElementById('labelRight');
+        const resizerLeft  = document.getElementById('resizerLeft');
+        const resizerRight = document.getElementById('resizerRight');
+
+        const LS_KEY = 'tf_panel_state';
+
+        function getState() {
+            try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; }
+        }
+        function saveState(s) {
+            try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch {}
+        }
+
+        function applyCollapse(panel, icon, label, isRight, collapsed) {
+            if (!panel) return;
+            if (collapsed) {
+                panel.classList.add('collapsed');
+                if (icon) icon.style.transform = 'rotate(180deg)';
+                if (label) label.textContent = 'Show panel';
+            } else {
+                panel.classList.remove('collapsed');
+                if (icon) icon.style.transform = '';
+                if (label) label.textContent = 'Hide panel';
+            }
+        }
+
+        // Restore saved state
+        const saved = getState();
+        if (saved.leftCollapsed)  applyCollapse(panelLeft,  iconLeft,  labelLeft,  false, true);
+        if (saved.rightCollapsed) applyCollapse(panelRight, iconRight, labelRight, true,  true);
+        if (saved.leftW)  layout.style.setProperty('--panel-left-w',  saved.leftW);
+        if (saved.rightW) layout.style.setProperty('--panel-right-w', saved.rightW);
+
+        // Auto-collapse on narrow viewport at load
+        if (window.innerWidth <= 960 && panelRight) {
+            applyCollapse(panelRight, iconRight, labelRight, true, true);
+        }
+        if (window.innerWidth <= 720 && panelLeft) {
+            applyCollapse(panelLeft, iconLeft, labelLeft, false, true);
+        }
+
+        // Toggle buttons
+        if (toggleLeft && panelLeft) {
+            toggleLeft.addEventListener('click', () => {
+                const col = panelLeft.classList.contains('collapsed');
+                applyCollapse(panelLeft, iconLeft, labelLeft, false, !col);
+                const s = getState(); s.leftCollapsed = !col; saveState(s);
+            });
+        }
+        if (toggleRight && panelRight) {
+            toggleRight.addEventListener('click', () => {
+                const col = panelRight.classList.contains('collapsed');
+                applyCollapse(panelRight, iconRight, labelRight, true, !col);
+                const s = getState(); s.rightCollapsed = !col; saveState(s);
+            });
+        }
+
+        // Drag-to-resize
+        function makeResizable(handle, getCurrent, setWidth, minW, maxW, stateKey, invert) {
+            if (!handle) return;
+            let startX, startW;
+            handle.addEventListener('mousedown', e => {
+                e.preventDefault();
+                startX = e.clientX;
+                startW = getCurrent();
+                handle.classList.add('dragging');
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+
+                function onMove(e) {
+                    const delta = (e.clientX - startX) * (invert ? -1 : 1);
+                    const newW = Math.min(maxW, Math.max(minW, startW + delta));
+                    setWidth(newW + 'px');
+                    const s = getState(); s[stateKey] = newW + 'px'; saveState(s);
+                }
+                function onUp() {
+                    handle.classList.remove('dragging');
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                }
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        }
+
+        makeResizable(
+            resizerLeft,
+            () => panelLeft ? panelLeft.getBoundingClientRect().width : 320,
+            w  => layout.style.setProperty('--panel-left-w', w),
+            200, 500, 'leftW'
+        );
+        makeResizable(
+            resizerRight,
+            () => panelRight ? panelRight.getBoundingClientRect().width : 360,
+            w  => layout.style.setProperty('--panel-right-w', w),
+            200, 520, 'rightW',
+            true  // invert: dragging left = grow
+        );
+
+        // Keyboard shortcut: Alt+1 toggle left, Alt+3 toggle right
+        document.addEventListener('keydown', e => {
+            if (e.altKey && e.key === '1' && panelLeft && toggleLeft) toggleLeft.click();
+            if (e.altKey && e.key === '3' && panelRight && toggleRight) toggleRight.click();
+        });
+
+        // ---- Compose area vertical resize ----
+        const composeResizer = document.getElementById('composeResizer');
+        const column2 = document.querySelector('.column2');
+        if (composeResizer && column2) {
+            let startY, startH;
+            const textarea = document.getElementById('new-message');
+            const MIN_H = 80, MAX_H = 500;
+
+            composeResizer.addEventListener('mousedown', e => {
+                e.preventDefault();
+                startY = e.clientY;
+                startH = textarea ? textarea.getBoundingClientRect().height : 190;
+                composeResizer.classList.add('dragging');
+                document.body.style.cursor = 'ns-resize';
+                document.body.style.userSelect = 'none';
+
+                function onMove(e) {
+                    const delta = startY - e.clientY; // drag up = bigger compose
+                    const newH = Math.min(MAX_H, Math.max(MIN_H, startH + delta));
+                    column2.style.setProperty('--compose-h', newH + 'px');
+                    const s = getState(); s.composeH = newH + 'px'; saveState(s);
+                }
+                function onUp() {
+                    composeResizer.classList.remove('dragging');
+                    document.body.style.cursor = '';
+                    document.body.style.userSelect = '';
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                }
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+
+            // Restore saved compose height
+            if (saved.composeH) column2.style.setProperty('--compose-h', saved.composeH);
+        }
+    })();
+
     // ---- Timestamps relativos ----
     function timeAgo(isoString) {
         const diff = Math.floor((Date.now() - new Date(isoString)) / 1000);
