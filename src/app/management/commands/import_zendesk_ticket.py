@@ -7,6 +7,7 @@ Uso:
 """
 
 import base64
+import time
 
 import requests
 from django.conf import settings
@@ -14,7 +15,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils.dateparse import parse_datetime
 
-from app.models import Comment, Group, Role, Ticket, TicketEvent, TicketTag, User, ZendeskFieldMap
+from app.models import Brand, Comment, Group, Organization, Role, Ticket, TicketEvent, TicketTag, User, ZendeskFieldMap
 
 
 # Zendesk -> TicketFlow status mapping
@@ -60,7 +61,13 @@ class ZendeskClient:
 
     def get(self, path, params=None):
         url = self.base + path
-        resp = requests.get(url, headers=self.headers, params=params, timeout=30)
+        for attempt in range(5):
+            resp = requests.get(url, headers=self.headers, params=params, timeout=30)
+            if resp.status_code == 429:
+                wait = int(resp.headers.get("Retry-After", 60))
+                time.sleep(wait)
+                continue
+            break
         if resp.status_code == 404:
             raise CommandError(f"No encontrado en Zendesk: {url}")
         if resp.status_code == 401:
@@ -192,25 +199,34 @@ def _import_audits(client, ticket, zaudits, user_cache, group_cache):
     return new_events
 
 
-def _resolve_organization_name(client, org_id, cache):
+def _get_or_create_organization(client, org_id, cache):
     if not org_id:
         return None
     if org_id in cache:
         return cache[org_id]
     try:
-        org = client.organization(org_id)
-        name = (org.get("name") or "")[:255] or None
+        zo = client.organization(org_id)
+        org, _ = Organization.objects.update_or_create(
+            zendesk_id=org_id,
+            defaults={
+                "name": (zo.get("name") or f"org-{org_id}")[:255],
+                "domain_names": ", ".join(zo.get("domain_names") or []),
+            },
+        )
     except Exception:
-        name = None
-    cache[org_id] = name
-    return name
+        org, _ = Organization.objects.get_or_create(
+            zendesk_id=org_id,
+            defaults={"name": f"org-{org_id}"},
+        )
+    cache[org_id] = org
+    return org
 
 
 def _sync_user_profile(client, user, zu, org_cache):
     """Actualiza los campos de perfil del User con los datos de Zendesk."""
     photo = (zu.get("photo") or {})
     photo_url = photo.get("content_url") if photo else None
-    org_name = _resolve_organization_name(client, zu.get("organization_id"), org_cache)
+    org = _get_or_create_organization(client, zu.get("organization_id"), org_cache)
 
     fields = {
         "phone":        (zu.get("phone") or "")[:64] or None,
@@ -218,7 +234,7 @@ def _sync_user_profile(client, user, zu, org_cache):
         "locale":       (zu.get("locale") or "")[:20] or None,
         "notes":        zu.get("notes") or None,
         "photo_url":    (photo_url or "")[:500] or None,
-        "organization": org_name,
+        "organization": org,
     }
     changed = False
     for attr, val in fields.items():
@@ -304,7 +320,10 @@ def _get_or_create_group(client, zendesk_group_id, cache):
         return cache[zendesk_group_id]
     zg = client.group(zendesk_group_id)
     name = (zg.get("name") or f"zendesk-group-{zendesk_group_id}")[:255]
-    group, _ = Group.objects.get_or_create(group_name=name)
+    group, _ = Group.objects.update_or_create(
+        zendesk_id=zendesk_group_id,
+        defaults={"group_name": name},
+    )
     cache[zendesk_group_id] = group
     return group
 
@@ -342,18 +361,24 @@ def _apply_custom_fields(ticket, zt):
     return changed
 
 
-def _resolve_brand_name(client, zendesk_brand_id, cache):
+def _get_or_create_brand(client, zendesk_brand_id, cache):
     if zendesk_brand_id is None:
         return None
     if zendesk_brand_id in cache:
         return cache[zendesk_brand_id]
     try:
         zb = client.brand(zendesk_brand_id)
-        name = (zb.get("name") or "")[:255] or str(zendesk_brand_id)
+        brand, _ = Brand.objects.update_or_create(
+            zendesk_id=zendesk_brand_id,
+            defaults={"name": (zb.get("name") or f"brand-{zendesk_brand_id}")[:255]},
+        )
     except Exception:
-        name = str(zendesk_brand_id)
-    cache[zendesk_brand_id] = name
-    return name
+        brand, _ = Brand.objects.get_or_create(
+            zendesk_id=zendesk_brand_id,
+            defaults={"name": f"brand-{zendesk_brand_id}"},
+        )
+    cache[zendesk_brand_id] = brand
+    return brand
 
 
 class Command(BaseCommand):
@@ -422,7 +447,7 @@ class Command(BaseCommand):
             assignee = _get_or_create_user(client, zt.get("assignee_id"), user_cache, org_cache)
             submitter = _get_or_create_user(client, zt.get("submitter_id"), user_cache, org_cache) or requester
             assigned_group = _get_or_create_group(client, zt.get("group_id"), group_cache)
-            brand_name = _resolve_brand_name(client, zt.get("brand_id"), brand_cache)
+            brand = _get_or_create_brand(client, zt.get("brand_id"), brand_cache)
 
             cc_users = []
             for cid in cc_ids:
@@ -441,7 +466,7 @@ class Command(BaseCommand):
                 "requester": requester,
                 "assignee": assignee,
                 "created_by": submitter,
-                "brand": brand_name,
+                "brand": brand,
                 "assigned_group": assigned_group,
                 "type": zt.get("type"),
                 "channel": (zt.get("via") or {}).get("channel"),

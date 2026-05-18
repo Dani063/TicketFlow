@@ -462,6 +462,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Manejo de Creación de Etiquetas en Select2
     $('#tags').select2({
+        width: '100%',
         tags: true,
         tokenSeparators: [','],
         placeholder: "Selecciona o añade etiquetas",

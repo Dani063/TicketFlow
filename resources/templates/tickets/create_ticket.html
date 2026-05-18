@@ -346,7 +346,7 @@
             <div class="rq-details">
                 <div class="rq-row"><span class="rq-label">Email</span><span class="rq-value rq-link">{{ u.email }}</span></div>
                 {% if u.phone %}<div class="rq-row"><span class="rq-label">Teléfono</span><span class="rq-value">{{ u.phone }}</span></div>{% endif %}
-                {% if u.organization %}<div class="rq-row"><span class="rq-label">Org.</span><span class="rq-value rq-link">{{ u.organization }}</span></div>{% endif %}
+                {% if u.organization %}<div class="rq-row"><span class="rq-label">Org.</span><span class="rq-value rq-link">{{ u.organization.name }}</span></div>{% endif %}
                 {% if u.time_zone %}<div class="rq-row"><span class="rq-label">Zona horaria</span><span class="rq-value">{{ u.time_zone }}</span></div>{% endif %}
                 {% if u.locale %}<div class="rq-row"><span class="rq-label">Idioma</span><span class="rq-value">{{ u.locale }}</span></div>{% endif %}
                 {% if u.role %}<div class="rq-row"><span class="rq-label">Rol</span><span class="rq-value">{{ u.role.role_name }}</span></div>{% endif %}

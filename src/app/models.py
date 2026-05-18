@@ -6,6 +6,24 @@ from unicodedata import category
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 
+class Organization(models.Model):
+    zendesk_id = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
+    name = models.CharField(max_length=255)
+    domain_names = models.TextField(blank=True)
+    created_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Brand(models.Model):
+    zendesk_id = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
+    name = models.CharField(max_length=255)
+
+    def __str__(self):
+        return self.name
+
+
 class UserManager(BaseUserManager):
     def create_user(self, email, name, password=None):
         if not email:
@@ -53,7 +71,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     locale = models.CharField(max_length=20, null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
     photo_url = models.URLField(max_length=500, null=True, blank=True)
-    organization = models.CharField(max_length=255, null=True, blank=True)
+    organization = models.ForeignKey('Organization', on_delete=models.SET_NULL, null=True, blank=True, related_name='users')
     groups = models.ManyToManyField(
         'auth.Group',
         related_name='custom_user_set',  # Cambia el related_name para evitar conflictos
@@ -95,6 +113,7 @@ class Role(models.Model):
 class Group(models.Model):
     group_name = models.CharField(max_length=255, null=False)
     description = models.TextField(null=True)
+    zendesk_id = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
 
     def __str__(self):
         return self.group_name
@@ -108,7 +127,7 @@ class Ticket(models.Model):
     requester = models.ForeignKey(User, on_delete=models.CASCADE, related_name='requested_tickets')
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='assigned_tickets')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_tickets')
-    brand = models.CharField(max_length=255, null=True)
+    brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
     type = models.CharField(max_length=255, null=True)
     ccs = models.ManyToManyField('User', related_name='tickets_ccd', blank=True)
     tags = models.ManyToManyField('TicketTag', related_name='tickets', blank=True)
@@ -147,7 +166,7 @@ class ZendeskFieldMap(models.Model):
 
 
 class Comment(models.Model):
-    zendesk_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    zendesk_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     content = models.TextField(null=False)
@@ -160,13 +179,6 @@ class TicketTag(models.Model):
     name = models.CharField(max_length=255, unique=True, null=False, help_text='Label for categorizing tickets')
     def __str__(self):
         return self.name
-
-class TicketHistory(models.Model):
-    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE)
-    previous_status = models.CharField(max_length=255, null=True)
-    new_status = models.CharField(max_length=255, choices=[('open', 'Open'), ('pending', 'Pending'), ('closed', 'Closed'), ('resolved', 'Resolved')])
-    changed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
-    changed_at = models.DateTimeField(auto_now_add=True)
 
 
 class TicketEvent(models.Model):
@@ -221,17 +233,18 @@ class SatisfactionRating(models.Model):
         ('good',       'Good'),
         ('bad',        'Bad'),
     ]
-    zendesk_id      = models.BigIntegerField(unique=True, db_index=True)
-    ticket          = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True,
-                                        related_name='satisfaction_ratings')
-    zendesk_ticket_id = models.BigIntegerField(db_index=True)
-    score           = models.CharField(max_length=50, choices=SCORE_CHOICES)
-    comment         = models.TextField(null=True, blank=True)
-    reason          = models.CharField(max_length=255, null=True, blank=True)
-    requester_zendesk_id = models.BigIntegerField(null=True, blank=True)
-    assignee_zendesk_id  = models.BigIntegerField(null=True, blank=True)
-    created_at      = models.DateTimeField()
-    updated_at      = models.DateTimeField(null=True, blank=True)
+    zendesk_id  = models.BigIntegerField(unique=True, db_index=True)
+    ticket      = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='satisfaction_ratings')
+    score       = models.CharField(max_length=50, choices=SCORE_CHOICES)
+    comment     = models.TextField(null=True, blank=True)
+    reason      = models.CharField(max_length=255, null=True, blank=True)
+    requester   = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='satisfaction_ratings_requester')
+    assignee    = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='satisfaction_ratings_assignee')
+    created_at  = models.DateTimeField()
+    updated_at  = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']

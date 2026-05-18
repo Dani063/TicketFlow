@@ -15,7 +15,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.conf import settings
 from django.utils.dateparse import parse_datetime
 
-from app.models import SatisfactionRating, Ticket
+from app.models import SatisfactionRating, Ticket, User
 
 
 class ZendeskClient:
@@ -115,19 +115,20 @@ class Command(BaseCommand):
                     continue
 
                 local_ticket_id = ticket_map.get(ztid)
+                requester = User.objects.filter(zendesk_id=req_zid).first() if req_zid else None
+                assignee  = User.objects.filter(zendesk_id=ass_zid).first() if ass_zid else None
 
                 _, new = SatisfactionRating.objects.update_or_create(
                     zendesk_id=zid,
                     defaults={
-                        "ticket_id":            local_ticket_id,
-                        "zendesk_ticket_id":    ztid,
-                        "score":                score,
-                        "comment":              comment,
-                        "reason":               reason,
-                        "requester_zendesk_id": req_zid,
-                        "assignee_zendesk_id":  ass_zid,
-                        "created_at":           created_at,
-                        "updated_at":           updated_at,
+                        "ticket_id":  local_ticket_id,
+                        "score":      score,
+                        "comment":    comment,
+                        "reason":     reason,
+                        "requester":  requester,
+                        "assignee":   assignee,
+                        "created_at": created_at,
+                        "updated_at": updated_at,
                     },
                 )
                 if new:
@@ -140,16 +141,6 @@ class Command(BaseCommand):
             if not data.get("next_page"):
                 break
             page += 1
-
-        # Link ratings to local tickets by zendesk_id
-        linked_count = 0
-        for zid, local_id in ticket_map.items():
-            n = SatisfactionRating.objects.filter(
-                zendesk_ticket_id=zid, ticket__isnull=True
-            ).update(ticket_id=local_id)
-            linked_count += n
-        if linked_count:
-            self.stdout.write(f"  ~ {linked_count} valoraciones vinculadas a tickets locales")
 
         self.stdout.write(self.style.SUCCESS(
             f"Sync completo: {created} creadas, {updated} actualizadas"

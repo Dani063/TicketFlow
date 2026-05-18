@@ -9,7 +9,7 @@ from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import Ticket, Comment, User, TicketTag, Attachment, TicketHistory, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating
+from .models import Brand, Organization, Ticket, Comment, User, TicketTag, Attachment, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
@@ -537,7 +537,7 @@ def ticket_detail_api(request, ticket_id):
     Notification.objects.filter(user=request.user, ticket=ticket, read=False).update(read=True)
 
     data = {
-        'empresa': ticket.brand,
+        'empresa': ticket.brand.name if ticket.brand else '',
         'solicitante': ticket.requester_id,
         'asignado': ticket.assignee_id,
         'grupo': ticket.assigned_group_id,
@@ -590,7 +590,8 @@ def create_ticket(request):
         # description en modelo es not null: mínimo cadena vacía
         description = content or ''
 
-        empresa   = request.POST.get('empresa') or None
+        empresa_name = (request.POST.get('empresa') or '').strip() or None
+        brand_obj    = Brand.objects.get_or_create(name=empresa_name)[0] if empresa_name else None
         language  = request.POST.get('idioma') or None
         category  = request.POST.get('categoria') or None
         channel   = request.POST.get('canal') or None
@@ -644,7 +645,7 @@ def create_ticket(request):
             ticket.subject     = subject
             ticket.description = description
             ticket.assignee_id = asignado_id
-            ticket.brand       = empresa
+            ticket.brand       = brand_obj
             ticket.type        = tipo
             ticket.channel     = channel
             ticket.service     = service
@@ -703,7 +704,7 @@ def create_ticket(request):
             assignee_id=asignado_id,
             assigned_group_id=grupo_id if grupo_id else None,
             created_by_id=request.user.id,
-            brand=empresa,
+            brand=brand_obj,
             type=tipo,
             channel=channel,
             service=service,
@@ -746,10 +747,7 @@ def create_ticket(request):
         "EcomFax",
         "Recordia",
     ]
-    db_brands = list(
-        Ticket.objects.exclude(brand__isnull=True).exclude(brand__exact='')
-        .values_list('brand', flat=True).distinct()
-    )
+    db_brands = list(Brand.objects.values_list('name', flat=True))
     empresas = sorted(set(hardcoded_brands + db_brands))
 
     ticket_obj = get_object_or_404(Ticket, id=int(id_param)) if id_param and id_param.isdigit() else None
@@ -938,12 +936,13 @@ def add_comment(request, ticket_id):
             ticket.closed_at = timezone.now()
         ticket.updated_at = timezone.now()
         ticket.save(update_fields=['status', 'updated_at', 'closed_at'])
-        # historial
-        TicketHistory.objects.create(
+        TicketEvent.objects.create(
             ticket=ticket,
-            previous_status=prev,
-            new_status=new_status,
-            changed_by=request.user
+            actor=request.user,
+            field_name='status',
+            old_value=prev,
+            new_value=new_status,
+            created_at=timezone.now(),
         )
         applied_status = new_status
 

@@ -20,7 +20,7 @@ from app.management.commands.import_zendesk_ticket import (
     _get_or_create_group,
     _apply_custom_fields,
     _import_audits,
-    _resolve_brand_name,
+    _get_or_create_brand,
     STATUS_MAP,
     PRIORITY_MAP,
 )
@@ -29,7 +29,8 @@ from django.utils.dateparse import parse_datetime
 from django.db import transaction
 
 
-def _import_one(client, ticket_id, stdout, dry_run=False):
+def _import_one(client, ticket_id, stdout, dry_run=False,
+                user_cache=None, group_cache=None, brand_cache=None, org_cache=None):
     """Importa un único ticket de Zendesk. Devuelve ('created'|'updated'|'skipped', ticket_pk)."""
     try:
         zt = client.ticket(ticket_id)
@@ -41,10 +42,10 @@ def _import_one(client, ticket_id, stdout, dry_run=False):
         stdout.write(f"  [dry] #{ticket_id}: {zt.get('subject', '')[:60]}")
         return 'skipped', None
 
-    user_cache   = {}
-    group_cache  = {}
-    brand_cache  = {}
-    org_cache    = {}
+    if user_cache  is None: user_cache  = {}
+    if group_cache is None: group_cache = {}
+    if brand_cache is None: brand_cache = {}
+    if org_cache   is None: org_cache   = {}
 
     zcomments = client.comments(ticket_id)
 
@@ -57,7 +58,7 @@ def _import_one(client, ticket_id, stdout, dry_run=False):
         assignee       = _get_or_create_user(client, zt.get("assignee_id"), user_cache, org_cache)
         submitter      = _get_or_create_user(client, zt.get("submitter_id"), user_cache, org_cache) or requester
         assigned_group = _get_or_create_group(client, zt.get("group_id"), group_cache)
-        brand_name     = _resolve_brand_name(client, zt.get("brand_id"), brand_cache)
+        brand          = _get_or_create_brand(client, zt.get("brand_id"), brand_cache)
 
         cc_users = []
         for cid in list(zt.get("collaborator_ids") or []):
@@ -77,7 +78,7 @@ def _import_one(client, ticket_id, stdout, dry_run=False):
             "requester":      requester,
             "assignee":       assignee,
             "created_by":     submitter,
-            "brand":          brand_name,
+            "brand":          brand,
             "assigned_group": assigned_group,
             "type":           zt.get("type"),
             "channel":        (zt.get("via") or {}).get("channel"),
@@ -216,10 +217,22 @@ class Command(BaseCommand):
             ))
             return
 
+        # Cachés compartidas entre todos los tickets: evita llamadas duplicadas a la API
+        shared_user_cache  = {}
+        shared_group_cache = {}
+        shared_brand_cache = {}
+        shared_org_cache   = {}
+
         created = updated = skipped = 0
         for i, tid in enumerate(ticket_ids, 1):
             self.stdout.write(f"[{i}/{total}]", ending=" ")
-            result, _ = _import_one(client, tid, self.stdout, dry_run=False)
+            result, _ = _import_one(
+                client, tid, self.stdout, dry_run=False,
+                user_cache=shared_user_cache,
+                group_cache=shared_group_cache,
+                brand_cache=shared_brand_cache,
+                org_cache=shared_org_cache,
+            )
             if result == 'created':
                 created += 1
             elif result == 'updated':
