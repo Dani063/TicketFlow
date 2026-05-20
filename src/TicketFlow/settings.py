@@ -28,6 +28,15 @@ def _get_ssm_parameter(name):
     return result["Parameter"]["Value"]
 
 
+def _get_ssm_json(path):
+    """Fetches a JSON SecureString from SSM and returns it parsed as dict."""
+    import json
+    try:
+        return json.loads(_get_ssm_parameter(path))
+    except Exception:
+        return {}
+
+
 def _get_ssm_db_config(prefix):
     """Fetches DB credentials from AWS SSM Parameter Store.
 
@@ -196,6 +205,13 @@ TEMPLATES = [
 WSGI_APPLICATION = 'TicketFlow.wsgi.application'
 # Database — credenciales desde AWS SSM Parameter Store (prod/dev) o .env (local sin SSM)
 _ssm_prefix = os.getenv("AWS_SSM_PREFIX")
+
+
+# Credenciales agrupadas desde SSM (una sola llamada por bloque)
+_ssm_azure   = _get_ssm_json(f"{_ssm_prefix}/AzureCredentials")   if _ssm_prefix else {}
+_ssm_zendesk = _get_ssm_json(f"{_ssm_prefix}/ZendeskCredentials") if _ssm_prefix else {}
+
+
 if _ssm_prefix:
     _ssm = _get_ssm_db_config(_ssm_prefix)
     _db_user     = _ssm["USER"]
@@ -257,20 +273,24 @@ SSO_LOGIN_API_URL = os.getenv("SSO_LOGIN_API_URL", "https://dev-login-api.agenti
 SSO_LOGIN_UI_URL = os.getenv("SSO_LOGIN_UI_URL", "https://dev-login.recordia.net/")
 
 # === Zendesk (solo comandos de importación histórica) ===
-ZENDESK_SUBDOMAIN = os.getenv("ZENDESK_SUBDOMAIN", "")
-ZENDESK_EMAIL = os.getenv("ZENDESK_EMAIL", "")
-ZENDESK_API_TOKEN = os.getenv("ZENDESK_API_TOKEN", "")
+# Local: desde .env | Producción: desde SSM /Recordia/.../ZendeskCredentials
+ZENDESK_SUBDOMAIN = os.getenv('ZENDESK_SUBDOMAIN') or _ssm_zendesk.get('ZENDESK_SUBDOMAIN', '')
+ZENDESK_EMAIL     = os.getenv('ZENDESK_EMAIL')     or _ssm_zendesk.get('ZENDESK_EMAIL', '')
+ZENDESK_API_TOKEN = os.getenv('ZENDESK_API_TOKEN') or _ssm_zendesk.get('ZENDESK_API_TOKEN', '')
 
 # === Celery ===
 # Producción: SQS (sin broker propio que mantener, usa IAM del pod)
 # Local dev:  sobreescribir con CELERY_BROKER_URL=redis://localhost:6379/0 en .env
 CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'sqs://')
+_sqs_queue_url = os.getenv('CELERY_SQS_QUEUE_URL', '')
 CELERY_BROKER_TRANSPORT_OPTIONS = {
     'region': os.getenv('AWS_REGION', 'eu-west-1'),
     'visibility_timeout': 3600,
+    # URL completa de la cola — kombu la usa directamente sin llamar a CreateQueue
+    'predefined_queues': {
+        'celery': {'url': _sqs_queue_url},
+    } if _sqs_queue_url else {},
 }
-# Nombre de la cola SQS — debe existir previamente, el pod no tiene permiso de crearla
-CELERY_DEFAULT_QUEUE = os.getenv('CELERY_SQS_QUEUE_NAME', 'ticketflow-celery')
 # Los resultados de tareas no se usan — se descartan para no necesitar result backend
 CELERY_TASK_IGNORE_RESULT = True
 CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'cache+memory://')
@@ -282,14 +302,10 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 # === Azure AD (lectura buzones M365) ===
-AZURE_TENANT_ID = os.getenv('AZURE_TENANT_ID', '')
-AZURE_CLIENT_ID = os.getenv('AZURE_CLIENT_ID', '')
-AZURE_CLIENT_SECRET = os.getenv('AZURE_CLIENT_SECRET', '')
-if not AZURE_CLIENT_SECRET and _ssm_prefix:
-    try:
-        AZURE_CLIENT_SECRET = _get_ssm_parameter(f"{_ssm_prefix}/AzureClientSecret")
-    except Exception:
-        pass
+# Local: desde .env | Producción: desde SSM /Recordia/.../AzureCredentials
+AZURE_TENANT_ID     = os.getenv('AZURE_TENANT_ID')     or _ssm_azure.get('AZURE_TENANT_ID', '')
+AZURE_CLIENT_ID     = os.getenv('AZURE_CLIENT_ID')     or _ssm_azure.get('AZURE_CLIENT_ID', '')
+AZURE_CLIENT_SECRET = os.getenv('AZURE_CLIENT_SECRET') or _ssm_azure.get('AZURE_CLIENT_SECRET', '')
 
 # Configuracion de la URL de inicio de sesión
 LOGIN_URL = '/login/'
