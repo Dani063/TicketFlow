@@ -19,7 +19,9 @@ spec:
       containers:
         - name: beat
           image: ticketflow:latest           # ← actualizar con tu registry/tag
-          command: ["entrypoint.sh", "beat"]
+          env:
+            - name: PYTHON_ARGS
+              value: "celery_beat"
           envFrom:
             - configMapRef:
                 name: ticketflow-config

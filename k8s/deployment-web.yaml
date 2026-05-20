@@ -17,9 +17,11 @@ spec:
       containers:
         - name: web
           image: ticketflow:latest           # ← actualizar con tu registry/tag
-          command: ["entrypoint.sh", "web"]
           ports:
             - containerPort: 8000
+          env:
+            - name: PYTHON_ARGS
+              value: "start_web"
           envFrom:
             - configMapRef:
                 name: ticketflow-config
