@@ -10,6 +10,16 @@
 *.userosscache
 *.sln.docstates
 *.env
+.env
+
+# Django / Python
+staticfiles/
+*.sqlite3
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+env/
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs

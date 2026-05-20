@@ -66,8 +66,6 @@ PROJECT_ROOT = find_project_root(__file__)
 # Buscamos el .env un nivel por encima (raíz del proyecto)
 env_path = PROJECT_ROOT / ".env"
 if env_path.exists():
-    _logging.getLogger(__name__).warning(f".env cargado desde: {env_path}")
-    _logging.getLogger(__name__).warning(f"SSO_LOGIN_UI_URL = {os.getenv('SSO_LOGIN_UI_URL')}")
     load_dotenv(env_path, override=True)
 
 # BASE_DIR is now resolved by Path.
@@ -152,6 +150,7 @@ LOGGING = {
 INSTALLED_APPS = [
     'health.apps.HealthConfig',
     'app',
+    'django_celery_beat',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -165,6 +164,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'health.middleware.HealthProbeHostMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -249,18 +249,32 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/2.1/howto/static-files/
 STATIC_URL = '/static/'
 STATIC_ROOT = PROJECT_ROOT / "staticfiles"
-# Ficheros subidos (adjuntos)
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL = '/media/'
-SSO_LOGIN_API_URL = os.getenv("SSO_LOGIN_API_URL", "https://dev-login-api.agentia365.com")
-SSO_LOGIN_UI_URL = os.getenv("SSO_LOGIN_UI_URL", "https://dev-login.recordia.net/")
-_logging.getLogger(__name__).warning(f"SSO_LOGIN_API_URL: {SSO_LOGIN_API_URL}, SSO_LOGIN_UI_URL: {SSO_LOGIN_UI_URL}")
-
 MEDIA_ROOT = PROJECT_ROOT / "resources" / "media"
 
-# === Zendesk (importación de tickets) ===
-ZENDESK_SUBDOMAIN = os.getenv("ZENDESK_SUBDOMAIN")
-ZENDESK_EMAIL = os.getenv("ZENDESK_EMAIL")
-ZENDESK_API_TOKEN = os.getenv("ZENDESK_API_TOKEN")
+SSO_LOGIN_API_URL = os.getenv("SSO_LOGIN_API_URL", "https://dev-login-api.agentia365.com")
+SSO_LOGIN_UI_URL = os.getenv("SSO_LOGIN_UI_URL", "https://dev-login.recordia.net/")
+
+# === Zendesk (solo comandos de importación histórica) ===
+ZENDESK_SUBDOMAIN = os.getenv("ZENDESK_SUBDOMAIN", "")
+ZENDESK_EMAIL = os.getenv("ZENDESK_EMAIL", "")
+ZENDESK_API_TOKEN = os.getenv("ZENDESK_API_TOKEN", "")
+
+# === Celery ===
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+CELERY_BEAT_SCHEDULE = {
+    'poll-m365-mailboxes': {
+        'task': 'app.tasks.poll_m365_mailboxes',
+        'schedule': 120.0,  # cada 2 min
+    },
+}
+
+# === Azure AD (lectura buzones M365) ===
+AZURE_TENANT_ID = os.getenv('AZURE_TENANT_ID', '')
+AZURE_CLIENT_ID = os.getenv('AZURE_CLIENT_ID', '')
+AZURE_CLIENT_SECRET = os.getenv('AZURE_CLIENT_SECRET', '')
 
 # Configuracion de la URL de inicio de sesión
 LOGIN_URL = '/login/'

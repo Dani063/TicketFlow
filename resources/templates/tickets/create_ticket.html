@@ -9,6 +9,15 @@
 {% endblock %}
 
 {% block content %}
+{% if ticket and ticket.merged_into %}
+<div class="merge-banner">
+    <i class="fas fa-code-branch"></i>
+    Este ticket fue fusionado en
+    <a href="{% url 'create_ticket' %}?id={{ ticket.merged_into.id }}">
+        #{{ ticket.merged_into.zendesk_id|default:ticket.merged_into.id }} — {{ ticket.merged_into.subject }}
+    </a>
+</div>
+{% endif %}
 <div class="title-bar">
     <h1>{% if ticket %}{{ ticket.subject }}{% else %}Nuevo ticket{% endif %}</h1>
     {% if ticket %}
@@ -22,6 +31,11 @@
     {% if can_use_internal and ticket.assignee_id != current_user_id %}
     <button type="button" id="take-it-btn" class="take-it-btn" data-ticket-id="{{ ticket.id }}">
         <i class="fas fa-hand-point-right"></i> Take it
+    </button>
+    {% endif %}
+    {% if can_use_internal and not ticket.merged_into %}
+    <button type="button" id="merge-btn" class="merge-btn" data-ticket-id="{{ ticket.id }}">
+        <i class="fas fa-code-branch"></i> Merge
     </button>
     {% endif %}
     {% endif %}
@@ -222,9 +236,9 @@
                     </div>
                     <div class="msg-body">
                         {% if c.html_body %}
-                            {{ c.html_body|safe }}
+                            <div class="email-html">{{ c.html_body|safe }}</div>
                         {% else %}
-                            {{ c.content|linebreaks }}
+                            {{ c.content|urlize|linebreaksbr }}
                         {% endif %}
                     </div>
                     {% with atts=c.attachment_set.all %}
@@ -419,6 +433,32 @@
         </div>
     </div>
 </form>
+
+{% if ticket and can_use_internal and not ticket.merged_into %}
+<div id="merge-modal" class="merge-modal-overlay" style="display:none">
+    <div class="merge-modal">
+        <div class="merge-modal-header">
+            <h3><i class="fas fa-code-branch"></i> Fusionar ticket</h3>
+            <button type="button" id="merge-modal-close" class="merge-modal-close">&times;</button>
+        </div>
+        <div class="merge-modal-body">
+            <p>El ticket actual (<strong>#{{ ticket.zendesk_id|default:ticket.id }}</strong>) se cerrará y sus comentarios pasarán al ticket destino.</p>
+            <label for="merge-search-input">Buscar ticket destino por ID o asunto:</label>
+            <input type="text" id="merge-search-input" class="merge-search-input" placeholder="Escribe para buscar…" autocomplete="off">
+            <ul id="merge-search-results" class="merge-search-results"></ul>
+            <div id="merge-selected" class="merge-selected" style="display:none">
+                Destino seleccionado: <strong id="merge-selected-label"></strong>
+                <input type="hidden" id="merge-target-id">
+            </div>
+        </div>
+        <div class="merge-modal-footer">
+            <button type="button" id="merge-confirm-btn" class="main-btn" disabled>Confirmar fusión</button>
+            <button type="button" id="merge-cancel-btn" class="cancel-btn">Cancelar</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 {% endblock %}
 {% block extra_js %}
 <script>
@@ -440,6 +480,8 @@
   window.currentUserId = {{ request.user.id }};
   window.urls = window.urls || {};
   window.urls.add_comment = window.ticketId ? `/tickets/${window.ticketId}/add_comment/` : null;
+  window.urls.merge_ticket = window.ticketId ? `/tickets/${window.ticketId}/merge/` : null;
+  window.urls.search = '/search/';
 </script>
 <script src="{% static 'tickets/create_ticket.js' %}"></script>
 {% endblock %}

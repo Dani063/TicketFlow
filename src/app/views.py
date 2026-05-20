@@ -87,6 +87,7 @@ def home(request):
 
     tickets_list = list(
         tickets_qs
+        .exclude(status__in=['closed', 'resolved'])
         .annotate(satisfaction_score=Subquery(rating_sub))
         .select_related('requester', 'assignee')
         .order_by('-updated_at')
@@ -140,9 +141,11 @@ def filter_tickets(request):
     page_size = _parse_page_size(request.GET.get("page_size"))
 
     if _is_agent(request.user):
-        base_qs = Ticket.objects.order_by('-updated_at')
+        base_qs = Ticket.objects.filter(merged_into__isnull=True).order_by('-updated_at')
     else:
         base_qs = Ticket.objects.filter(
+            merged_into__isnull=True
+        ).filter(
             Q(requester=request.user) | Q(ccs=request.user)
         ).distinct().order_by('-updated_at')
 
@@ -1106,8 +1109,10 @@ def global_search(request):
         return JsonResponse({"tickets": [], "users": []})
 
     # --- Tickets ---
-    ticket_qs = Ticket.objects.all() if _is_agent(request.user) else \
-        Ticket.objects.filter(Q(requester=request.user) | Q(ccs=request.user)).distinct()
+    ticket_qs = Ticket.objects.filter(merged_into__isnull=True) if _is_agent(request.user) else \
+        Ticket.objects.filter(merged_into__isnull=True).filter(
+            Q(requester=request.user) | Q(ccs=request.user)
+        ).distinct()
 
     tickets = ticket_qs.filter(
         Q(subject__icontains=q) |
@@ -1150,3 +1155,47 @@ def global_search(request):
         users_data = []
 
     return JsonResponse({"tickets": tickets_data, "users": users_data})
+
+
+@login_required
+@require_POST
+def merge_ticket(request, ticket_id):
+    if not _is_agent(request.user):
+        return JsonResponse({'error': 'Permiso denegado'}, status=403)
+
+    ticket = get_object_or_404(Ticket, pk=ticket_id)
+
+    if ticket.merged_into_id:
+        return JsonResponse({'error': 'Este ticket ya está fusionado'}, status=400)
+
+    try:
+        target_id = int(request.POST.get('target_ticket_id', ''))
+        target = Ticket.objects.get(pk=target_id)
+    except (ValueError, TypeError, Ticket.DoesNotExist):
+        return JsonResponse({'error': 'Ticket destino no encontrado'}, status=404)
+
+    if target.id == ticket.id:
+        return JsonResponse({'error': 'No puedes fusionar un ticket consigo mismo'}, status=400)
+
+    if target.merged_into_id:
+        return JsonResponse({'error': 'El ticket destino también está fusionado'}, status=400)
+
+    Comment.objects.filter(ticket=ticket).update(ticket=target)
+    TicketEvent.objects.filter(ticket=ticket).update(ticket=target)
+
+    ticket.merged_into = target
+    ticket.status = 'closed'
+    ticket.save()
+
+    TicketEvent.objects.create(
+        ticket=target,
+        actor=request.user,
+        field_name='merge',
+        old_value=None,
+        new_value=f'#{ticket.zendesk_id or ticket.id}',
+        created_at=timezone.now(),
+    )
+
+    _notify_users(target, f'Ticket #{ticket.zendesk_id or ticket.id} fusionado aquí', actor=request.user)
+
+    return JsonResponse({'ok': True, 'target_id': target.id})

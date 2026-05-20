@@ -3,3 +3,8 @@ mysqlclient
 python-dotenv
 boto3
 requests
+celery[redis]
+django-celery-beat
+msal
+gunicorn
+whitenoise

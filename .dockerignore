@@ -1,0 +1,43 @@
+# Secrets — nunca en la imagen
+.env
+*.env
+
+# Entornos virtuales Python
+.venv/
+env/
+venv/
+
+# Cache Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Static compilado (se regenera en build)
+staticfiles/
+
+# Base de datos local
+*.sqlite3
+
+# Node / frontend build (solo fuentes en repo, build es externo)
+node_modules/
+
+# Scripts de uso único
+src/inspect_email.py
+
+# IDE y SO
+.vscode/
+.idea/
+*.suo
+*.user
+Thumbs.db
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Docs (no necesarios en runtime)
+docs/
+readme.html

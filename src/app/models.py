@@ -19,6 +19,13 @@ class Organization(models.Model):
 class Brand(models.Model):
     zendesk_id = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
     name = models.CharField(max_length=255)
+    support_email = models.EmailField(blank=True, default='')
+    from_name = models.CharField(max_length=100, blank=True, default='')
+    language = models.CharField(max_length=10, blank=True, default='es')
+    mailbox_type = models.CharField(
+        max_length=10, default='m365',
+        choices=[('m365', 'Microsoft 365'), ('ses', 'Amazon SES')],
+    )
 
     def __str__(self):
         return self.name
@@ -145,6 +152,11 @@ class Ticket(models.Model):
     approval_status = models.CharField(max_length=255, null=True, blank=True)
     resolution_type = models.CharField(max_length=255, null=True, blank=True)
     required_tasks = models.CharField(max_length=255, null=True, blank=True)
+    merged_into = models.ForeignKey(
+        'self', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='merged_tickets'
+    )
+    email_message_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
 
 
 class ZendeskFieldMap(models.Model):
@@ -174,6 +186,7 @@ class Comment(models.Model):
     via_channel = models.CharField(max_length=100, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     is_public = models.BooleanField(default=True)
+    email_message_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
 
 class TicketTag(models.Model):
     name = models.CharField(max_length=255, unique=True, null=False, help_text='Label for categorizing tickets')
