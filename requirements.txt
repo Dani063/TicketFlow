@@ -3,7 +3,7 @@ mysqlclient
 python-dotenv
 boto3
 requests
-celery[redis]
+celery[sqs,redis]
 django-celery-beat
 msal
 gunicorn

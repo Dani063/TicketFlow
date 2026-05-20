@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ticketflow-beat
+spec:
+  replicas: 1             # NUNCA más de 1 — Celery beat no es distribuido
+  strategy:
+    type: Recreate        # Matar el pod viejo antes de crear el nuevo
+  selector:
+    matchLabels:
+      app: ticketflow
+      role: beat
+  template:
+    metadata:
+      labels:
+        app: ticketflow
+        role: beat
+    spec:
+      containers:
+        - name: beat
+          image: ticketflow:latest           # ← actualizar con tu registry/tag
+          command: ["entrypoint.sh", "beat"]
+          envFrom:
+            - configMapRef:
+                name: ticketflow-config
+            - secretRef:
+                name: ticketflow-secrets
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"

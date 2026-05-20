@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ticketflow-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ticketflow
+      role: web
+  template:
+    metadata:
+      labels:
+        app: ticketflow
+        role: web
+    spec:
+      containers:
+        - name: web
+          image: ticketflow:latest           # ← actualizar con tu registry/tag
+          command: ["entrypoint.sh", "web"]
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: ticketflow-config
+            - secretRef:
+                name: ticketflow-secrets
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

@@ -1,0 +1,27 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ticketflow-migrate
+  annotations:
+    # Borrar job anterior antes de aplicar: kubectl delete job ticketflow-migrate --ignore-not-found
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: ticketflow:latest           # ← misma imagen que los deployments
+          command: ["entrypoint.sh", "migrate"]
+          envFrom:
+            - configMapRef:
+                name: ticketflow-config
+            - secretRef:
+                name: ticketflow-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

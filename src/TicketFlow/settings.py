@@ -262,12 +262,21 @@ ZENDESK_EMAIL = os.getenv("ZENDESK_EMAIL", "")
 ZENDESK_API_TOKEN = os.getenv("ZENDESK_API_TOKEN", "")
 
 # === Celery ===
-CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+# Producción: SQS (sin broker propio que mantener, usa IAM del pod)
+# Local dev:  sobreescribir con CELERY_BROKER_URL=redis://localhost:6379/0 en .env
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'sqs://')
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    'region': os.getenv('AWS_REGION', 'eu-west-1'),
+    'queue_name_prefix': 'ticketflow-',   # colas: ticketflow-celery
+    'visibility_timeout': 3600,
+}
+# Los resultados de tareas no se usan — se descartan para no necesitar result backend
+CELERY_TASK_IGNORE_RESULT = True
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'cache+memory://')
 CELERY_BEAT_SCHEDULE = {
     'poll-m365-mailboxes': {
         'task': 'app.tasks.poll_m365_mailboxes',
-        'schedule': 120.0,  # cada 2 min
+        'schedule': 120.0,
     },
 }
 

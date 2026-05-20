@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ticketflow-config
+data:
+  DEBUG: "False"
+  ALLOWED_HOSTS: "ticketflow.example.com"           # ← cambiar al dominio real
+  CSRF_TRUSTED_ORIGINS: "https://ticketflow.example.com"
+  DB_NAME: "ticketflow"
+  DB_PORT: "3306"
+  # Celery usa SQS automáticamente via IAM del pod — no necesita URL explícita
+  # La cola se crea sola con el nombre: ticketflow-celery
+  AWS_SSM_PREFIX: "/Recordia/Development/Ticketflow"
+  AWS_REGION: "eu-west-1"
+  SSO_LOGIN_API_URL: "https://dev-login-api.agentia365.com"
+  SSO_LOGIN_UI_URL: "https://dev-login.recordia.net"
+  AZURE_TENANT_ID: "4810d7e9-64fd-4a61-aaf0-b6289ef860c3"
+  AZURE_CLIENT_ID: "ceccd3ef-7fad-49b8-8cd7-9fe2f5e3475c"
+  # SECRET_KEY y AZURE_CLIENT_SECRET vienen de SSM — no van aquí
