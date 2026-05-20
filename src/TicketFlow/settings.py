@@ -275,6 +275,11 @@ CELERY_BEAT_SCHEDULE = {
 AZURE_TENANT_ID = os.getenv('AZURE_TENANT_ID', '')
 AZURE_CLIENT_ID = os.getenv('AZURE_CLIENT_ID', '')
 AZURE_CLIENT_SECRET = os.getenv('AZURE_CLIENT_SECRET', '')
+if not AZURE_CLIENT_SECRET and _ssm_prefix:
+    try:
+        AZURE_CLIENT_SECRET = _get_ssm_parameter(f"{_ssm_prefix}/AzureClientSecret")
+    except Exception:
+        pass
 
 # Configuracion de la URL de inicio de sesión
 LOGIN_URL = '/login/'
