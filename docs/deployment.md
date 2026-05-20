@@ -106,9 +106,9 @@ Todas vienen del ConfigMap `ticketflow-config` y el Secret `ticketflow-secrets`.
 |---|---|---|
 | `AWS_SSM_PREFIX` | ConfigMap | Prefijo SSM para obtener secretos (ej. `/Recordia/Development/Ticketflow`) |
 | `AWS_REGION` | ConfigMap | Región AWS (ej. `eu-west-1`) |
-| `CELERY_SQS_QUEUE_URL` | ConfigMap | URL completa de la cola SQS |
 | `DB_NAME`, `DB_PORT` | ConfigMap | Configuración de base de datos |
-| `SECRET_KEY` | SSM | Clave secreta Django (vía `{AWS_SSM_PREFIX}/SecretKey`) |
+| `SECRET_KEY` | SSM `{prefix}/SecretKey` | Clave secreta Django |
+| `CELERY_SQS_QUEUE_URL` | SSM `{prefix}/CelerySQSQueueUrl` | URL completa de la cola SQS |
 | `CELERY_BROKER_URL` | — | Solo en local con Redis; en producción no definir (usa SQS) |
 
 ---

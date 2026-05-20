@@ -8,9 +8,6 @@ data:
   CSRF_TRUSTED_ORIGINS: "https://ticketflow.example.com"
   DB_NAME: "ticketflow"
   DB_PORT: "3306"
-  # URL completa de la cola SQS — debe existir previamente, el pod NO tiene permiso de crearla.
-  # Formato: https://sqs.{region}.amazonaws.com/{account_id}/{queue_name}
-  CELERY_SQS_QUEUE_URL: "https://sqs.eu-west-1.amazonaws.com/ACCOUNT_ID/ticketflow-celery"  # ← cambiar
   AWS_SSM_PREFIX: "/Recordia/Development/Ticketflow"
   AWS_REGION: "eu-west-1"
   SSO_LOGIN_API_URL: "https://dev-login-api.agentia365.com"
