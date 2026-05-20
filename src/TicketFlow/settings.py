@@ -283,6 +283,13 @@ ZENDESK_API_TOKEN = os.getenv('ZENDESK_API_TOKEN') or _ssm_zendesk.get('ZENDESK_
 # Local dev:  sobreescribir con CELERY_BROKER_URL=redis://localhost:6379/0 en .env
 CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'sqs://')
 _sqs_queue_url = os.getenv('CELERY_SQS_QUEUE_URL', '')
+# Si el broker es SQS, CELERY_SQS_QUEUE_URL es obligatoria para evitar auto-creación
+if CELERY_BROKER_URL == 'sqs://' and not _sqs_queue_url:
+    raise RuntimeError(
+        "CELERY_SQS_QUEUE_URL no está definida. "
+        "En local añade CELERY_BROKER_URL=redis://localhost:6379/0 al .env. "
+        "En producción define CELERY_SQS_QUEUE_URL con la URL completa de la cola SQS."
+    )
 CELERY_BROKER_TRANSPORT_OPTIONS = {
     'region': os.getenv('AWS_REGION', 'eu-west-1'),
     'visibility_timeout': 3600,
