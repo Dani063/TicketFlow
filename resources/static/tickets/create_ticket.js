@@ -1021,4 +1021,92 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ---- Merge de tickets ----
+    const mergeBtn = document.getElementById('merge-btn');
+    const mergeModal = document.getElementById('merge-modal');
+    const mergeModalClose = document.getElementById('merge-modal-close');
+    const mergeCancelBtn = document.getElementById('merge-cancel-btn');
+    const mergeConfirmBtn = document.getElementById('merge-confirm-btn');
+    const mergeSearchInput = document.getElementById('merge-search-input');
+    const mergeSearchResults = document.getElementById('merge-search-results');
+    const mergeSelected = document.getElementById('merge-selected');
+    const mergeSelectedLabel = document.getElementById('merge-selected-label');
+    const mergeTargetId = document.getElementById('merge-target-id');
+
+    if (mergeBtn && mergeModal) {
+        let searchTimer = null;
+
+        function openMergeModal() {
+            mergeModal.style.display = 'flex';
+            mergeSearchInput.value = '';
+            mergeSearchResults.innerHTML = '';
+            mergeSelected.style.display = 'none';
+            mergeTargetId.value = '';
+            mergeConfirmBtn.disabled = true;
+            mergeSearchInput.focus();
+        }
+
+        function closeMergeModal() {
+            mergeModal.style.display = 'none';
+        }
+
+        mergeBtn.addEventListener('click', openMergeModal);
+        mergeModalClose.addEventListener('click', closeMergeModal);
+        mergeCancelBtn.addEventListener('click', closeMergeModal);
+        mergeModal.addEventListener('click', (e) => { if (e.target === mergeModal) closeMergeModal(); });
+
+        mergeSearchInput.addEventListener('input', () => {
+            clearTimeout(searchTimer);
+            const q = mergeSearchInput.value.trim();
+            if (q.length < 2) { mergeSearchResults.innerHTML = ''; return; }
+            searchTimer = setTimeout(async () => {
+                const res = await fetch(`${window.urls.search}?q=${encodeURIComponent(q)}`);
+                const data = await res.json();
+                mergeSearchResults.innerHTML = '';
+                const tickets = (data.tickets || []).filter(t => t.id !== window.ticketId);
+                if (!tickets.length) {
+                    mergeSearchResults.innerHTML = '<li class="merge-result-empty">Sin resultados</li>';
+                    return;
+                }
+                tickets.forEach(t => {
+                    const li = document.createElement('li');
+                    li.className = 'merge-result-item';
+                    li.dataset.id = t.id;
+                    li.innerHTML = `<span class="merge-result-id">#${t.id}</span> <span class="merge-result-subject">${t.subject}</span> <span class="merge-result-status status-${t.status}">${t.status}</span>`;
+                    li.addEventListener('click', () => {
+                        mergeTargetId.value = t.id;
+                        mergeSelectedLabel.textContent = `#${t.id} — ${t.subject}`;
+                        mergeSelected.style.display = 'block';
+                        mergeConfirmBtn.disabled = false;
+                        mergeSearchResults.innerHTML = '';
+                    });
+                    mergeSearchResults.appendChild(li);
+                });
+            }, 300);
+        });
+
+        mergeConfirmBtn.addEventListener('click', async () => {
+            const targetId = mergeTargetId.value;
+            if (!targetId) return;
+            if (!confirm('¿Seguro que quieres fusionar este ticket? La acción no se puede deshacer.')) return;
+            mergeConfirmBtn.disabled = true;
+            try {
+                const fd = new FormData();
+                fd.append('target_ticket_id', targetId);
+                const res = await fetch(window.urls.merge_ticket, {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': getCookie('csrftoken') },
+                    body: fd,
+                });
+                const data = await res.json();
+                if (!res.ok) { alert(data.error || 'Error al fusionar'); mergeConfirmBtn.disabled = false; return; }
+                closeMergeModal();
+                window.location.href = `/tickets/create/?id=${data.target_id}`;
+            } catch (e) {
+                mergeConfirmBtn.disabled = false;
+                console.error('merge error', e);
+            }
+        });
+    }
+
 });
