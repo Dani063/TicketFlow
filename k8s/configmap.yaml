@@ -8,8 +8,8 @@ data:
   CSRF_TRUSTED_ORIGINS: "https://ticketflow.example.com"
   DB_NAME: "ticketflow"
   DB_PORT: "3306"
-  # Celery usa SQS automáticamente via IAM del pod — no necesita URL explícita
-  # La cola se crea sola con el nombre: ticketflow-celery
+  # Celery usa SQS via IAM del pod. La cola debe existir previamente — NO se crea automáticamente.
+  CELERY_SQS_QUEUE_NAME: "ticketflow-celery"   # ← nombre de la cola SQS creada por DevOps
   AWS_SSM_PREFIX: "/Recordia/Development/Ticketflow"
   AWS_REGION: "eu-west-1"
   SSO_LOGIN_API_URL: "https://dev-login-api.agentia365.com"
