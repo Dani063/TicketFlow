@@ -101,10 +101,18 @@ if not SECRET_KEY:
     try:
         SECRET_KEY = _get_ssm_parameter(_secret_key_path)
     except Exception as exc:
-        raise RuntimeError(
-            f"SECRET_KEY no definido y no se pudo obtener de SSM ({_secret_key_path}). "
-            f"Configúralo en .env o verifica permisos IAM. Causa: {exc}"
-        ) from exc
+        _exc_str = str(exc)
+        if 'AccessDenied' in _exc_str or 'AccessDeniedException' in _exc_str:
+            raise RuntimeError(
+                f"Sin permisos IAM para leer {_secret_key_path}. "
+                f"Añade ssm:GetParameter al rol del pod. Causa: {exc}"
+            ) from exc
+        if 'ParameterNotFound' in _exc_str:
+            raise RuntimeError(
+                f"Parámetro SSM no encontrado: {_secret_key_path}. "
+                f"Créalo en Parameter Store o define SECRET_KEY en .env."
+            ) from exc
+        raise
 
 # DEBUG por entorno
 DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes", "on")
@@ -287,8 +295,19 @@ if not _sqs_queue_url and _ssm_prefix:
     try:
         _sqs_queue_url = _get_ssm_parameter(f"{_ssm_prefix}/CelerySQSQueueUrl")
         os.environ['CELERY_SQS_QUEUE_URL'] = _sqs_queue_url
-    except Exception:
-        pass
+    except Exception as _sqs_exc:
+        _sqs_err = str(_sqs_exc)
+        if 'AccessDenied' in _sqs_err or 'AccessDeniedException' in _sqs_err:
+            raise RuntimeError(
+                f"Sin permisos IAM para leer {_ssm_prefix}/CelerySQSQueueUrl. "
+                f"Añade ssm:GetParameter al rol del pod. Causa: {_sqs_exc}"
+            ) from _sqs_exc
+        if 'ParameterNotFound' in _sqs_err:
+            raise RuntimeError(
+                f"Parámetro SSM no encontrado: {_ssm_prefix}/CelerySQSQueueUrl. "
+                f"Créalo en Parameter Store (tipo String)."
+            ) from _sqs_exc
+        raise
 # Si el broker es SQS, CELERY_SQS_QUEUE_URL es obligatoria para evitar auto-creación
 if CELERY_BROKER_URL == 'sqs://' and not _sqs_queue_url:
     raise RuntimeError(
