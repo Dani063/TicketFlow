@@ -25,6 +25,26 @@ spec:
                 name: ticketflow-config
             - secretRef:
                 name: ticketflow-secrets
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "celery -A TicketFlow inspect ping --timeout 10 2>&1 | grep -q pong"
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "celery -A TicketFlow inspect ping --timeout 10 2>&1 | grep -q pong"
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 15
+            failureThreshold: 2
           resources:
             requests:
               cpu: "100m"

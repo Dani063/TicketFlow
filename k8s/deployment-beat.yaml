@@ -27,6 +27,26 @@ spec:
                 name: ticketflow-config
             - secretRef:
                 name: ticketflow-secrets
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "find /tmp/celerybeat-schedule -mmin -5 | grep -q celerybeat"
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "test -f /tmp/celerybeat-schedule"
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 2
           resources:
             requests:
               cpu: "50m"
