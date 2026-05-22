@@ -33,8 +33,19 @@ def _get_ssm_json(path):
     import json
     try:
         return json.loads(_get_ssm_parameter(path))
-    except Exception:
-        return {}
+    except Exception as exc:
+        _exc_str = str(exc)
+        if 'AccessDenied' in _exc_str or 'AccessDeniedException' in _exc_str:
+            raise RuntimeError(
+                f"Sin permisos IAM para leer {path}. "
+                f"Añade ssm:GetParameter al rol del pod. Causa: {exc}"
+            ) from exc
+        if 'ParameterNotFound' in _exc_str:
+            raise RuntimeError(
+                f"Parámetro SSM no encontrado: {path}. "
+                f"Créalo en Parameter Store como SecureString JSON."
+            ) from exc
+        raise
 
 
 def _get_ssm_db_config(prefix):
