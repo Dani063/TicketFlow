@@ -315,12 +315,15 @@ if CELERY_BROKER_URL == 'sqs://' and not _sqs_queue_url:
         "En local añade CELERY_BROKER_URL=redis://localhost:6379/0 al .env. "
         "En producción crea el parámetro SSM {prefix}/CelerySQSQueueUrl."
     )
+# Deriva el nombre de la cola desde la URL (soporta colas FIFO con sufijo .fifo)
+_sqs_queue_name = _sqs_queue_url.rstrip('/').split('/')[-1] if _sqs_queue_url else 'celery'
+CELERY_TASK_DEFAULT_QUEUE = _sqs_queue_name
 CELERY_BROKER_TRANSPORT_OPTIONS = {
     'region': os.getenv('AWS_REGION', 'eu-west-1'),
     'visibility_timeout': 3600,
-    # URL completa de la cola — kombu la usa directamente sin llamar a CreateQueue
+    # La clave debe coincidir con el nombre real de la cola (incluido .fifo si aplica)
     'predefined_queues': {
-        'celery': {'url': _sqs_queue_url},
+        _sqs_queue_name: {'url': _sqs_queue_url},
     } if _sqs_queue_url else {},
 }
 # Los resultados de tareas no se usan — se descartan para no necesitar result backend
