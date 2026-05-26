@@ -44,6 +44,45 @@ _TICKET_SORT_FIELDS = {
     'assignee':   'assignee__name',
 }
 
+# Subfiltro (agrupación) por vista, replicando el comportamiento de Zendesk
+_TICKET_GROUP_BY = {
+    'telefonica_mes':         'assignee',
+    'unsolved_no_tareas':     'status',
+    'unassigned':             'status',
+    'all_unsolved_no_tareas': 'assignee',
+    'recently_updated':       'status',
+    'recently_solved':        'assignee',
+    'pendientes':             'assignee',
+    'tareas':                 'assignee',
+    'sus_tareas':             'status',
+    'unsolved_groups':        'group',
+    'rated_last7':            'assignee',
+    'internos_comuny':        'assignee',
+    'abiertos_ecomfax':       'assignee',
+    'recordia_sgsd':          'assignee',
+    'closed':                 'requester',
+    'sus_pendientes':         'status',
+    'espera':                 'assignee',
+    'abiertos':               'assignee',
+    'sus_no_cerrados':        'status',
+    'ultimos_cerrados':       'requester',
+    'no_resueltos':           'status',
+    'twitter':                'status',
+    'twitter_dm':             'status',
+    'twitter_like':           'status',
+    'resueltos':              'requester',
+    'new_in_groups':          'group',
+    'open':                   'assignee',
+    'no_update_48h':          'assignee',
+}
+
+_GROUP_DB_SORT = {
+    'assignee':  'assignee__name',
+    'status':    'status',
+    'group':     'assigned_group__group_name',
+    'requester': 'requester__name',
+}
+
 _CUSTOMER_SORT_FIELDS = {
     'id':         'id',
     'name':       'name',
@@ -174,7 +213,7 @@ def filter_tickets(request):
             "unsolved_no_tareas": base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea")).count(),
             "unassigned": base_qs.filter(assignee__isnull=True).count(),
             "all_unsolved_no_tareas": base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea")).count(),
-            "recently_updated": base_qs.count(),
+            "recently_updated": base_qs.filter(updated_at__gte=timezone.now()-timedelta(hours=24)).count(),
             "recently_solved": base_qs.filter(status="resolved").count(),
             "pendientes": base_qs.filter(status="pending").count(),
             "tareas": base_qs.filter(type="tarea").count(),
@@ -209,7 +248,7 @@ def filter_tickets(request):
     elif view == "all_unsolved_no_tareas":
         tickets = base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea"))
     elif view == "recently_updated":
-        tickets = base_qs
+        tickets = base_qs.filter(updated_at__gte=timezone.now()-timedelta(hours=24))
     elif view == "recently_solved":
         tickets = base_qs.filter(status="resolved")
     elif view == "pendientes":
@@ -264,15 +303,28 @@ def filter_tickets(request):
         tickets = base_qs
 
     db_sort = _TICKET_SORT_FIELDS.get(sort_by)
-    if db_sort:
-        tickets = tickets.order_by(f'-{db_sort}' if sort_dir == 'desc' else db_sort)
+    db_sort_signed = (f'-{db_sort}' if sort_dir == 'desc' else db_sort) if db_sort else None
+
+    # Si el usuario ha pedido ordenar por una columna, desactivamos la agrupación
+    # para mostrar la tabla plana ordenada por su criterio.
+    if db_sort_signed:
+        group_by = None
+        group_sort = None
+    else:
+        group_by = _TICKET_GROUP_BY.get(view)
+        group_sort = _GROUP_DB_SORT.get(group_by) if group_by else None
+
+    if group_sort:
+        tickets = tickets.order_by(group_sort, '-updated_at')
+    elif db_sort_signed:
+        tickets = tickets.order_by(db_sort_signed)
 
     total = tickets.count()
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(page, total_pages)
     offset = (page - 1) * page_size
 
-    tickets_page = list(tickets.select_related('requester', 'assignee')[offset:offset + page_size])
+    tickets_page = list(tickets.select_related('requester', 'assignee', 'assigned_group')[offset:offset + page_size])
 
     last_comments = {}
     if tickets_page:
@@ -283,6 +335,19 @@ def filter_tickets(request):
                   .order_by('ticket_id', '-created_at')):
             if c.ticket_id not in last_comments:
                 last_comments[c.ticket_id] = c
+
+    def _group_value(t):
+        if not group_by:
+            return None
+        if group_by == 'assignee':
+            return t.assignee.name if t.assignee else '— Sin asignar —'
+        if group_by == 'status':
+            return (t.status or '—').capitalize()
+        if group_by == 'group':
+            return t.assigned_group.group_name if t.assigned_group else '— Sin grupo —'
+        if group_by == 'requester':
+            return t.requester.name if t.requester else '—'
+        return None
 
     data = []
     for t in tickets_page:
@@ -297,6 +362,7 @@ def filter_tickets(request):
             "status": t.status,
             "priority": t.priority or "",
             "description": (t.description or "")[:200],
+            "group_value": _group_value(t),
             "last_comment": {
                 "author": lc.user.name if lc and lc.user else "",
                 "date": lc.created_at.strftime("%d/%m/%Y %H:%M") if lc else "",
@@ -313,6 +379,7 @@ def filter_tickets(request):
             "page_size": page_size,
         },
         "sort": {"sort_by": sort_by if db_sort else "", "sort_dir": sort_dir},
+        "group_by": group_by,
     })
 
 @login_required

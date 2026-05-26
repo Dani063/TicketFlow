@@ -281,8 +281,14 @@
             <!-- Resize handle compose -->
             <div class="compose-resize-handle" id="composeResizer"></div>
             <!-- Input de Mensaje -->
-            <div class="message-input">
-                <textarea id="new-message" name="message" placeholder="Escribe un mensaje..."></textarea>
+            <div class="message-input" id="messageInputArea">
+                <div class="dropzone-overlay" id="composerDropzone" aria-hidden="true">
+                    <div class="dropzone-overlay__inner">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <span>Suelta los archivos aquí para adjuntar</span>
+                    </div>
+                </div>
+                <textarea id="new-message" name="message" placeholder="Escribe un mensaje... (puedes pegar o arrastrar archivos)"></textarea>
                 <div class="compose-toolbar">
                     {# Solo agentes ven el toggle Público/Interno #}
                     {% if can_use_internal %}

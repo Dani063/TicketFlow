@@ -470,6 +470,27 @@
     background-color: #ddd6fe !important;
 }
 
+/* ---- Group header row (subfiltro tipo Zendesk) ---- */
+.tabla tbody tr.group-header-row {
+    background-color: #f8fafc;
+    cursor: default;
+}
+
+.tabla tbody tr.group-header-row:hover {
+    background-color: #f8fafc;
+}
+
+.tabla tbody tr.group-header-row td.group-header {
+    font-weight: 600;
+    color: #475569;
+    padding: 10px 14px;
+    border-top: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 0.9rem;
+    text-align: left;
+    letter-spacing: 0.2px;
+}
+
 /* ---- Bulk action bar ---- */
 .ticket-action-bar {
     position: fixed;

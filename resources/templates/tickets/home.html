@@ -326,9 +326,16 @@
 
         // Delete
         const delBtn = document.getElementById("homeActionDelete");
-        if (delBtn) delBtn.addEventListener("click", function() {
+        if (delBtn) delBtn.addEventListener("click", async function() {
             if (!_sel.size) return;
-            if (!confirm(_sel.size + " ticket(s) serán eliminados. ¿Continuar?")) return;
+            const ok = await window.dialog.confirm({
+                title: 'Eliminar tickets',
+                message: `${_sel.size} ticket(s) serán eliminados. ¿Continuar?`,
+                confirmText: 'Eliminar',
+                cancelText: 'Cancelar',
+                variant: 'danger',
+            });
+            if (!ok) return;
             fetch("{% url 'bulk_delete' %}", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", "X-CSRFToken": _getCookie("csrftoken") },
@@ -339,15 +346,18 @@
                         const cb = document.querySelector(".home-ticket-cb[data-ticket-id='" + id + "']");
                         if (cb) cb.closest("tr").remove();
                     });
+                    window.toast.success(`${d.deleted || 0} ticket(s) eliminado(s)`);
                     _clearSel();
+                } else {
+                    window.toast.error(d.error || "Error al eliminar");
                 }
-            });
+            }).catch(() => window.toast.error("Error de red"));
         });
 
         // Merge modal open/close
         const mergeBtn = document.getElementById("homeActionMerge");
         if (mergeBtn) mergeBtn.addEventListener("click", function() {
-            if (_sel.size < 2) { alert("Selecciona al menos 2 tickets para fusionar."); return; }
+            if (_sel.size < 2) { window.toast.warning("Selecciona al menos 2 tickets para fusionar."); return; }
             document.getElementById("homeBmmSearch").value = "";
             document.getElementById("homeBmmResults").innerHTML = "<li style='color:#94a3b8;cursor:default;'>Escribe para buscar</li>";
             const tgt = document.getElementById("homeBmmSelectedTarget");
@@ -408,10 +418,13 @@
                         const cb = document.querySelector(".home-ticket-cb[data-ticket-id='" + id + "']");
                         if (cb) cb.closest("tr").remove();
                     });
+                    window.toast.success(`${d.merged || 0} ticket(s) fusionado(s)`);
                     _clearSel();
                     overlay.classList.remove("open");
+                } else {
+                    window.toast.error(d.error || "Error al fusionar");
                 }
-            });
+            }).catch(() => window.toast.error("Error de red"));
         });
     })();
 

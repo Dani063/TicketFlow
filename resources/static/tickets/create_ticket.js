@@ -49,62 +49,115 @@ document.addEventListener('DOMContentLoaded', () => {
     const attachBtn = document.getElementById('attach-btn');
     const attachInput = document.getElementById('attach-input');
     const pendingBox = document.getElementById('pending-attachments');
+    const composerArea = document.getElementById('messageInputArea');
+    const composerTextarea = document.getElementById('new-message');
 
     function isImageType(t) { return t && t.startsWith('image/'); }
+
+    async function uploadFiles(files) {
+        if (!files || !files.length) return;
+        if (!window.ticketId) {
+            window.toast.warning('Guarda el ticket antes de adjuntar archivos.');
+            return;
+        }
+        for (const file of files) {
+            const fd = new FormData();
+            fd.append('file', file);
+            try {
+                const res = await fetch(`/tickets/${window.ticketId}/attachments/upload/`, {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': getCookie('csrftoken') }, // NO pongas Content-Type aquí
+                    body: fd
+                });
+                const data = await res.json();
+                if (!res.ok) { window.toast.error(data.error || 'Error al subir adjunto'); continue; }
+
+                window.pendingAttachmentIds.push(data.id);
+                const pill = document.createElement('div');
+                pill.className = 'pending-pill';
+                pill.dataset.id = String(data.id);
+
+                const originalName = data.filename || (data.file_url || '').split('/').pop() || 'archivo';
+                const displayName = middleEllipsis(originalName, 26, '…');
+
+                pill.innerHTML = `
+  <i class="fas fa-paperclip" aria-hidden="true"></i>
+  <span class="name" title="${originalName}">${displayName}</span>
+  <button type="button" class="remove" aria-label="Quitar adjunto">&times;</button>
+`;
+
+                pill.querySelector('.remove').addEventListener('click', () => {
+                    window.pendingAttachmentIds = window.pendingAttachmentIds.filter(id => id !== data.id);
+                    pill.remove();
+                });
+
+                pendingBox && pendingBox.appendChild(pill);
+            } catch (err) {
+                console.error('Upload error', err);
+                window.toast.error('No se pudo subir el adjunto.');
+            }
+        }
+    }
 
     if (attachBtn && attachInput) {
         attachBtn.addEventListener('click', () => {
             if (!window.ticketId) {
-                alert('Guarda el ticket antes de adjuntar archivos.');
+                window.toast.warning('Guarda el ticket antes de adjuntar archivos.');
                 return;
             }
             attachInput.click();
         });
 
         attachInput.addEventListener('change', async (e) => {
-            const files = Array.from(e.target.files || []);
-            for (const file of files) {
-                const fd = new FormData();
-                fd.append('file', file);
-                try {
-                    const res = await fetch(`/tickets/${window.ticketId}/attachments/upload/`, {
-                        method: 'POST',
-                        headers: { 'X-CSRFToken': getCookie('csrftoken') }, // NO pongas Content-Type aquí
-                        body: fd
-                    });
-                    const data = await res.json();
-                    if (!res.ok) { alert(data.error || 'Error al subir adjunto'); continue; }
+            await uploadFiles(Array.from(e.target.files || []));
+            attachInput.value = '';
+        });
+    }
 
-                    // guardamos id para el comentario
-                    window.pendingAttachmentIds.push(data.id);
-                    // pinta píldora con nombre (elipsis medio) y botón de quitar
-                    const pill = document.createElement('div');
-                    pill.className = 'pending-pill';
-                    pill.dataset.id = String(data.id);
+    // Drag & drop sobre el composer
+    if (composerArea) {
+        let _dragDepth = 0;
+        const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
 
-                    const originalName = data.filename || (data.file_url || '').split('/').pop() || 'archivo';
-                    const displayName = middleEllipsis(originalName, 26, '…');
+        composerArea.addEventListener('dragenter', (e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            _dragDepth++;
+            composerArea.classList.add('dragover');
+        });
+        composerArea.addEventListener('dragover', (e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+        });
+        composerArea.addEventListener('dragleave', () => {
+            _dragDepth = Math.max(0, _dragDepth - 1);
+            if (_dragDepth === 0) composerArea.classList.remove('dragover');
+        });
+        composerArea.addEventListener('drop', async (e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            _dragDepth = 0;
+            composerArea.classList.remove('dragover');
+            await uploadFiles(Array.from(e.dataTransfer.files || []));
+        });
+    }
 
-                    pill.innerHTML = `
-  <i class="fas fa-paperclip" aria-hidden="true"></i>
-  <span class="name" title="${originalName}">${displayName}</span>
-  <button type="button" class="remove" aria-label="Quitar adjunto">&times;</button>
-`;
-
-                    const removeBtn = pill.querySelector('.remove');
-                    removeBtn.addEventListener('click', () => {
-                        window.pendingAttachmentIds = window.pendingAttachmentIds.filter(id => id !== data.id);
-                        pill.remove();
-                    });
-
-                    pendingBox && pendingBox.appendChild(pill);
-
-                } catch (err) {
-                    console.error('Upload error', err);
-                    alert('No se pudo subir el adjunto.');
+    // Pegar imagen desde el portapapeles
+    if (composerTextarea) {
+        composerTextarea.addEventListener('paste', async (e) => {
+            const items = (e.clipboardData && e.clipboardData.items) || [];
+            const files = [];
+            for (const it of items) {
+                if (it.kind === 'file') {
+                    const f = it.getAsFile();
+                    if (f) files.push(f);
                 }
             }
-            attachInput.value = '';
+            if (files.length) {
+                e.preventDefault();
+                await uploadFiles(files);
+            }
         });
     }
 
@@ -181,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!brand) errors.push('Please provide a ticket brand');
             if (!content) errors.push('Please provide a ticket description');
             if (!subject) errors.push('Please provide a ticket subject');
-            if (errors.length) { alert(errors.join('\n')); return; }
+            if (errors.length) { errors.forEach(e => window.toast.warning(e)); return; }
 
             // Inyecta status y crea/redirige
             const ticketForm = document.getElementById('ticket-form');
@@ -202,7 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Ticket existente: validar contenido
-        if (!content) { alert('El contenido no puede estar vacío.'); return; }
+        if (!content) { window.toast.warning('El contenido no puede estar vacío.'); return; }
 
         const isPublic = (typeof isPublicInput !== 'undefined') ? (isPublicInput.value === 'true') : true;
         const payload = { content, is_public: isPublic };
@@ -221,7 +274,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
 
             if (!response.ok) {
-                alert(data.error || 'No se pudo enviar el mensaje.');
+                window.toast.error(data.error || 'No se pudo enviar el mensaje.');
                 return;
             }
 
@@ -270,7 +323,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } catch (err) {
             console.error('Error al enviar el comentario:', err);
-            alert('Error de red al enviar el mensaje.');
+            window.toast.error('Error de red al enviar el mensaje.');
         }
     };
 
@@ -295,7 +348,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const textarea = document.getElementById('new-message');
         const content = (textarea?.value || '').trim();
-        if (!content) { alert('El contenido no puede estar vacío.'); return; }
+        if (!content) { window.toast.warning('El contenido no puede estar vacío.'); return; }
 
         const isPublic = (typeof isPublicInput !== 'undefined') ? (isPublicInput.value === 'true') : true;
         const newStatus = (document.getElementById('selected-status')?.textContent || 'open').trim().toLowerCase();
@@ -310,7 +363,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify(payload)
             });
             const data = await response.json();
-            if (!response.ok) { alert(data.error || 'No se pudo publicar.'); return; }
+            if (!response.ok) { window.toast.error(data.error || 'No se pudo publicar.'); return; }
 
             // Pinta el nuevo comentario (idéntico a sendMessage)
             const messagesBox = document.getElementById('messagesBox');
@@ -357,7 +410,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } catch (err) {
             console.error('Error al publicar:', err);
-            alert('Error de red al publicar.');
+            window.toast.error('Error de red al publicar.');
         }
     }
 
@@ -384,7 +437,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (errors.length) {
                     e.preventDefault();
                     e.stopPropagation();
-                    alert(errors.join('\n'));
+                    errors.forEach(err => window.toast.warning(err));
                 }
             }
         });
@@ -442,7 +495,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!brand) errors.push('Please provide a ticket brand');
             if (!description) errors.push('Please provide a ticket description');
             if (!subject) errors.push('Please provide a ticket subject');
-            if (errors.length) { alert(errors.join('\n')); return; }
+            if (errors.length) { errors.forEach(err => window.toast.warning(err)); return; }
 
             const selectedStatus = document.getElementById('selected-status').textContent.trim();
             let statusInput = ticketForm.querySelector('input[name="status"]');
@@ -506,7 +559,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 $('#tags').find('option[value="create_new_tag"]').remove();
             } else {
-                alert('El tag solo puede contener letras y números, sin espacios en blanco.');
+                window.toast.warning('El tag solo puede contener letras y números, sin espacios en blanco.');
                 $('#tags').find('option[value="create_new_tag"]').remove();
             }
         }
@@ -1088,7 +1141,14 @@ document.addEventListener('DOMContentLoaded', () => {
         mergeConfirmBtn.addEventListener('click', async () => {
             const targetId = mergeTargetId.value;
             if (!targetId) return;
-            if (!confirm('¿Seguro que quieres fusionar este ticket? La acción no se puede deshacer.')) return;
+            const ok = await window.dialog.confirm({
+                title: 'Fusionar ticket',
+                message: '¿Seguro que quieres fusionar este ticket? La acción no se puede deshacer.',
+                confirmText: 'Fusionar',
+                cancelText: 'Cancelar',
+                variant: 'danger',
+            });
+            if (!ok) return;
             mergeConfirmBtn.disabled = true;
             try {
                 const fd = new FormData();
@@ -1099,7 +1159,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     body: fd,
                 });
                 const data = await res.json();
-                if (!res.ok) { alert(data.error || 'Error al fusionar'); mergeConfirmBtn.disabled = false; return; }
+                if (!res.ok) { window.toast.error(data.error || 'Error al fusionar'); mergeConfirmBtn.disabled = false; return; }
                 closeMergeModal();
                 window.location.href = `/tickets/create/?id=${data.target_id}`;
             } catch (e) {

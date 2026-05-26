@@ -1,4 +1,40 @@
-﻿/* Title Bar Styles */
+﻿/* ----- Composer drop zone (drag & drop attachments) ----- */
+.message-input {
+    position: relative;
+}
+
+.dropzone-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(124, 58, 237, 0.06);
+    border: 2px dashed var(--color-primary, #7c3aed);
+    border-radius: var(--radius-md, 8px);
+    pointer-events: none;
+    color: var(--color-primary, #7c3aed);
+}
+
+.message-input.dragover .dropzone-overlay {
+    display: flex;
+}
+
+.dropzone-overlay__inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.dropzone-overlay__inner i {
+    font-size: 32px;
+}
+
+/* Title Bar Styles */
 .title-bar {
     background-color: #f8f9f9;
     padding: 15px 85px;

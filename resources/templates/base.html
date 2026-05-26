@@ -7,6 +7,8 @@
 
     <!-- CSS globales -->
     <link rel="stylesheet" href="{% static 'tickets/style.css' %}">
+    <link rel="stylesheet" href="{% static 'tickets/toast.css' %}">
+    <link rel="stylesheet" href="{% static 'tickets/dialog.css' %}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 
     {% block extra_css %}{% endblock %}
@@ -45,6 +47,8 @@
     window.static_urls = { logo: "{% static 'tickets/logo.png' %}" };
     window.currentUserId = {{ request.user.id|default:'null' }};
     </script>
+    <script src="{% static 'tickets/toast.js' %}"></script>
+    <script src="{% static 'tickets/dialog.js' %}"></script>
     <script src="{% static 'tickets/tabs.js' %}"></script>
 
     {% block extra_js %}{% endblock %}

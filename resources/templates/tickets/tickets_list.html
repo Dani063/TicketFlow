@@ -375,7 +375,26 @@
                 tbody.innerHTML = `<tr><td colspan="7">No hay tickets.</td></tr>`;
             } else {
                 const fragment = document.createDocumentFragment();
+                const groupBy = data.group_by;
+                const groupLabel = {
+                    assignee:  'Asignado',
+                    status:    'Estado',
+                    group:     'Grupo',
+                    requester: 'Solicitante',
+                }[groupBy] || '';
+                let _prevGroup = null;
                 data.tickets.forEach(t => {
+                    if (groupBy && t.group_value !== _prevGroup) {
+                        const headerRow = document.createElement('tr');
+                        headerRow.className = 'group-header-row';
+                        const headerCell = document.createElement('td');
+                        headerCell.colSpan = 7;
+                        headerCell.className = 'group-header';
+                        headerCell.textContent = `${groupLabel}: ${t.group_value}`;
+                        headerRow.appendChild(headerCell);
+                        fragment.appendChild(headerRow);
+                        _prevGroup = t.group_value;
+                    }
                     const isClosed = (t.status === 'closed');
                     const row = document.createElement("tr");
                     row.dataset.ticketId = t.id;
@@ -501,7 +520,14 @@
         // Action bar — Delete
         document.getElementById('actionDelete').addEventListener('click', async () => {
             if (_selectedIds.size === 0) return;
-            if (!confirm(`¿Eliminar ${_selectedIds.size} ticket(s)? Esta acción se puede revertir.`)) return;
+            const ok = await window.dialog.confirm({
+                title: 'Eliminar tickets',
+                message: `¿Eliminar ${_selectedIds.size} ticket(s)? Esta acción se puede revertir.`,
+                confirmText: 'Eliminar',
+                cancelText: 'Cancelar',
+                variant: 'danger',
+            });
+            if (!ok) return;
             try {
                 const resp = await fetch('/tickets/bulk_delete/', {
                     method: 'POST',
@@ -510,12 +536,13 @@
                 });
                 const data = await resp.json();
                 if (data.ok) {
+                    window.toast.success(`${data.deleted || 0} ticket(s) eliminado(s)`);
                     clearSelection();
                     loadTickets(_currentView, _currentPage);
                 } else {
-                    alert(data.error || 'Error al eliminar');
+                    window.toast.error(data.error || 'Error al eliminar');
                 }
-            } catch (e) { alert('Error de red'); }
+            } catch (e) { window.toast.error('Error de red'); }
         });
 
         // Action bar — Merge
@@ -548,13 +575,14 @@
                 });
                 const data = await resp.json();
                 if (data.ok) {
+                    window.toast.success(`${data.merged || 0} ticket(s) fusionado(s)`);
                     closeBulkMergeModal();
                     clearSelection();
                     loadTickets(_currentView, _currentPage);
                 } else {
-                    alert(data.error || 'Error al fusionar');
+                    window.toast.error(data.error || 'Error al fusionar');
                 }
-            } catch (e) { alert('Error de red'); }
+            } catch (e) { window.toast.error('Error de red'); }
         });
     });
 

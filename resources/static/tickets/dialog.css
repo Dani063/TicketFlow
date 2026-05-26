@@ -1,0 +1,175 @@
+/* ============================================================
+ * Custom confirm dialog
+ * Replaces native confirm(); coherent with the rest of the UI.
+ * ============================================================ */
+
+.dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+    z-index: var(--z-modal, 3500);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-4, 16px);
+    opacity: 0;
+    transition: opacity 180ms ease;
+}
+
+.dialog-backdrop.open   { opacity: 1; }
+.dialog-backdrop.closing { opacity: 0; }
+
+.dialog {
+    background: var(--color-surface, #ffffff);
+    border-radius: var(--radius-lg, 12px);
+    box-shadow:
+        0 24px 48px rgba(15, 23, 42, 0.28),
+        0 4px 12px rgba(15, 23, 42, 0.10);
+    width: 100%;
+    max-width: 440px;
+    overflow: hidden;
+    transform: scale(0.94) translateY(8px);
+    opacity: 0;
+    transition:
+        transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1),
+        opacity 180ms ease;
+}
+
+.dialog-backdrop.open .dialog {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+}
+
+.dialog-backdrop.closing .dialog {
+    transform: scale(0.96) translateY(4px);
+    opacity: 0;
+    transition:
+        transform 160ms ease,
+        opacity 140ms ease;
+}
+
+/* ---- Header ---- */
+.dialog__header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3, 12px);
+    padding: var(--space-5, 20px) var(--space-5, 20px) 0;
+}
+
+.dialog__icon {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    background: var(--color-info-bg, #dbeafe);
+    color: var(--color-info, #2563eb);
+}
+
+.dialog--primary .dialog__icon {
+    background: var(--color-primary-soft, #ede9fe);
+    color: var(--color-primary, #7c3aed);
+}
+
+.dialog--danger .dialog__icon {
+    background: var(--color-danger-bg, #fee2e2);
+    color: var(--color-danger, #dc2626);
+}
+
+.dialog__title {
+    flex: 1;
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--color-text, #1e293b);
+    line-height: 1.35;
+}
+
+/* ---- Body ---- */
+.dialog__body {
+    padding: var(--space-4, 16px) var(--space-5, 20px) var(--space-5, 20px);
+    color: var(--color-text-muted, #475569);
+    font-size: 14.5px;
+    line-height: 1.55;
+    word-break: break-word;
+}
+
+/* ---- Footer ---- */
+.dialog__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2, 8px);
+    padding: var(--space-3, 12px) var(--space-5, 20px) var(--space-5, 20px);
+    background: var(--color-surface-2, #f8fafc);
+    border-top: 1px solid var(--color-border, #e2e8f0);
+}
+
+.dialog__btn {
+    border: none;
+    border-radius: var(--radius-md, 8px);
+    padding: 10px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 140ms ease, transform 120ms ease, box-shadow 140ms ease;
+}
+
+.dialog__btn:active { transform: translateY(1px); }
+
+.dialog__btn--cancel {
+    background: var(--color-surface, #fff);
+    color: var(--color-text-muted, #475569);
+    border: 1px solid var(--color-border, #e2e8f0);
+}
+
+.dialog__btn--cancel:hover {
+    background: var(--color-bg, #f5f6f8);
+    border-color: var(--color-border-strong, #cbd5e1);
+}
+
+.dialog__btn--confirm.dialog__btn--primary {
+    background: var(--color-primary, #7c3aed);
+    color: #ffffff;
+    box-shadow: 0 1px 2px rgba(124, 58, 237, 0.25);
+}
+
+.dialog__btn--confirm.dialog__btn--primary:hover {
+    background: var(--color-primary-hover, #6d28d9);
+}
+
+.dialog__btn--confirm.dialog__btn--danger {
+    background: var(--color-danger, #dc2626);
+    color: #ffffff;
+    box-shadow: 0 1px 2px rgba(220, 38, 38, 0.25);
+}
+
+.dialog__btn--confirm.dialog__btn--danger:hover {
+    background: #b91c1c;
+}
+
+.dialog__btn:focus-visible {
+    outline: 2px solid var(--color-primary, #7c3aed);
+    outline-offset: 2px;
+}
+
+.dialog__btn--confirm.dialog__btn--danger:focus-visible {
+    outline-color: var(--color-danger, #dc2626);
+}
+
+@media (max-width: 480px) {
+    .dialog__footer { flex-direction: column-reverse; }
+    .dialog__btn { width: 100%; padding: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dialog-backdrop, .dialog {
+        transition: opacity 120ms ease;
+        transform: none !important;
+    }
+}

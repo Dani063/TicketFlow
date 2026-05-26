@@ -10,10 +10,14 @@
             <a href="{% url 'tickets_list' %}"><i class="fas fa-list"></i><span class="tooltip">Views</span></a>
         </li>
         <li><a href="{% url 'customers_list' %}"><i class="fas fa-users"></i><span class="tooltip">Customers</span></a></li>
+        {% comment %}Reporting oculto hasta que tenga contenido; ruta intacta para dev.
         <li><a href="{% url 'reporting' %}"><i class="fas fa-chart-bar"></i><span class="tooltip">Reporting</span></a></li>
+        {% endcomment %}
         {% endif %}
+        {% comment %}Admin/Settings oculto hasta que tenga contenido; ruta intacta para dev.
         <li class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">
             <a href="{% url 'settings' %}"><i class="fas fa-cog"></i><span class="tooltip">Admin</span></a>
         </li>
+        {% endcomment %}
     </ul>
 </div>
