@@ -59,15 +59,23 @@ class ZendeskClient:
             "Content-Type": "application/json",
         }
 
-    def get(self, path, params=None):
+    def get(self, path, params=None, timeout=30):
         url = self.base + path
-        for attempt in range(5):
-            resp = requests.get(url, headers=self.headers, params=params, timeout=30)
+        resp = None
+        for attempt in range(6):
+            try:
+                resp = requests.get(url, headers=self.headers, params=params, timeout=timeout)
+            except requests.exceptions.Timeout:
+                wait = 10 * (attempt + 1)
+                time.sleep(wait)
+                continue
             if resp.status_code == 429:
                 wait = int(resp.headers.get("Retry-After", 60))
                 time.sleep(wait)
                 continue
             break
+        if resp is None:
+            raise CommandError(f"Timeout persistente al conectar con Zendesk: {url}")
         if resp.status_code == 404:
             raise CommandError(f"No encontrado en Zendesk: {url}")
         if resp.status_code == 401:
@@ -159,44 +167,55 @@ def _resolve_audit_value(field_name, raw_value, user_cache, group_cache, client)
 
 
 def _import_audits(client, ticket, zaudits, user_cache, group_cache):
-    """Importa los audits de Zendesk como TicketEvent locales."""
-    new_events = 0
+    """Importa los audits de Zendesk como TicketEvent locales (bulk insert)."""
+    # Collect all candidate events first
+    candidates = []
     for audit in zaudits:
         author_id = audit.get("author_id")
         actor = _get_or_create_user(client, author_id, user_cache) if author_id else None
-        created_at = parse_datetime(audit["created_at"]) if audit.get("created_at") else None
-
+        audit_dt = parse_datetime(audit["created_at"]) if audit.get("created_at") else None
         for ev in audit.get("events", []):
-            ev_id = ev.get("id")
             ev_type = ev.get("type")
-
-            # Solo Change con campo tracked; ignorar Comments y otros
             if ev_type not in ("Change", "Create"):
                 continue
             field = ev.get("field_name")
             if field not in TRACKED_FIELDS:
                 continue
+            candidates.append((ev, actor, audit_dt))
 
-            if ev_id and TicketEvent.objects.filter(zendesk_event_id=ev_id).exists():
-                continue
+    if not candidates:
+        return 0
 
-            old_raw = ev.get("previous_value")
-            new_raw = ev.get("value")
+    # Pre-fetch existing event IDs in one query instead of N exists() calls
+    candidate_ids = [ev.get("id") for ev, _, _ in candidates if ev.get("id")]
+    existing_ids = set(
+        TicketEvent.objects.filter(zendesk_event_id__in=candidate_ids)
+        .values_list("zendesk_event_id", flat=True)
+    ) if candidate_ids else set()
 
-            old_label = _resolve_audit_value(field, old_raw, user_cache, group_cache, client)
-            new_label = _resolve_audit_value(field, new_raw, user_cache, group_cache, client)
+    objs = []
+    for ev, actor, audit_dt in candidates:
+        ev_id = ev.get("id")
+        if ev_id in existing_ids:
+            continue
+        field = ev.get("field_name")
+        old_label = _resolve_audit_value(field, ev.get("previous_value"), user_cache, group_cache, client)
+        new_label = _resolve_audit_value(field, ev.get("value"), user_cache, group_cache, client)
+        obj = TicketEvent(
+            ticket=ticket,
+            actor=actor,
+            field_name=FIELD_LABELS.get(field, field),
+            old_value=old_label,
+            new_value=new_label,
+            zendesk_event_id=ev_id,
+        )
+        if audit_dt:
+            obj.created_at = audit_dt
+        objs.append(obj)
 
-            TicketEvent.objects.create(
-                ticket=ticket,
-                actor=actor,
-                field_name=FIELD_LABELS.get(field, field),
-                old_value=old_label,
-                new_value=new_label,
-                created_at=created_at,
-                zendesk_event_id=ev_id,
-            )
-            new_events += 1
-    return new_events
+    if objs:
+        TicketEvent.objects.bulk_create(objs, ignore_conflicts=True)
+    return len(objs)
 
 
 def _get_or_create_organization(client, org_id, cache):
@@ -361,6 +380,19 @@ def _apply_custom_fields(ticket, zt):
     return changed
 
 
+def _populate_caches_from_db(user_cache, group_cache, brand_cache, org_cache):
+    """Pre-populates entity caches from the local DB to avoid redundant lookups."""
+    from app.models import User, Group, Brand, Organization
+    for u in User.objects.filter(zendesk_id__isnull=False).only("id", "zendesk_id"):
+        user_cache[u.zendesk_id] = u
+    for g in Group.objects.filter(zendesk_id__isnull=False).only("id", "zendesk_id"):
+        group_cache[g.zendesk_id] = g
+    for b in Brand.objects.filter(zendesk_id__isnull=False).only("id", "zendesk_id"):
+        brand_cache[b.zendesk_id] = b
+    for o in Organization.objects.filter(zendesk_id__isnull=False).only("id", "zendesk_id"):
+        org_cache[o.zendesk_id] = o
+
+
 def _get_or_create_brand(client, zendesk_brand_id, cache):
     if zendesk_brand_id is None:
         return None
@@ -508,19 +540,42 @@ class Command(BaseCommand):
 
             # Comments (públicos + privados/internos)
             refresh = options.get("refresh_comments", False)
-            new_comments = 0
             refreshed_comments = 0
+
+            # Pre-fetch all existing comment zendesk_ids in one query
+            zc_ids = [zc.get("id") for zc in zcomments if zc.get("id")]
+            existing_comments = {
+                c.zendesk_id: c
+                for c in Comment.objects.filter(zendesk_id__in=zc_ids).only("id", "zendesk_id", "html_body")
+            } if zc_ids else {}
+
+            if refresh:
+                to_refresh = [
+                    c for c in existing_comments.values() if not c.html_body
+                ]
+                for zc in zcomments:
+                    zc_id = zc.get("id")
+                    if zc_id in existing_comments and not existing_comments[zc_id].html_body:
+                        existing_comments[zc_id].html_body = zc.get("html_body") or ""
+                if to_refresh:
+                    for zc in zcomments:
+                        zc_id = zc.get("id")
+                        if zc_id in existing_comments:
+                            existing_comments[zc_id].html_body = zc.get("html_body") or ""
+                    Comment.objects.bulk_update(
+                        [existing_comments[zc.get("id")] for zc in zcomments
+                         if zc.get("id") in existing_comments and existing_comments[zc.get("id")].html_body != (zc.get("html_body") or "")],
+                        ["html_body"],
+                    )
+                    refreshed_comments = len(to_refresh)
+
+            new_objs = []
             for zc in zcomments:
                 zc_id = zc.get("id")
-                existing_comment = Comment.objects.filter(zendesk_id=zc_id).first() if zc_id else None
-                if existing_comment:
-                    if refresh and not existing_comment.html_body:
-                        existing_comment.html_body = zc.get("html_body") or ""
-                        existing_comment.save()
-                        refreshed_comments += 1
+                if zc_id in existing_comments:
                     continue
                 author = _get_or_create_user(client, zc.get("author_id"), user_cache, org_cache) or requester
-                comment = Comment.objects.create(
+                obj = Comment(
                     ticket=ticket,
                     user=author,
                     content=zc.get("body") or "",
@@ -529,10 +584,14 @@ class Command(BaseCommand):
                     zendesk_id=zc_id,
                     via_channel=(zc.get("via") or {}).get("channel") or "",
                 )
-                c_created = parse_datetime(zc["created_at"]) if zc.get("created_at") else None
-                if c_created:
-                    Comment.objects.filter(pk=comment.pk).update(created_at=c_created)
-                new_comments += 1
+                c_dt = parse_datetime(zc["created_at"]) if zc.get("created_at") else None
+                if c_dt:
+                    obj.created_at = c_dt  # bulk_create bypasses auto_now_add
+                new_objs.append(obj)
+
+            if new_objs:
+                Comment.objects.bulk_create(new_objs, ignore_conflicts=True)
+            new_comments = len(new_objs)
 
             # Audits (cambios de estado, reasignaciones, etc.)
             zaudits = client.audits(ticket_id)

@@ -2,7 +2,9 @@ import re
 import html as _html
 import logging
 import requests
+from datetime import timedelta
 from django.conf import settings
+from django.utils import timezone
 from django.utils.html import strip_tags
 from celery import shared_task
 
@@ -47,18 +49,59 @@ def _get_or_create_requester(email, name):
     return user
 
 
-def _find_ticket_by_ref(subject, brand):
+def _find_ticket_for_message(subject, conversation_id, brand, requester=None):
     from app.models import Ticket
+    # Tier 1: Graph conversationId — most reliable, groups the whole email thread
+    if conversation_id:
+        ticket = Ticket.objects.filter(email_conversation_id=conversation_id, brand=brand).first()
+        if ticket:
+            return ticket
+    # Tier 2: explicit [Ticket #N] in subject (system reply-to or manual reference)
     m = _TICKET_REF_RE.search(subject or '')
-    if not m:
-        return None
-    num = int(m.group(1))
-    for lookup in ({'id': num, 'brand': brand}, {'zendesk_id': num, 'brand': brand}):
-        try:
-            return Ticket.objects.get(**lookup)
-        except Ticket.DoesNotExist:
-            pass
+    if m:
+        num = int(m.group(1))
+        for lookup in ({'id': num, 'brand': brand}, {'zendesk_id': num, 'brand': brand}):
+            try:
+                return Ticket.objects.get(**lookup)
+            except Ticket.DoesNotExist:
+                pass
+    # Tier 3: normalized subject + same requester + open/pending ticket (last 30 days)
+    # Handles replies from sources that don't preserve conversationId (e.g. SES, forwards)
+    if requester and not conversation_id:
+        normalized = _normalize_subject(subject or '')
+        if len(normalized) >= 4:
+            cutoff = timezone.now() - timedelta(days=7)
+            ticket = (
+                Ticket.objects
+                .filter(
+                    brand=brand,
+                    requester=requester,
+                    status__in=('open', 'pending'),
+                    created_at__gte=cutoff,
+                    email_conversation_id__isnull=True,
+                )
+                .filter(subject__icontains=normalized[:60])
+                .order_by('-created_at')
+                .first()
+            )
+            if ticket:
+                return ticket
     return None
+
+
+_STRIP_PREFIX_RE = re.compile(r'^(re|fw|fwd|rv|resp):\s*', re.IGNORECASE)
+_TICKET_TAG_RE = re.compile(r'\[ticket\s*#\d+\]', re.IGNORECASE)
+
+
+def _normalize_subject(subject):
+    """Strip ticket tags and reply/forward prefixes for fuzzy thread matching."""
+    s = _TICKET_TAG_RE.sub('', subject).strip()
+    while True:
+        cleaned = _STRIP_PREFIX_RE.sub('', s).strip()
+        if cleaned == s:
+            break
+        s = cleaned
+    return s.lower()
 
 
 _BODY_RE = re.compile(r'<body[^>]*>(.*?)</body>', re.DOTALL | re.IGNORECASE)
@@ -90,6 +133,7 @@ def _process_message(message, brand):
     from app.models import Ticket, Comment
 
     msg_id = message['id']
+    conversation_id = message.get('conversationId') or ''
     subject = message.get('subject') or '(sin asunto)'
     sender = message.get('from', {}).get('emailAddress', {})
     sender_email = sender.get('address', '').strip().lower()
@@ -106,7 +150,7 @@ def _process_message(message, brand):
         return 'skip_dup'
 
     requester = _get_or_create_requester(sender_email, sender_name)
-    ticket = _find_ticket_by_ref(subject, brand)
+    ticket = _find_ticket_for_message(subject, conversation_id, brand, requester=requester)
 
     if ticket:
         Comment.objects.create(
@@ -132,6 +176,7 @@ def _process_message(message, brand):
             channel='email',
             status='open',
             email_message_id=msg_id,
+            email_conversation_id=conversation_id or None,
         )
         Comment.objects.create(
             ticket=ticket,
@@ -173,7 +218,7 @@ def poll_m365_mailboxes():
         url = (
             f'{GRAPH_BASE}/users/{mailbox}/mailFolders/Inbox/messages'
             '?$filter=isRead eq false'
-            '&$select=id,subject,from,body,receivedDateTime'
+            '&$select=id,subject,from,body,receivedDateTime,conversationId'
             '&$top=50'
             '&$orderby=receivedDateTime asc'
         )

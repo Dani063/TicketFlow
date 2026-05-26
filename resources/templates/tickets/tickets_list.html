@@ -8,6 +8,56 @@
 {% endblock %}
 
 {% block content %}
+<!-- Bulk merge modal -->
+<div id="bulkMergeOverlay" class="bulk-merge-overlay">
+    <div class="bulk-merge-modal">
+        <div class="bmm-header">
+            <h3><i class="fas fa-code-branch"></i> Fusionar tickets en...</h3>
+            <button class="bmm-close" id="bmmClose">&times;</button>
+        </div>
+        <div class="bmm-body">
+            <input type="text" class="bmm-search" id="bmmSearch" placeholder="Buscar ticket destino por asunto o ID...">
+            <ul class="bmm-results" id="bmmResults">
+                <li style="color:#94a3b8; cursor:default;">Escribe para buscar</li>
+            </ul>
+            <div class="bmm-selected-target" id="bmmSelectedTarget"></div>
+        </div>
+        <div class="bmm-footer">
+            <button class="bmm-btn" id="bmmCancel">Cancelar</button>
+            <button class="bmm-btn bmm-btn-confirm" id="bmmConfirm" disabled>Fusionar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk action bar -->
+<div id="ticketActionBar" class="ticket-action-bar">
+    <span class="tab-action-count"><strong id="tabActionCount">0</strong> tickets seleccionados</span>
+    <div class="tab-action-buttons">
+        <button class="tab-action-btn" id="actionMerge" title="Fusionar seleccionados">
+            <i class="fas fa-code-branch"></i> Merge
+        </button>
+        <button class="tab-action-btn tab-action-btn--danger" id="actionDelete" title="Eliminar seleccionados">
+            <i class="fas fa-trash"></i> Delete
+        </button>
+    </div>
+</div>
+
+<div id="ticket-preview-card">
+    <div class="tpc-header">
+        <span class="tpc-status"></span>
+        <span class="tpc-subject"></span>
+        <span class="tpc-priority"></span>
+    </div>
+    <div class="tpc-desc"></div>
+    <div class="tpc-comment-section">
+        <div class="tpc-comment-label">Latest comment</div>
+        <div class="tpc-comment-meta">
+            <span class="tpc-comment-author"></span>
+            <span class="tpc-comment-date"></span>
+        </div>
+        <div class="tpc-comment-body"></div>
+    </div>
+</div>
 <div class="title-bar">
     <h1>Lista de Tickets</h1>
 </div>
@@ -146,6 +196,7 @@
             <table>
                 <thead>
                     <tr>
+                        <th class="th-checkbox"><input type="checkbox" id="selectAllCheckbox" title="Seleccionar todos los no-cerrados"></th>
                         <th class="sortable" data-sort="id" onclick="toggleSort('id')">ID <i class="sort-icon fas fa-sort"></i></th>
                         <th class="sortable" data-sort="subject" onclick="toggleSort('subject')">Asunto <i class="sort-icon fas fa-sort"></i></th>
                         <th class="sortable" data-sort="requester" onclick="toggleSort('requester')">Solicitante <i class="sort-icon fas fa-sort"></i></th>
@@ -155,7 +206,7 @@
                     </tr>
                 </thead>
                 <tbody id="ticketsTableBody">
-                    <tr><td colspan="6">Cargando...</td></tr>
+                    <tr><td colspan="7">Cargando...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -182,6 +233,7 @@
     let _pageSize    = 50;
     let _sortBy      = '';
     let _sortDir     = 'asc';
+    let _selectedIds = new Set();
 
     function getUrlParam(name) {
         return new URLSearchParams(window.location.search).get(name);
@@ -312,6 +364,7 @@
         try {
             spinner.style.display = "block";
             tbody.innerHTML = "";
+            clearSelection();
 
             let url = `/tickets/filter/?view=${encodeURIComponent(view)}&page=${page}&page_size=${_pageSize}`;
             if (_sortBy) url += `&sort_by=${_sortBy}&sort_dir=${_sortDir}`;
@@ -319,20 +372,63 @@
             const data = await response.json();
 
             if (!data.tickets || data.tickets.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6">No hay tickets.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="7">No hay tickets.</td></tr>`;
             } else {
                 const fragment = document.createDocumentFragment();
                 data.tickets.forEach(t => {
+                    const isClosed = (t.status === 'closed');
                     const row = document.createElement("tr");
-                    row.onclick = () => openTicket(t.id, t.subject);
+                    row.dataset.ticketId = t.id;
+                    row.dataset.status = t.status;
+                    row.onclick = (e) => {
+                        if (e.target.closest('.td-checkbox')) return;
+                        if (_selectedIds.size > 0) return;
+                        openTicket(t.id, t.subject);
+                    };
+
+                    // Checkbox cell
+                    const cbCell = document.createElement('td');
+                    cbCell.className = 'td-checkbox';
+                    const cb = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.className = 'ticket-checkbox';
+                    cb.disabled = isClosed;
+                    if (!isClosed) {
+                        cb.dataset.ticketId = t.id;
+                        cb.addEventListener('change', (e) => {
+                            e.stopPropagation();
+                            if (cb.checked) { _selectedIds.add(t.id); row.classList.add('row-selected'); }
+                            else            { _selectedIds.delete(t.id); row.classList.remove('row-selected'); }
+                            updateActionBar();
+                            syncSelectAll();
+                        });
+                    }
+                    cbCell.addEventListener('click', (e) => e.stopPropagation());
+                    cbCell.appendChild(cb);
+
+                    // Subject span with hover data
+                    const subjectSpan = document.createElement("span");
+                    subjectSpan.className = "subject-text";
+                    subjectSpan.textContent = t.subject;
+                    subjectSpan.dataset.ticketId = t.id;
+                    subjectSpan.dataset.status = t.status;
+                    subjectSpan.dataset.priority = t.priority || "";
+                    subjectSpan.dataset.subject = t.subject;
+                    subjectSpan.dataset.description = t.description || "";
+                    subjectSpan.dataset.lcAuthor = t.last_comment ? t.last_comment.author : "";
+                    subjectSpan.dataset.lcDate = t.last_comment ? t.last_comment.date : "";
+                    subjectSpan.dataset.lcBody = t.last_comment ? t.last_comment.body : "";
+
                     row.innerHTML = `
                       <td>${t.id}</td>
-                      <td><span class="status-dot status-${t.status}"></span>${t.subject}</td>
+                      <td><span class="status-dot status-${t.status}"></span></td>
                       <td>${t.requester}</td>
                       <td>${t.updated_at}</td>
                       <td>${t.service}</td>
                       <td>${t.assignee}</td>
                     `;
+                    row.insertBefore(cbCell, row.firstChild);
+                    row.cells[2].appendChild(subjectSpan);
                     fragment.appendChild(row);
                 });
                 tbody.appendChild(fragment);
@@ -352,7 +448,7 @@
             }
         } catch (err) {
             console.error("Error cargando tickets:", err);
-            tbody.innerHTML = `<tr><td colspan="6">Error al cargar tickets.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7">Error al cargar tickets.</td></tr>`;
         } finally {
             spinner.style.display = "none";
         }
@@ -379,6 +475,7 @@
             f.addEventListener("click", () => {
                 filters.forEach(x => x.classList.remove("active"));
                 f.classList.add("active");
+                clearSelection();
                 loadTickets(f.dataset.view, 1);
             });
             if (f.dataset.view === activeView) f.classList.add("active");
@@ -387,7 +484,171 @@
         if (activeView) loadTickets(activeView, activePage, false);
 
         refreshFilterCounts();
+
+        // Select-all checkbox
+        document.getElementById('selectAllCheckbox').addEventListener('change', function() {
+            const checkAll = this.checked;
+            document.querySelectorAll('.ticket-checkbox:not(:disabled)').forEach(cb => {
+                cb.checked = checkAll;
+                const id = parseInt(cb.dataset.ticketId, 10);
+                const row = cb.closest('tr');
+                if (checkAll) { _selectedIds.add(id); row.classList.add('row-selected'); }
+                else          { _selectedIds.delete(id); row.classList.remove('row-selected'); }
+            });
+            updateActionBar();
+        });
+
+        // Action bar — Delete
+        document.getElementById('actionDelete').addEventListener('click', async () => {
+            if (_selectedIds.size === 0) return;
+            if (!confirm(`¿Eliminar ${_selectedIds.size} ticket(s)? Esta acción se puede revertir.`)) return;
+            try {
+                const resp = await fetch('/tickets/bulk_delete/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+                    body: JSON.stringify({ids: [..._selectedIds]}),
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    clearSelection();
+                    loadTickets(_currentView, _currentPage);
+                } else {
+                    alert(data.error || 'Error al eliminar');
+                }
+            } catch (e) { alert('Error de red'); }
+        });
+
+        // Action bar — Merge
+        document.getElementById('actionMerge').addEventListener('click', () => {
+            if (_selectedIds.size === 0) return;
+            openBulkMergeModal();
+        });
+
+        // Merge modal wiring
+        document.getElementById('bmmClose').addEventListener('click', closeBulkMergeModal);
+        document.getElementById('bmmCancel').addEventListener('click', closeBulkMergeModal);
+        document.getElementById('bulkMergeOverlay').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('bulkMergeOverlay')) closeBulkMergeModal();
+        });
+
+        let _bmmSearchTimer = null;
+        document.getElementById('bmmSearch').addEventListener('input', function() {
+            clearTimeout(_bmmSearchTimer);
+            _bmmSearchTimer = setTimeout(() => bmmSearch(this.value.trim()), 300);
+        });
+
+        document.getElementById('bmmConfirm').addEventListener('click', async () => {
+            const targetId = parseInt(document.getElementById('bmmConfirm').dataset.targetId || '0', 10);
+            if (!targetId) return;
+            try {
+                const resp = await fetch('/tickets/bulk_merge/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+                    body: JSON.stringify({ids: [..._selectedIds], target_id: targetId}),
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    closeBulkMergeModal();
+                    clearSelection();
+                    loadTickets(_currentView, _currentPage);
+                } else {
+                    alert(data.error || 'Error al fusionar');
+                }
+            } catch (e) { alert('Error de red'); }
+        });
     });
+
+    // ---- Selection helpers ----
+    function updateActionBar() {
+        const count = _selectedIds.size;
+        document.getElementById('tabActionCount').textContent = count;
+        const bar = document.getElementById('ticketActionBar');
+        if (count > 0) bar.classList.add('visible');
+        else           bar.classList.remove('visible');
+    }
+
+    function syncSelectAll() {
+        const all     = document.querySelectorAll('.ticket-checkbox:not(:disabled)');
+        const checked = document.querySelectorAll('.ticket-checkbox:not(:disabled):checked');
+        const sa = document.getElementById('selectAllCheckbox');
+        if (!sa) return;
+        if (all.length === 0 || checked.length === 0) {
+            sa.checked = false; sa.indeterminate = false;
+        } else if (checked.length === all.length) {
+            sa.checked = true; sa.indeterminate = false;
+        } else {
+            sa.checked = false; sa.indeterminate = true;
+        }
+    }
+
+    function clearSelection() {
+        _selectedIds.clear();
+        document.querySelectorAll('.ticket-checkbox:checked').forEach(cb => { cb.checked = false; });
+        document.querySelectorAll('.row-selected').forEach(r => r.classList.remove('row-selected'));
+        const sa = document.getElementById('selectAllCheckbox');
+        if (sa) { sa.checked = false; sa.indeterminate = false; }
+        updateActionBar();
+    }
+
+    function getCookie(name) {
+        const v = document.cookie.match('(^|;) ?' + name + '=([^;]*)(;|$)');
+        return v ? v[2] : null;
+    }
+
+    // ---- Bulk merge modal ----
+    function openBulkMergeModal() {
+        const overlay = document.getElementById('bulkMergeOverlay');
+        overlay.classList.add('open');
+        document.getElementById('bmmSearch').value = '';
+        document.getElementById('bmmResults').innerHTML = '<li style="color:#94a3b8;cursor:default;">Escribe para buscar</li>';
+        document.getElementById('bmmSelectedTarget').classList.remove('show');
+        document.getElementById('bmmConfirm').disabled = true;
+        delete document.getElementById('bmmConfirm').dataset.targetId;
+        setTimeout(() => document.getElementById('bmmSearch').focus(), 50);
+    }
+
+    function closeBulkMergeModal() {
+        document.getElementById('bulkMergeOverlay').classList.remove('open');
+    }
+
+    async function bmmSearch(q) {
+        const list = document.getElementById('bmmResults');
+        if (!q) {
+            list.innerHTML = '<li style="color:#94a3b8;cursor:default;">Escribe para buscar</li>';
+            return;
+        }
+        list.innerHTML = '<li style="color:#94a3b8;cursor:default;">Buscando...</li>';
+        try {
+            const resp = await fetch(`/search/?q=${encodeURIComponent(q)}`);
+            const data = await resp.json();
+            const tickets = (data.tickets || []).filter(t => !_selectedIds.has(t.id)).slice(0, 15);
+            if (!tickets.length) {
+                list.innerHTML = '<li style="color:#94a3b8;cursor:default;">Sin resultados</li>';
+                return;
+            }
+            list.innerHTML = '';
+            tickets.forEach(t => {
+                const li = document.createElement('li');
+                li.dataset.id = t.id;
+                li.innerHTML = `<span class="bmm-id">#${t.id}</span><span class="bmm-subject">${t.subject}</span>`;
+                li.addEventListener('click', () => bmmSelectTarget(t.id, t.subject, li));
+                list.appendChild(li);
+            });
+        } catch(e) {
+            list.innerHTML = '<li style="color:#ef4444;cursor:default;">Error al buscar</li>';
+        }
+    }
+
+    function bmmSelectTarget(id, subject, li) {
+        document.querySelectorAll('#bmmResults li').forEach(el => el.classList.remove('selected'));
+        li.classList.add('selected');
+        const target = document.getElementById('bmmSelectedTarget');
+        target.textContent = `Destino: #${id} — ${subject}`;
+        target.classList.add('show');
+        const confirm = document.getElementById('bmmConfirm');
+        confirm.disabled = false;
+        confirm.dataset.targetId = id;
+    }
 
     function openTicket(ticketId, subject) {
         const tabText = subject || "Ticket " + ticketId;
@@ -398,5 +659,59 @@
             window.location.href = tabUrl;
         }
     }
+
+    // ---- Subject hover preview ----
+    const _card = document.getElementById("ticket-preview-card");
+    let _hoverTimer = null;
+
+    function _showCard(span, e) {
+        const s = span.dataset;
+        _card.querySelector(".tpc-status").textContent = s.status;
+        _card.querySelector(".tpc-status").className = "tpc-status status-" + s.status;
+        _card.querySelector(".tpc-subject").textContent = s.subject;
+        _card.querySelector(".tpc-priority").textContent = s.priority ? "(" + s.priority + ")" : "";
+        _card.querySelector(".tpc-desc").textContent = s.description || "";
+
+        const hasComment = s.lcBody && s.lcBody.trim() !== "";
+        _card.querySelector(".tpc-comment-section").style.display = hasComment ? "" : "none";
+        if (hasComment) {
+            _card.querySelector(".tpc-comment-author").textContent = s.lcAuthor;
+            _card.querySelector(".tpc-comment-date").textContent = s.lcDate;
+            _card.querySelector(".tpc-comment-body").textContent = s.lcBody;
+        }
+
+        _card.style.display = "block";
+        _positionCard(e);
+    }
+
+    function _positionCard(e) {
+        const margin = 16;
+        const cw = _card.offsetWidth;
+        const ch = _card.offsetHeight;
+        let x = e.clientX + 14;
+        let y = e.clientY + 14;
+        if (x + cw + margin > window.innerWidth)  x = e.clientX - cw - 14;
+        if (y + ch + margin > window.innerHeight) y = e.clientY - ch - 14;
+        _card.style.left = Math.max(0, x) + "px";
+        _card.style.top  = Math.max(0, y) + "px";
+    }
+
+    document.addEventListener("mouseover", function(e) {
+        const span = e.target.closest(".subject-text");
+        if (!span) return;
+        clearTimeout(_hoverTimer);
+        _hoverTimer = setTimeout(() => _showCard(span, e), 250);
+    });
+
+    document.addEventListener("mouseout", function(e) {
+        const span = e.target.closest(".subject-text");
+        if (!span) return;
+        clearTimeout(_hoverTimer);
+        _card.style.display = "none";
+    });
+
+    document.addEventListener("mousemove", function(e) {
+        if (_card.style.display === "block") _positionCard(e);
+    });
 </script>
 {% endblock %}

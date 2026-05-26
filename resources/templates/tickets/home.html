@@ -8,6 +8,54 @@
 {% endblock %}
 
 {% block content %}
+<!-- Bulk merge modal -->
+<div id="homeBulkMergeOverlay" class="bulk-merge-overlay">
+    <div class="bulk-merge-modal">
+        <div class="bmm-header">
+            <h3><i class="fas fa-code-branch"></i> Fusionar tickets en...</h3>
+            <button class="bmm-close" id="homeBmmClose">&times;</button>
+        </div>
+        <div class="bmm-body">
+            <input type="text" class="bmm-search" id="homeBmmSearch" placeholder="Buscar ticket destino por asunto o ID...">
+            <ul class="bmm-results" id="homeBmmResults">
+                <li style="color:#94a3b8; cursor:default;">Escribe para buscar</li>
+            </ul>
+            <div class="bmm-selected-target" id="homeBmmSelectedTarget"></div>
+        </div>
+        <div class="bmm-footer">
+            <button class="bmm-btn" id="homeBmmCancel">Cancelar</button>
+            <button class="bmm-btn bmm-btn-confirm" id="homeBmmConfirm" disabled>Fusionar</button>
+        </div>
+    </div>
+</div>
+<!-- Bulk action bar -->
+<div id="homeTicketActionBar" class="ticket-action-bar">
+    <span class="tab-action-count"><strong id="homeTabActionCount">0</strong> tickets seleccionados</span>
+    <div class="tab-action-buttons">
+        <button class="tab-action-btn" id="homeActionMerge" title="Fusionar seleccionados">
+            <i class="fas fa-code-branch"></i> Merge
+        </button>
+        <button class="tab-action-btn tab-action-btn--danger" id="homeActionDelete" title="Eliminar seleccionados">
+            <i class="fas fa-trash"></i> Delete
+        </button>
+    </div>
+</div>
+<div id="ticket-preview-card">
+    <div class="tpc-header">
+        <span class="tpc-status"></span>
+        <span class="tpc-subject"></span>
+        <span class="tpc-priority"></span>
+    </div>
+    <div class="tpc-desc"></div>
+    <div class="tpc-comment-section">
+        <div class="tpc-comment-label">Latest comment</div>
+        <div class="tpc-comment-meta">
+            <span class="tpc-comment-author"></span>
+            <span class="tpc-comment-date"></span>
+        </div>
+        <div class="tpc-comment-body"></div>
+    </div>
+</div>
 <div class="title-bar">
     <h1>Dashboard</h1>
 </div>
@@ -88,6 +136,9 @@
     <table>
         <thead>
             <tr>
+                <th class="th-checkbox">
+                    <input type="checkbox" id="homeSelectAll" title="Seleccionar todo">
+                </th>
                 <th>ID</th>
                 <th>Asunto</th>
                 <th>Solicitante</th>
@@ -105,8 +156,22 @@
                 data-satisfaction="{{ ticket.satisfaction_score|default:'' }}"
                 data-assignee="{{ ticket.assignee_id|default:'' }}"
                 data-assignee-group="{{ ticket.assignee.group_id|default:'' }}">
+                <td class="td-checkbox" onclick="event.stopPropagation()">
+                    <input type="checkbox" class="ticket-checkbox home-ticket-cb"
+                        data-ticket-id="{{ ticket.id }}"
+                        {% if ticket.status == 'closed' or ticket.status == 'resolved' %}disabled{% endif %}>
+                </td>
                 <td>{{ ticket.id }}</td>
-                <td><span class="status-dot status-{{ ticket.status|lower }}"></span>{{ ticket.subject }}</td>
+                <td>
+                    <span class="status-dot status-{{ ticket.status|lower }}"></span><span class="subject-text"
+                        data-status="{{ ticket.status }}"
+                        data-subject="{{ ticket.subject }}"
+                        data-description="{{ ticket.description|default:''|truncatechars:200 }}"
+                        data-priority="{{ ticket.priority|default:'' }}"
+                        data-lc-author="{{ ticket.lc_author|default:'' }}"
+                        data-lc-date="{{ ticket.lc_date|default:'' }}"
+                        data-lc-body="{{ ticket.lc_body|default:'' }}">{{ ticket.subject }}</span>
+                </td>
                 <td>{{ ticket.requester.name }}</td>
                 <td>{{ ticket.updated_at }}</td>
                 <td>{{ ticket.service }}</td>
@@ -122,7 +187,7 @@
             {% endfor %}
             {% else %}
             <tr>
-                <td colspan="7">No hay tickets pendientes.</td>
+                <td colspan="8">No hay tickets pendientes.</td>
             </tr>
             {% endif %}
         </tbody>
@@ -131,6 +196,57 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+    // ---- Subject hover preview ----
+    (function() {
+        const card = document.getElementById("ticket-preview-card");
+        if (!card) return;
+        let _timer = null, _mx = 0, _my = 0;
+
+        function _positionCard() {
+            const cw = card.offsetWidth, ch = card.offsetHeight, m = 16;
+            let x = _mx + 14, y = _my + 14;
+            if (x + cw + m > window.innerWidth)  x = _mx - cw - 14;
+            if (y + ch + m > window.innerHeight) y = _my - ch - 14;
+            card.style.left = Math.max(0, x) + "px";
+            card.style.top  = Math.max(0, y) + "px";
+        }
+
+        function _showCard(span) {
+            const s = span.dataset;
+            card.querySelector(".tpc-status").textContent = s.status || '';
+            card.querySelector(".tpc-status").className = "tpc-status status-" + (s.status || '').toLowerCase();
+            card.querySelector(".tpc-subject").textContent = s.subject || '';
+            card.querySelector(".tpc-priority").textContent = s.priority ? "(" + s.priority + ")" : "";
+            card.querySelector(".tpc-desc").textContent = s.description || "";
+            const hasComment = s.lcBody && s.lcBody.trim();
+            card.querySelector(".tpc-comment-section").style.display = hasComment ? "" : "none";
+            if (hasComment) {
+                card.querySelector(".tpc-comment-author").textContent = s.lcAuthor || '';
+                card.querySelector(".tpc-comment-date").textContent = s.lcDate || '';
+                card.querySelector(".tpc-comment-body").textContent = s.lcBody || '';
+            }
+            card.style.display = "block";
+            _positionCard();
+        }
+
+        document.addEventListener("mousemove", function(e) {
+            _mx = e.clientX; _my = e.clientY;
+            if (card.style.display === "block") _positionCard();
+        });
+
+        document.querySelectorAll(".subject-text").forEach(function(span) {
+            span.addEventListener("mouseenter", function() {
+                clearTimeout(_timer);
+                _timer = setTimeout(() => _showCard(span), 250);
+            });
+            span.addEventListener("mouseleave", function() {
+                clearTimeout(_timer);
+                card.style.display = "none";
+            });
+        });
+    })();
+</script>
 <script>
     const CURRENT_USER_ID = {{ current_user_id }};
     const CURRENT_USER_GROUP_ID = {% if current_user_group_id %}{{ current_user_group_id }}{% else %}null{% endif %};
@@ -148,6 +264,156 @@
     document.querySelectorAll('.stat').forEach(stat => {
         stat.addEventListener('click', () => filterTable(stat.getAttribute('data-filter')));
     });
+
+    // ---- Checkbox selection + bulk actions ----
+    (function() {
+        const _sel = new Set();
+        const bar       = document.getElementById("homeTicketActionBar");
+        const countEl   = document.getElementById("homeTabActionCount");
+        const selectAll = document.getElementById("homeSelectAll");
+        const overlay   = document.getElementById("homeBulkMergeOverlay");
+
+        function _getCookie(name) {
+            for (const c of document.cookie.split(";")) {
+                const [k, v] = c.trim().split("=");
+                if (k === name) return decodeURIComponent(v || "");
+            }
+            return "";
+        }
+
+        function _updateBar() {
+            if (countEl) countEl.textContent = _sel.size;
+            if (bar) bar.classList.toggle("visible", _sel.size > 0);
+        }
+
+        function _clearSel() {
+            _sel.clear();
+            document.querySelectorAll(".home-ticket-cb").forEach(cb => { cb.checked = false; });
+            document.querySelectorAll(".tabla tbody tr.row-selected").forEach(r => r.classList.remove("row-selected"));
+            if (selectAll) selectAll.checked = false;
+            _updateBar();
+        }
+
+        function _syncSelectAll() {
+            const all = document.querySelectorAll(".home-ticket-cb:not(:disabled)");
+            const chk = document.querySelectorAll(".home-ticket-cb:not(:disabled):checked");
+            if (selectAll) selectAll.checked = all.length > 0 && all.length === chk.length;
+        }
+
+        document.querySelectorAll(".home-ticket-cb").forEach(function(cb) {
+            cb.addEventListener("change", function() {
+                const id = parseInt(cb.dataset.ticketId);
+                const row = cb.closest("tr");
+                if (cb.checked) { _sel.add(id); if (row) row.classList.add("row-selected"); }
+                else             { _sel.delete(id); if (row) row.classList.remove("row-selected"); }
+                _updateBar();
+                _syncSelectAll();
+            });
+        });
+
+        if (selectAll) {
+            selectAll.addEventListener("change", function() {
+                document.querySelectorAll(".home-ticket-cb:not(:disabled)").forEach(function(cb) {
+                    cb.checked = selectAll.checked;
+                    const id = parseInt(cb.dataset.ticketId);
+                    const row = cb.closest("tr");
+                    if (selectAll.checked) { _sel.add(id); if (row) row.classList.add("row-selected"); }
+                    else                   { _sel.delete(id); if (row) row.classList.remove("row-selected"); }
+                });
+                _updateBar();
+            });
+        }
+
+        // Delete
+        const delBtn = document.getElementById("homeActionDelete");
+        if (delBtn) delBtn.addEventListener("click", function() {
+            if (!_sel.size) return;
+            if (!confirm(_sel.size + " ticket(s) serán eliminados. ¿Continuar?")) return;
+            fetch("{% url 'bulk_delete' %}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRFToken": _getCookie("csrftoken") },
+                body: JSON.stringify({ ids: [..._sel] })
+            }).then(r => r.json()).then(d => {
+                if (d.ok) {
+                    [..._sel].forEach(id => {
+                        const cb = document.querySelector(".home-ticket-cb[data-ticket-id='" + id + "']");
+                        if (cb) cb.closest("tr").remove();
+                    });
+                    _clearSel();
+                }
+            });
+        });
+
+        // Merge modal open/close
+        const mergeBtn = document.getElementById("homeActionMerge");
+        if (mergeBtn) mergeBtn.addEventListener("click", function() {
+            if (_sel.size < 2) { alert("Selecciona al menos 2 tickets para fusionar."); return; }
+            document.getElementById("homeBmmSearch").value = "";
+            document.getElementById("homeBmmResults").innerHTML = "<li style='color:#94a3b8;cursor:default;'>Escribe para buscar</li>";
+            const tgt = document.getElementById("homeBmmSelectedTarget");
+            tgt.textContent = ""; tgt.className = "bmm-selected-target";
+            document.getElementById("homeBmmConfirm").disabled = true;
+            document.getElementById("homeBmmConfirm").dataset.targetId = "";
+            overlay.classList.add("open");
+        });
+
+        ["homeBmmClose", "homeBmmCancel"].forEach(function(id) {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener("click", () => overlay.classList.remove("open"));
+        });
+
+        // Merge search
+        const bmmSearch = document.getElementById("homeBmmSearch");
+        if (bmmSearch) bmmSearch.addEventListener("input", function() {
+            const q = this.value.trim();
+            const ul = document.getElementById("homeBmmResults");
+            if (!q) { ul.innerHTML = "<li style='color:#94a3b8;cursor:default;'>Escribe para buscar</li>"; return; }
+            fetch("/search/?q=" + encodeURIComponent(q))
+                .then(r => r.json())
+                .then(d => {
+                    ul.innerHTML = "";
+                    if (!d.tickets || !d.tickets.length) {
+                        ul.innerHTML = "<li style='color:#94a3b8;cursor:default;'>Sin resultados</li>"; return;
+                    }
+                    d.tickets.forEach(function(t) {
+                        const li = document.createElement("li");
+                        li.innerHTML = "<span class='bmm-id'>#" + t.id + "</span><span class='bmm-subject'>" + t.subject + "</span>";
+                        li.addEventListener("click", function() {
+                            ul.querySelectorAll("li").forEach(x => x.classList.remove("selected"));
+                            li.classList.add("selected");
+                            const confirm = document.getElementById("homeBmmConfirm");
+                            confirm.disabled = false;
+                            confirm.dataset.targetId = t.id;
+                            const tgt = document.getElementById("homeBmmSelectedTarget");
+                            tgt.textContent = "Destino: #" + t.id + " – " + t.subject;
+                            tgt.className = "bmm-selected-target show";
+                        });
+                        ul.appendChild(li);
+                    });
+                });
+        });
+
+        // Merge confirm
+        const bmmConfirm = document.getElementById("homeBmmConfirm");
+        if (bmmConfirm) bmmConfirm.addEventListener("click", function() {
+            const targetId = parseInt(this.dataset.targetId);
+            if (!targetId) return;
+            fetch("{% url 'bulk_merge' %}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRFToken": _getCookie("csrftoken") },
+                body: JSON.stringify({ ids: [..._sel], target_id: targetId })
+            }).then(r => r.json()).then(d => {
+                if (d.ok) {
+                    [..._sel].filter(id => id !== targetId).forEach(id => {
+                        const cb = document.querySelector(".home-ticket-cb[data-ticket-id='" + id + "']");
+                        if (cb) cb.closest("tr").remove();
+                    });
+                    _clearSel();
+                    overlay.classList.remove("open");
+                }
+            });
+        });
+    })();
 
     function filterTable(filter) {
         const rows = document.querySelectorAll('.tabla tbody tr[data-status]');

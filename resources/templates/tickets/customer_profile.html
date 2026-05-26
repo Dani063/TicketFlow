@@ -8,6 +8,22 @@
 {% endblock %}
 
 {% block content %}
+<div id="ticket-preview-card">
+    <div class="tpc-header">
+        <span class="tpc-status"></span>
+        <span class="tpc-subject"></span>
+        <span class="tpc-priority"></span>
+    </div>
+    <div class="tpc-desc"></div>
+    <div class="tpc-comment-section">
+        <div class="tpc-comment-label">Latest comment</div>
+        <div class="tpc-comment-meta">
+            <span class="tpc-comment-author"></span>
+            <span class="tpc-comment-date"></span>
+        </div>
+        <div class="tpc-comment-body"></div>
+    </div>
+</div>
 <div class="title-bar">
     <h1>Perfil de Cliente</h1>
 </div>
@@ -78,7 +94,16 @@
                         {% for ticket in tickets %}
                         <tr onclick="openTicket('{{ ticket.id }}', '{{ ticket.subject|escapejs }}')">
                             <td>{{ ticket.id }}</td>
-                            <td><span class="status-dot status-{{ ticket.status|lower }}"></span>{{ ticket.subject }}</td>
+                            <td>
+                                <span class="status-dot status-{{ ticket.status|lower }}"></span><span class="subject-text"
+                                    data-status="{{ ticket.status }}"
+                                    data-subject="{{ ticket.subject }}"
+                                    data-description="{{ ticket.description|default:''|truncatechars:200 }}"
+                                    data-priority="{{ ticket.priority|default:'' }}"
+                                    data-lc-author="{{ ticket.lc_author|default:'' }}"
+                                    data-lc-date="{{ ticket.lc_date|default:'' }}"
+                                    data-lc-body="{{ ticket.lc_body|default:'' }}">{{ ticket.subject }}</span>
+                            </td>
                             <td>{{ ticket.status }}</td>
                             <td>{{ ticket.priority }}</td>
                             <td>{{ ticket.updated_at|date:"d/m/Y H:i" }}</td>
@@ -96,6 +121,58 @@
 </div>
 
 <script>
+    // ---- Subject hover preview ----
+    (function() {
+        const card = document.getElementById("ticket-preview-card");
+        if (!card) return;
+        let _timer = null, _mx = 0, _my = 0;
+
+        function _positionCard() {
+            const cw = card.offsetWidth, ch = card.offsetHeight, m = 16;
+            let x = _mx + 14, y = _my + 14;
+            if (x + cw + m > window.innerWidth)  x = _mx - cw - 14;
+            if (y + ch + m > window.innerHeight) y = _my - ch - 14;
+            card.style.left = Math.max(0, x) + "px";
+            card.style.top  = Math.max(0, y) + "px";
+        }
+
+        function _showCard(span) {
+            const s = span.dataset;
+            card.querySelector(".tpc-status").textContent = s.status || '';
+            card.querySelector(".tpc-status").className = "tpc-status status-" + (s.status || '').toLowerCase();
+            card.querySelector(".tpc-subject").textContent = s.subject || '';
+            card.querySelector(".tpc-priority").textContent = s.priority ? "(" + s.priority + ")" : "";
+            card.querySelector(".tpc-desc").textContent = s.description || "";
+            const hasComment = s.lcBody && s.lcBody.trim();
+            card.querySelector(".tpc-comment-section").style.display = hasComment ? "" : "none";
+            if (hasComment) {
+                card.querySelector(".tpc-comment-author").textContent = s.lcAuthor || '';
+                card.querySelector(".tpc-comment-date").textContent = s.lcDate || '';
+                card.querySelector(".tpc-comment-body").textContent = s.lcBody || '';
+            }
+            card.style.display = "block";
+            _positionCard();
+        }
+
+        document.addEventListener("mousemove", function(e) {
+            _mx = e.clientX; _my = e.clientY;
+            if (card.style.display === "block") _positionCard();
+        });
+
+        function _attachHover(span) {
+            span.addEventListener("mouseenter", function() {
+                clearTimeout(_timer);
+                _timer = setTimeout(() => _showCard(span), 250);
+            });
+            span.addEventListener("mouseleave", function() {
+                clearTimeout(_timer);
+                card.style.display = "none";
+            });
+        }
+
+        document.querySelectorAll(".subject-text").forEach(_attachHover);
+    })();
+
 function openTicket(ticketId, subject) {
     const tabText = subject || "Ticket " + ticketId;
     const tabUrl = "{% url 'create_ticket' %}?id=" + ticketId;

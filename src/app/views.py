@@ -54,6 +54,21 @@ _CUSTOMER_SORT_FIELDS = {
     'created_at': 'created_at',
 }
 
+def _attach_last_comments(ticket_list):
+    if not ticket_list:
+        return
+    ids = [t.id for t in ticket_list]
+    lc_map = {}
+    for c in Comment.objects.filter(ticket_id__in=ids).select_related('user').order_by('ticket_id', '-created_at'):
+        if c.ticket_id not in lc_map:
+            lc_map[c.ticket_id] = c
+    for t in ticket_list:
+        lc = lc_map.get(t.id)
+        t.lc_author = lc.user.name if lc and lc.user else ''
+        t.lc_date   = lc.created_at.strftime('%d/%m/%Y %H:%M') if lc else ''
+        t.lc_body   = (lc.content or '')[:300] if lc else ''
+
+
 def _parse_page_size(raw):
     try:
         size = int(raw or _DEFAULT_PAGE_SIZE)
@@ -93,6 +108,8 @@ def home(request):
         .order_by('-updated_at')
         [:100]
     )
+
+    _attach_last_comments(tickets_list)
 
     # Global satisfaction stats (all Zendesk-imported ratings)
     bien = SatisfactionRating.objects.filter(score='good').count()
@@ -141,10 +158,10 @@ def filter_tickets(request):
     page_size = _parse_page_size(request.GET.get("page_size"))
 
     if _is_agent(request.user):
-        base_qs = Ticket.objects.filter(merged_into__isnull=True).order_by('-updated_at')
+        base_qs = Ticket.objects.filter(merged_into__isnull=True, is_deleted=False).order_by('-updated_at')
     else:
         base_qs = Ticket.objects.filter(
-            merged_into__isnull=True
+            merged_into__isnull=True, is_deleted=False
         ).filter(
             Q(requester=request.user) | Q(ccs=request.user)
         ).distinct().order_by('-updated_at')
@@ -255,10 +272,22 @@ def filter_tickets(request):
     page = min(page, total_pages)
     offset = (page - 1) * page_size
 
-    page_qs = tickets.select_related('requester', 'assignee')[offset:offset + page_size]
+    tickets_page = list(tickets.select_related('requester', 'assignee')[offset:offset + page_size])
 
-    data = [
-        {
+    last_comments = {}
+    if tickets_page:
+        ticket_ids = [t.id for t in tickets_page]
+        for c in (Comment.objects
+                  .filter(ticket_id__in=ticket_ids)
+                  .select_related('user')
+                  .order_by('ticket_id', '-created_at')):
+            if c.ticket_id not in last_comments:
+                last_comments[c.ticket_id] = c
+
+    data = []
+    for t in tickets_page:
+        lc = last_comments.get(t.id)
+        data.append({
             "id": t.id,
             "subject": t.subject,
             "requester": t.requester.name if t.requester else "-",
@@ -266,9 +295,14 @@ def filter_tickets(request):
             "service": t.service or "-",
             "assignee": t.assignee.name if t.assignee else "-",
             "status": t.status,
-        }
-        for t in page_qs
-    ]
+            "priority": t.priority or "",
+            "description": (t.description or "")[:200],
+            "last_comment": {
+                "author": lc.user.name if lc and lc.user else "",
+                "date": lc.created_at.strftime("%d/%m/%Y %H:%M") if lc else "",
+                "body": (lc.content or "")[:300] if lc else "",
+            } if lc else None,
+        })
     return JsonResponse({
         "tickets": data,
         "filtros": filtros,
@@ -352,9 +386,13 @@ def customer_profile(request):
     customer_id = request.GET.get("id")
     customer = get_object_or_404(User, id=customer_id)
 
-    tickets = Ticket.objects.filter(
-    Q(requester__id=customer.id) | Q(assignee__id=customer.id) | Q(ccs__id=customer.id) | Q(created_by_id=customer.id)
-    ).distinct().order_by("-updated_at")
+    tickets = list(
+        Ticket.objects.filter(
+            Q(requester__id=customer.id) | Q(assignee__id=customer.id) |
+            Q(ccs__id=customer.id) | Q(created_by_id=customer.id)
+        ).distinct().select_related('requester', 'assignee').order_by("-updated_at")
+    )
+    _attach_last_comments(tickets)
 
     return render(request, "tickets/customer_profile.html", {
         "customer": customer,
@@ -403,10 +441,13 @@ def settings(request):
 @login_required
 def profile(request):
     user = request.user
-    tickets = Ticket.objects.filter(
-    Q(requester__id=user.id) | Q(assignee__id=user.id) | Q(ccs__id=user.id) | Q(created_by_id=user.id)
-    ).distinct().order_by("-updated_at")
-
+    tickets = list(
+        Ticket.objects.filter(
+            Q(requester__id=user.id) | Q(assignee__id=user.id) |
+            Q(ccs__id=user.id) | Q(created_by_id=user.id)
+        ).distinct().select_related('requester', 'assignee').order_by("-updated_at")
+    )
+    _attach_last_comments(tickets)
     return render(request, "tickets/profile.html", {
         "user": user,
         "tickets": tickets
@@ -1108,24 +1149,47 @@ def global_search(request):
     if not q:
         return JsonResponse({"tickets": [], "users": []})
 
-    # --- Tickets ---
-    ticket_qs = Ticket.objects.filter(merged_into__isnull=True) if _is_agent(request.user) else \
-        Ticket.objects.filter(merged_into__isnull=True).filter(
-            Q(requester=request.user) | Q(ccs=request.user)
-        ).distinct()
+    ticket_qs = (
+        Ticket.objects.filter(merged_into__isnull=True, is_deleted=False)
+        if _is_agent(request.user) else
+        Ticket.objects.filter(merged_into__isnull=True, is_deleted=False)
+        .filter(Q(requester=request.user) | Q(ccs=request.user))
+        .distinct()
+    )
 
-    tickets = ticket_qs.filter(
-        Q(subject__icontains=q) |
-        Q(description__icontains=q) |
-        Q(service__icontains=q) |
-        Q(status__icontains=q) |
-        Q(priority__icontains=q) |
-        Q(requester__name__icontains=q) |
-        Q(requester__email__icontains=q) |
-        Q(assignee__name__icontains=q) |
-        Q(assignee__email__icontains=q) |
-        Q(tags__name__icontains=q)
-    ).distinct()[:10]
+    # Handle #ID (e.g. "#454") or plain digit string — prioritise exact ID match
+    raw = q.lstrip('#')
+    if raw.isdigit():
+        id_val = int(raw)
+        exact = list(ticket_qs.filter(id=id_val).select_related('requester', 'assignee'))
+        if q.startswith('#'):
+            # User explicitly asked for a ticket by ID — return only the exact match
+            tickets = exact
+        else:
+            # Numeric string without '#': exact ID hit first, then text matches
+            text = list(
+                ticket_qs.filter(
+                    Q(subject__icontains=q) |
+                    Q(requester__name__icontains=q) |
+                    Q(requester__email__icontains=q) |
+                    Q(assignee__name__icontains=q) |
+                    Q(assignee__email__icontains=q)
+                ).exclude(id=id_val).select_related('requester', 'assignee').distinct()[:9]
+            )
+            tickets = exact + text
+    else:
+        # Text search — description excluded for performance and to avoid false positives
+        tickets = list(
+            ticket_qs.filter(
+                Q(subject__icontains=q) |
+                Q(service__icontains=q) |
+                Q(requester__name__icontains=q) |
+                Q(requester__email__icontains=q) |
+                Q(assignee__name__icontains=q) |
+                Q(assignee__email__icontains=q) |
+                Q(tags__name__icontains=q)
+            ).select_related('requester', 'assignee').distinct()[:10]
+        )
 
     tickets_data = [{
         "id": t.id,
@@ -1136,14 +1200,16 @@ def global_search(request):
         "service": t.service or "-"
     } for t in tickets]
 
-    # --- Usuarios (solo agentes/admins) ---
+    # Users (agents/admins only)
     if _is_agent(request.user):
-        users = User.objects.filter(
-            Q(name__icontains=q) |
-            Q(email__icontains=q) |
-            Q(role__role_name__icontains=q) |
-            Q(group__group_name__icontains=q)
-        ).distinct()[:10]
+        users = list(
+            User.objects.filter(
+                Q(name__icontains=q) |
+                Q(email__icontains=q) |
+                Q(role__role_name__icontains=q) |
+                Q(group__group_name__icontains=q)
+            ).select_related('role', 'group').distinct()[:10]
+        )
         users_data = [{
             "id": u.id,
             "name": u.name,
@@ -1199,3 +1265,64 @@ def merge_ticket(request, ticket_id):
     _notify_users(target, f'Ticket #{ticket.zendesk_id or ticket.id} fusionado aquí', actor=request.user)
 
     return JsonResponse({'ok': True, 'target_id': target.id})
+
+
+@login_required
+@require_POST
+def bulk_delete(request):
+    if not _is_agent(request.user):
+        return JsonResponse({'error': 'Permiso denegado'}, status=403)
+    try:
+        ids = json.loads(request.body).get('ids', [])
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({'error': 'Payload inválido'}, status=400)
+    if not ids or not isinstance(ids, list):
+        return JsonResponse({'error': 'ids requerido'}, status=400)
+    updated = Ticket.objects.filter(
+        id__in=ids, merged_into__isnull=True, is_deleted=False
+    ).update(is_deleted=True)
+    return JsonResponse({'ok': True, 'deleted': updated})
+
+
+@login_required
+@require_POST
+def bulk_merge(request):
+    if not _is_agent(request.user):
+        return JsonResponse({'error': 'Permiso denegado'}, status=403)
+    try:
+        data = json.loads(request.body)
+        ids = data.get('ids', [])
+        target_id = int(data.get('target_id', 0))
+    except (json.JSONDecodeError, AttributeError, ValueError, TypeError):
+        return JsonResponse({'error': 'Payload inválido'}, status=400)
+    if not ids or not target_id:
+        return JsonResponse({'error': 'ids y target_id requeridos'}, status=400)
+
+    try:
+        target = Ticket.objects.get(pk=target_id, merged_into__isnull=True, is_deleted=False)
+    except Ticket.DoesNotExist:
+        return JsonResponse({'error': 'Ticket destino no encontrado'}, status=404)
+
+    tickets_to_merge = Ticket.objects.filter(
+        id__in=ids, merged_into__isnull=True, is_deleted=False
+    ).exclude(id=target_id)
+
+    merged_count = 0
+    for ticket in tickets_to_merge:
+        Comment.objects.filter(ticket=ticket).update(ticket=target)
+        TicketEvent.objects.filter(ticket=ticket).update(ticket=target)
+        ticket.merged_into = target
+        ticket.status = 'closed'
+        ticket.save()
+        TicketEvent.objects.create(
+            ticket=target,
+            actor=request.user,
+            field_name='merge',
+            old_value=None,
+            new_value=f'#{ticket.zendesk_id or ticket.id}',
+            created_at=timezone.now(),
+        )
+        merged_count += 1
+
+    _notify_users(target, f'{merged_count} ticket(s) fusionados aquí', actor=request.user)
+    return JsonResponse({'ok': True, 'merged': merged_count, 'target_id': target.id})

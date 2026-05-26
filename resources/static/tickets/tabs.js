@@ -565,10 +565,16 @@
                 resultsBox.style.display = "none";
                 return;
             }
+            resultsList.innerHTML = '<li class="result-header" style="font-style:italic;font-weight:normal;">Buscando…</li>';
+            resultsBox.style.display = "block";
             timer = setTimeout(async () => {
-                const res = await fetch(`/search/?q=${encodeURIComponent(q)}`);
-                const data = await res.json();
-                renderResults(data);
+                try {
+                    const res = await fetch(`/search/?q=${encodeURIComponent(q)}`);
+                    const data = await res.json();
+                    renderResults(data);
+                } catch(e) {
+                    resultsList.innerHTML = '<li>Error al buscar</li>';
+                }
             }, 300);
         });
 

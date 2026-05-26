@@ -157,6 +157,8 @@ class Ticket(models.Model):
         on_delete=models.SET_NULL, related_name='merged_tickets'
     )
     email_message_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+    email_conversation_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+    is_deleted = models.BooleanField(default=False, db_index=True)
 
 
 class ZendeskFieldMap(models.Model):

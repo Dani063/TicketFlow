@@ -321,16 +321,34 @@ label {
     font-size: 12px;
 }
 
-input, select {
+input:not([type="checkbox"]):not([type="radio"]), select {
     width: 100%;
     padding: 8px;
     border: 1px solid #ccc;
     border-radius: 4px;
+    box-sizing: border-box;
 }
 
     input::placeholder {
         color: #aaa;
     }
+
+input[type="checkbox"],
+input[type="radio"] {
+    width: auto;
+    padding: 0;
+    margin: 0;
+    flex-shrink: 0;
+}
+
+.form-checkbox label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: normal;
+    margin-bottom: 0;
+    cursor: pointer;
+}
 
 /* Truncar tags largos en selects múltiples (CCs, Tags) */
 .select2-container--default .select2-selection--multiple .select2-selection__choice {
@@ -693,6 +711,7 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
     display: flex;
     justify-content: flex-end;
     align-items: center;
+    z-index: 1300;
 }
 
 .footer-right {
