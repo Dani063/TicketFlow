@@ -23,9 +23,9 @@
 
     {# Bump ?v= on each Sprint deploy to bust browser cache on legacy clients. #}
     <!-- CSS globales -->
-    <link rel="stylesheet" href="{% static 'tickets/style.css' %}?v=s3.0">
-    <link rel="stylesheet" href="{% static 'tickets/toast.css' %}?v=s3.0">
-    <link rel="stylesheet" href="{% static 'tickets/dialog.css' %}?v=s3.0">
+    <link rel="stylesheet" href="{% static 'tickets/style.css' %}?v=s3.1">
+    <link rel="stylesheet" href="{% static 'tickets/toast.css' %}?v=s3.1">
+    <link rel="stylesheet" href="{% static 'tickets/dialog.css' %}?v=s3.1">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 
     {% block extra_css %}{% endblock %}
@@ -65,10 +65,10 @@
     window.static_urls = { logo: "{% static 'tickets/logo.png' %}" };
     window.currentUserId = {{ request.user.id|default:'null' }};
     </script>
-    <script src="{% static 'tickets/toast.js' %}?v=s3.0"></script>
-    <script src="{% static 'tickets/dialog.js' %}?v=s3.0"></script>
-    <script src="{% static 'tickets/tabs.js' %}?v=s3.0"></script>
-    <script src="{% static 'tickets/theme.js' %}?v=s3.0"></script>
+    <script src="{% static 'tickets/toast.js' %}?v=s3.1"></script>
+    <script src="{% static 'tickets/dialog.js' %}?v=s3.1"></script>
+    <script src="{% static 'tickets/tabs.js' %}?v=s3.1"></script>
+    <script src="{% static 'tickets/theme.js' %}?v=s3.1"></script>
 
     {% block extra_js %}{% endblock %}
 </body>

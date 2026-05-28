@@ -13,12 +13,14 @@
                 <span class="tooltip">Vistas</span>
             </a>
         </li>
+        {% if user.role and user.role.role_name|lower != 'end user' and user.role.role_name|lower != 'end-user' and user.role.role_name|lower != 'cliente' and user.role.role_name|lower != 'customer' %}
         <li>
             <a href="{% url 'customers_list' %}">
                 <i class="fas fa-users"></i>
                 <span class="tooltip">Clientes</span>
             </a>
         </li>
+        {% endif %}
         <li>
             <a href="{% url 'reporting' %}">
                 <i class="fas fa-chart-bar"></i>
