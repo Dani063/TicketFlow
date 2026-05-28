@@ -4,8 +4,9 @@
 
 {% block title %}{% if ticket %}{{ ticket.subject }} – TicketFlow{% else %}Nuevo ticket – TicketFlow{% endif %}{% endblock %}
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}">
+<link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s2.8">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/css/select2.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css">
 {% endblock %}
 
 {% block content %}
@@ -288,7 +289,28 @@
                         <span>Suelta los archivos aquí para adjuntar</span>
                     </div>
                 </div>
-                <textarea id="new-message" name="message" placeholder="Escribe un mensaje... (puedes pegar o arrastrar archivos)"></textarea>
+                <div id="quill-toolbar" class="quill-toolbar">
+                    <span class="ql-formats">
+                        <button class="ql-bold" title="Negrita"></button>
+                        <button class="ql-italic" title="Cursiva"></button>
+                        <button class="ql-underline" title="Subrayado"></button>
+                        <button class="ql-strike" title="Tachado"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <button class="ql-list" value="ordered" title="Lista numerada"></button>
+                        <button class="ql-list" value="bullet" title="Lista con vi&#241;etas"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <button class="ql-link" title="Enlace"></button>
+                        <button class="ql-code-block" title="Bloque de c&#243;digo"></button>
+                        <button class="ql-blockquote" title="Cita"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <button class="ql-clean" title="Quitar formato"></button>
+                    </span>
+                </div>
+                <div id="quill-editor" class="quill-editor"></div>
+                <textarea id="new-message" name="message" placeholder="Escribe un mensaje... (puedes pegar o arrastrar archivos)" hidden></textarea>
                 <div class="compose-toolbar">
                     {# Solo agentes ven el toggle Público/Interno #}
                     {% if can_use_internal %}
@@ -480,6 +502,8 @@
 </script>
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+<script src="{% static 'tickets/quill-composer.js' %}?v=s2.8"></script>
 
 <script>
   window.ticketId = {{ ticket.id|default:'null' }};
@@ -489,5 +513,5 @@
   window.urls.merge_ticket = window.ticketId ? `/tickets/${window.ticketId}/merge/` : null;
   window.urls.search = '/search/';
 </script>
-<script src="{% static 'tickets/create_ticket.js' %}"></script>
+<script src="{% static 'tickets/create_ticket.js' %}?v=s2.8"></script>
 {% endblock %}

@@ -5,10 +5,27 @@
     <meta charset="utf-8">
     <title>{% block title %}TicketFlow{% endblock %}</title>
 
+    {# Apply theme as early as possible to avoid FOUC #}
+    <script>
+        (function () {
+            try {
+                var pref = localStorage.getItem('tf.theme') || 'system';
+                if (['light','dark','system'].indexOf(pref) === -1) pref = 'system';
+                var eff = pref;
+                if (pref === 'system') {
+                    eff = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+                }
+                if (eff === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+                document.documentElement.setAttribute('data-theme-pref', pref);
+            } catch (e) { /* no-op */ }
+        })();
+    </script>
+
+    {# Bump ?v= on each Sprint deploy to bust browser cache on legacy clients. #}
     <!-- CSS globales -->
-    <link rel="stylesheet" href="{% static 'tickets/style.css' %}">
-    <link rel="stylesheet" href="{% static 'tickets/toast.css' %}">
-    <link rel="stylesheet" href="{% static 'tickets/dialog.css' %}">
+    <link rel="stylesheet" href="{% static 'tickets/style.css' %}?v=s2.8">
+    <link rel="stylesheet" href="{% static 'tickets/toast.css' %}?v=s2.8">
+    <link rel="stylesheet" href="{% static 'tickets/dialog.css' %}?v=s2.8">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 
     {% block extra_css %}{% endblock %}
@@ -42,14 +59,16 @@
       tickets_list: "{% url 'tickets_list' %}",
       login: "{% url 'login' %}",
       logout: "{% url 'logout' %}",
-      customer_profile: "{% url 'customer_profile' %}"
+      customer_profile: "{% url 'customer_profile' %}",
+      documentation: "{% url 'documentation' %}"
     };
     window.static_urls = { logo: "{% static 'tickets/logo.png' %}" };
     window.currentUserId = {{ request.user.id|default:'null' }};
     </script>
-    <script src="{% static 'tickets/toast.js' %}"></script>
-    <script src="{% static 'tickets/dialog.js' %}"></script>
-    <script src="{% static 'tickets/tabs.js' %}"></script>
+    <script src="{% static 'tickets/toast.js' %}?v=s2.8"></script>
+    <script src="{% static 'tickets/dialog.js' %}?v=s2.8"></script>
+    <script src="{% static 'tickets/tabs.js' %}?v=s2.8"></script>
+    <script src="{% static 'tickets/theme.js' %}?v=s2.9"></script>
 
     {% block extra_js %}{% endblock %}
 </body>

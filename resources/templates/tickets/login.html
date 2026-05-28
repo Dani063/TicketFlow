@@ -5,8 +5,10 @@
     <meta charset="UTF-8">
     <title>Login - TicketFlow</title>
     <link rel="stylesheet" type="text/css" href="{% static 'tickets/login.css' %}">
+    <link rel="stylesheet" href="{% static 'tickets/toast.css' %}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bodymovin/5.7.6/lottie.min.js"></script>
+    <script src="{% static 'tickets/toast.js' %}"></script>
 </head>
 <body>
     <section class="forms-section">
@@ -81,7 +83,7 @@
             const passwordConfirm = document.getElementById('signup-password-confirm').value;
 
             if (password !== passwordConfirm) {
-                alert('Las contrasenas no coinciden');
+                window.toast.warning('Las contraseñas no coinciden');
                 return;
             }
 
@@ -96,10 +98,10 @@
 
             const data = await response.json();
             if (response.ok) {
-                alert(data.message);
+                window.toast.success(data.message || 'Cuenta creada con éxito');
                 document.querySelector('.switcher-login').click();
             } else {
-                alert(data.error);
+                window.toast.error(data.error || 'No se pudo crear la cuenta');
             }
         });
 
@@ -119,9 +121,10 @@
 
             const data = await response.json();
             if (response.ok) {
-                window.location.href = '/';
+                window.toast.success('Bienvenido', { duration: 1200 });
+                setTimeout(() => { window.location.href = '/'; }, 600);
             } else {
-                alert(data.error);
+                window.toast.error(data.error || 'No se pudo iniciar sesión');
             }
         });
 

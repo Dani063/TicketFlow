@@ -259,6 +259,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const isPublic = (typeof isPublicInput !== 'undefined') ? (isPublicInput.value === 'true') : true;
         const payload = { content, is_public: isPublic };
+        const _html = window.QuillComposer?.getHtml?.();
+        if (_html) payload.html_body = _html;
         if (window.pendingAttachmentIds?.length) payload.attachment_ids = window.pendingAttachmentIds;
 
         try {
@@ -282,13 +284,56 @@ document.addEventListener('DOMContentLoaded', () => {
             const newComment = document.createElement('div');
             const isMe = Number(data.user_id) === Number(window.currentUserId);
             newComment.className = 'message' + (isMe ? ' me' : '') + (data.is_public ? '' : ' internal');
+            newComment.dataset.commentId = data.id;
+
+            // Calcular fecha relativa ("hace un momento", "hace X minutos", etc.)
+            const getRelativeTime = (isoDate) => {
+                const date = new Date(isoDate);
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                const diffDays = Math.floor(diffMs / 86400000);
+
+                if (diffMins < 1) return 'hace un momento';
+                if (diffMins < 60) return `hace ${diffMins} minuto${diffMins > 1 ? 's' : ''}`;
+                if (diffHours < 24) return `hace ${diffHours} hora${diffHours > 1 ? 's' : ''}`;
+                if (diffDays < 7) return `hace ${diffDays} día${diffDays > 1 ? 's' : ''}`;
+                return date.toLocaleDateString('es-ES');
+            };
 
             const internalBadge = data.is_public ? '' : '<span class="badge-internal">Interno</span>';
+            const initials = (data.username || '?').charAt(0).toUpperCase();
+            const roleHtml = data.user_role ? `<span class="msg-role">${data.user_role}</span>` : '';
+            const profileUrl = (window.urls && window.urls.customer_profile) ? `${window.urls.customer_profile}?id=${data.user_id}` : '#';
+            const userLink = `<a class="msg-author" href="${profileUrl}">${data.username || 'Usuario'}</a>`;
+            const relativeTime = getRelativeTime(data.created_at_iso);
+            const _bodyHtml = data.html_body
+                ? `<div class="email-html">${data.html_body}</div>`
+                : `${(data.content || '').replace(/\n/g, '<br>')}`;
+
+            // Calcular color del avatar usando la misma lógica que existe en la página
+            const avatarColor = (name) => {
+                const palette = ['#5b67ca','#e06c75','#56b6c2','#98c379','#d19a66','#c678dd','#61afef','#e5c07b'];
+                let hash = 0;
+                for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+                return palette[Math.abs(hash) % palette.length];
+            };
+            const bgColor = avatarColor(data.username || '?');
 
             newComment.innerHTML = `
-      ${internalBadge}
-      <p><strong>${data.username}:</strong> ${data.content}</p>
-      <span class="timestamp">${data.created_at}</span>
+      <div class="msg-header">
+        <div class="msg-avatar" data-initials="${initials}" style="background: ${bgColor};">${initials}</div>
+        <div class="msg-meta">
+          ${userLink}
+          ${roleHtml}
+        </div>
+        <div class="msg-right">
+          ${internalBadge}
+          <span class="msg-timestamp" title="${data.created_at}">${relativeTime}</span>
+        </div>
+      </div>
+      <div class="msg-body">${_bodyHtml}</div>
     `;
 
             // PINTAR ADJUNTOS DEVUELTOS (si hay)
@@ -354,6 +399,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const newStatus = (document.getElementById('selected-status')?.textContent || 'open').trim().toLowerCase();
 
         const payload = { content, is_public: isPublic, new_status: newStatus };
+        const _html2 = window.QuillComposer?.getHtml?.();
+        if (_html2) payload.html_body = _html2;
         if (window.pendingAttachmentIds?.length) payload.attachment_ids = window.pendingAttachmentIds;
 
         try {
@@ -370,11 +417,57 @@ document.addEventListener('DOMContentLoaded', () => {
             const newComment = document.createElement('div');
             const isMe = Number(data.user_id) === Number(window.currentUserId);
             newComment.className = 'message' + (isMe ? ' me' : '') + (data.is_public ? '' : ' internal');
+            newComment.dataset.commentId = data.id;
+
+            // Reutilizar la función getRelativeTime (definida en sendMessage)
+            const getRelativeTime2 = (isoDate) => {
+                const date = new Date(isoDate);
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMs / 3600000);
+                const diffDays = Math.floor(diffMs / 86400000);
+
+                if (diffMins < 1) return 'hace un momento';
+                if (diffMins < 60) return `hace ${diffMins} minuto${diffMins > 1 ? 's' : ''}`;
+                if (diffHours < 24) return `hace ${diffHours} hora${diffHours > 1 ? 's' : ''}`;
+                if (diffDays < 7) return `hace ${diffDays} día${diffDays > 1 ? 's' : ''}`;
+                return date.toLocaleDateString('es-ES');
+            };
+
+            // Construir estructura correcta del mensaje
             const internalBadge = data.is_public ? '' : '<span class="badge-internal">Interno</span>';
+            const initials = (data.username || '?').charAt(0).toUpperCase();
+            const roleHtml = data.user_role ? `<span class="msg-role">${data.user_role}</span>` : '';
+            const profileUrl = (window.urls && window.urls.customer_profile) ? `${window.urls.customer_profile}?id=${data.user_id}` : '#';
+            const userLink = `<a class="msg-author" href="${profileUrl}">${data.username || 'Usuario'}</a>`;
+            const relativeTime = getRelativeTime2(data.created_at_iso);
+            const _bodyHtml2 = data.html_body
+                ? `<div class="email-html">${data.html_body}</div>`
+                : `${(data.content || '').replace(/\n/g, '<br>')}`;
+
+            // Calcular color del avatar
+            const avatarColor2 = (name) => {
+                const palette = ['#5b67ca','#e06c75','#56b6c2','#98c379','#d19a66','#c678dd','#61afef','#e5c07b'];
+                let hash = 0;
+                for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+                return palette[Math.abs(hash) % palette.length];
+            };
+            const bgColor2 = avatarColor2(data.username || '?');
+
             newComment.innerHTML = `
-      ${internalBadge}
-      <p><strong>${data.username}:</strong> ${data.content}</p>
-      <span class="timestamp">${data.created_at}</span>
+      <div class="msg-header">
+        <div class="msg-avatar" data-initials="${initials}" style="background: ${bgColor2};">${initials}</div>
+        <div class="msg-meta">
+          ${userLink}
+          ${roleHtml}
+        </div>
+        <div class="msg-right">
+          ${internalBadge}
+          <span class="msg-timestamp" title="${data.created_at}">${relativeTime}</span>
+        </div>
+      </div>
+      <div class="msg-body">${_bodyHtml2}</div>
     `;
             if (data.attachments && data.attachments.length) {
                 const at = document.createElement('div');
@@ -989,13 +1082,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const column2 = document.querySelector('.column2');
         if (composeResizer && column2) {
             let startY, startH;
-            const textarea = document.getElementById('new-message');
+            const measureEl = document.getElementById('quill-editor') || document.getElementById('new-message');
             const MIN_H = 80, MAX_H = 500;
 
             composeResizer.addEventListener('mousedown', e => {
                 e.preventDefault();
                 startY = e.clientY;
-                startH = textarea ? textarea.getBoundingClientRect().height : 190;
+                startH = measureEl ? measureEl.getBoundingClientRect().height : 190;
                 composeResizer.classList.add('dragging');
                 document.body.style.cursor = 'ns-resize';
                 document.body.style.userSelect = 'none';

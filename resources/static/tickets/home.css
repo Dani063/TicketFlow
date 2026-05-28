@@ -131,6 +131,27 @@
     max-height: calc(100vh - 150px);
 }
 
+/* ===== Responsive: progressively hide low-priority columns ===== */
+/* Column order (home/tickets_list):
+   1=checkbox, 2=ID, 3=Asunto, 4=Solicitante, 5=Actualizado,
+   6=Servicio, 7=Asignado, 8=Val.(home only) */
+@media (max-width: 1100px) {
+    .tabla th:nth-child(7), .tabla td:nth-child(7) { display: none; } /* Asignado */
+}
+@media (max-width: 900px) {
+    .tabla th:nth-child(6), .tabla td:nth-child(6) { display: none; } /* Servicio */
+    .tabla th:nth-child(5), .tabla td:nth-child(5) { display: none; } /* Actualizado */
+}
+@media (max-width: 720px) {
+    .tabla th:nth-child(4), .tabla td:nth-child(4) { display: none; } /* Solicitante */
+    .left-column { width: 100%; max-width: none; }
+}
+@media (max-width: 540px) {
+    .tabla th:nth-child(2), .tabla td:nth-child(2) { display: none; } /* ID */
+    .stats-bar { flex-direction: column; gap: 6px; }
+    .stats-group { width: 100%; }
+}
+
 /* Tabla en vistas con barra de paginación: deja espacio para ella */
 .with-pagination .tabla {
     max-height: calc(100vh - 200px);

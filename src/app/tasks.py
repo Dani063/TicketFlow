@@ -139,6 +139,9 @@ def _process_message(message, brand):
     sender_email = sender.get('address', '').strip().lower()
     sender_name = sender.get('name', '')
     text_body, html_body = _extract_body(message)
+    if html_body:
+        from app.views import _sanitize_email_html
+        html_body = _sanitize_email_html(html_body)
 
     if not sender_email:
         return 'skip_no_sender'

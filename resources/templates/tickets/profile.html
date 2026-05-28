@@ -84,43 +84,7 @@
         <!-- 🔹 Tickets asociados -->
         <div id="tickets-section" class="profile-section" style="display:none;">
             <h2>Mis Tickets</h2>
-            <div class="tabla">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Asunto</th>
-                            <th>Estado</th>
-                            <th>Prioridad</th>
-                            <th>Última actualización</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% if tickets %}
-                        {% for ticket in tickets %}
-                        <tr onclick="openTicket('{{ ticket.id }}', '{{ ticket.subject|escapejs }}')">
-                            <td>{{ ticket.id }}</td>
-                            <td>
-                                <span class="status-dot status-{{ ticket.status|lower }}"></span><span class="subject-text"
-                                    data-status="{{ ticket.status }}"
-                                    data-subject="{{ ticket.subject }}"
-                                    data-description="{{ ticket.description|default:''|truncatechars:200 }}"
-                                    data-priority="{{ ticket.priority|default:'' }}"
-                                    data-lc-author="{{ ticket.lc_author|default:'' }}"
-                                    data-lc-date="{{ ticket.lc_date|default:'' }}"
-                                    data-lc-body="{{ ticket.lc_body|default:'' }}">{{ ticket.subject }}</span>
-                            </td>
-                            <td>{{ ticket.status }}</td>
-                            <td>{{ ticket.priority }}</td>
-                            <td>{{ ticket.updated_at|date:"d/m/Y H:i" }}</td>
-                        </tr>
-                        {% endfor %}
-                        {% else %}
-                        <tr><td colspan="5">No tienes tickets.</td></tr>
-                        {% endif %}
-                    </tbody>
-                </table>
-            </div>
+            {% include 'tickets/_profile_tickets.html' %}
         </div>
 
     </div>

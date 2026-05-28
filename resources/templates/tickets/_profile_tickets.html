@@ -1,0 +1,208 @@
+{% comment %}
+Partial: paginated ticket list for profile pages.
+Context: tickets, pagination, filters, page_sizes.
+Optional: extra_param + extra_value (carried in every link, e.g. customer id).
+{% endcomment %}
+
+<form method="get" class="profile-tickets-toolbar" id="profileTicketsToolbar" action="#tickets">
+    {% if extra_param %}<input type="hidden" name="{{ extra_param }}" value="{{ extra_value }}">{% endif %}
+    <div class="profile-status-pills" role="tablist" aria-label="Filtro por estado">
+        {% with current=filters.status %}
+        <button type="button" class="status-pill {% if current == 'all' %}active{% endif %}"     data-status="all">Todos</button>
+        <button type="button" class="status-pill {% if current == 'open' %}active{% endif %}"    data-status="open">Abiertos</button>
+        <button type="button" class="status-pill {% if current == 'pending' %}active{% endif %}" data-status="pending">Pendientes</button>
+        <button type="button" class="status-pill {% if current == 'solved' %}active{% endif %}"  data-status="solved">Resueltos</button>
+        <input type="hidden" name="status" value="{{ current }}" id="profileTicketsStatus">
+        {% endwith %}
+    </div>
+    <div class="profile-search">
+        <input type="search" name="q" value="{{ filters.q }}" placeholder="Buscar por asunto o #ID…" autocomplete="off">
+        <button type="submit" class="profile-search-btn" aria-label="Buscar"><i class="fas fa-search"></i></button>
+    </div>
+    <input type="hidden" name="page_size" value="{{ pagination.page_size }}" id="profileTicketsPageSize">
+</form>
+
+<div class="tabla">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Asunto</th>
+                <th>Estado</th>
+                <th>Prioridad</th>
+                <th>Última actualización</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ticket in tickets %}
+            <tr onclick="openTicket('{{ ticket.id }}', '{{ ticket.subject|escapejs }}')">
+                <td>{{ ticket.id }}</td>
+                <td>
+                    <span class="status-dot status-{{ ticket.status|lower }}"></span><span class="subject-text"
+                        data-status="{{ ticket.status }}"
+                        data-subject="{{ ticket.subject }}"
+                        data-description="{{ ticket.description|default:''|truncatechars:200 }}"
+                        data-priority="{{ ticket.priority|default:'' }}"
+                        data-lc-author="{{ ticket.lc_author|default:'' }}"
+                        data-lc-date="{{ ticket.lc_date|default:'' }}"
+                        data-lc-body="{{ ticket.lc_body|default:'' }}">{{ ticket.subject }}</span>
+                </td>
+                <td>{{ ticket.status }}</td>
+                <td>{{ ticket.priority }}</td>
+                <td>{{ ticket.updated_at|date:"d/m/Y H:i" }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5">
+                <div class="empty-state">
+                    <span class="empty-state-icon"><i class="fas fa-{% if filters.q or filters.status != 'all' %}filter{% else %}folder-open{% endif %}"></i></span>
+                    <h4>{% if filters.q or filters.status != 'all' %}Sin resultados{% else %}Sin tickets asociados{% endif %}</h4>
+                    <p>{% if filters.q or filters.status != 'all' %}Prueba con otro filtro o búsqueda.{% else %}Cuando este usuario tenga tickets aparecerán aquí.{% endif %}</p>
+                </div>
+            </td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if pagination.total > 0 %}
+<div class="pagination-bar profile-pagination">
+    <span class="registros-info">
+        {{ pagination.start_index }}–{{ pagination.end_index }} de {{ pagination.total }}
+    </span>
+    <div class="page-numbers">
+        <button type="button" class="page-num-btn page-arrow" data-page="{{ pagination.prev_page }}" {% if not pagination.has_prev %}disabled{% endif %} aria-label="Anterior">‹</button>
+        <span class="page-num-btn active" aria-current="page">{{ pagination.page }}</span>
+        <span class="page-ellipsis">/ {{ pagination.total_pages }}</span>
+        <button type="button" class="page-num-btn page-arrow" data-page="{{ pagination.next_page }}" {% if not pagination.has_next %}disabled{% endif %} aria-label="Siguiente">›</button>
+    </div>
+    <span class="page-size-sep">Por página</span>
+    <div class="page-size-wrapper">
+        <select id="profileTicketsPageSizeSelect">
+            {% for size in page_sizes %}
+            <option value="{{ size }}" {% if size == pagination.page_size %}selected{% endif %}>{{ size }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</div>
+{% endif %}
+
+<style>
+.profile-tickets-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3, 12px);
+    flex-wrap: wrap;
+    margin: 0 0 var(--space-3, 12px) 0;
+    padding: var(--space-2, 8px) 0;
+}
+.profile-status-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.status-pill {
+    border: 1px solid var(--color-border, #e2e8f0);
+    background: #fff;
+    color: var(--color-text-muted, #475569);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.status-pill:hover { background: #f5f6f8; }
+.status-pill.active {
+    background: var(--color-primary, #7c3aed);
+    color: #fff;
+    border-color: var(--color-primary, #7c3aed);
+}
+.profile-search {
+    display: flex;
+    align-items: center;
+    background: #fff;
+    border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: var(--radius-md, 8px);
+    padding: 2px 4px 2px 10px;
+    margin-left: auto;
+    min-width: 240px;
+}
+.profile-search input {
+    border: none;
+    outline: none;
+    font-size: 13px;
+    font-family: inherit;
+    flex: 1;
+    background: transparent;
+    padding: 6px 4px;
+}
+.profile-search-btn {
+    border: none;
+    background: transparent;
+    color: var(--color-text-muted, #475569);
+    cursor: pointer;
+    padding: 6px 8px;
+    font-size: 13px;
+}
+.profile-search-btn:hover { color: var(--color-primary, #7c3aed); }
+.profile-pagination { border-top: 1px solid #e8e8e8; margin-top: 6px; }
+</style>
+
+<script>
+(function () {
+    const form = document.getElementById('profileTicketsToolbar');
+    if (!form) return;
+    const statusInput = document.getElementById('profileTicketsStatus');
+    const pageSizeInput = document.getElementById('profileTicketsPageSize');
+
+    // On load: if the hash points us at the tickets pane (or there are
+    // filter query params, which means we came from a form submit), open it.
+    // We touch the DOM directly instead of clicking the menu item — the
+    // parent template's click handler hasn't been bound yet at this point
+    // (its DOMContentLoaded listener is registered after ours).
+    function activateTicketsPane() {
+        document.querySelectorAll('#profileMenu li').forEach(li => li.classList.remove('active'));
+        document.querySelectorAll('.profile-section').forEach(s => s.style.display = 'none');
+        const menuItem = document.querySelector('#profileMenu li[data-section="tickets-section"]');
+        const target = document.getElementById('tickets-section');
+        if (menuItem) menuItem.classList.add('active');
+        if (target) target.style.display = 'block';
+    }
+    const hasFilters = window.location.search.includes('status=')
+        || window.location.search.includes('q=')
+        || window.location.search.includes('page=');
+    if (window.location.hash === '#tickets' || hasFilters) {
+        activateTicketsPane();
+    }
+
+    // Status pills → set status, reset page, submit (keeping #tickets hash)
+    form.querySelectorAll('.status-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+            statusInput.value = pill.dataset.status;
+            form.submit();
+        });
+    });
+
+    // Page-size select
+    const pageSizeSelect = document.getElementById('profileTicketsPageSizeSelect');
+    if (pageSizeSelect) {
+        pageSizeSelect.addEventListener('change', () => {
+            pageSizeInput.value = pageSizeSelect.value;
+            form.submit();
+        });
+    }
+
+    // Prev / next buttons → add page param and submit
+    document.querySelectorAll('.profile-pagination .page-num-btn[data-page]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (btn.disabled) return;
+            let pageField = form.querySelector('input[name="page"]');
+            if (!pageField) {
+                pageField = document.createElement('input');
+                pageField.type = 'hidden';
+                pageField.name = 'page';
+                form.appendChild(pageField);
+            }
+            pageField.value = btn.dataset.page;
+            form.submit();
+        });
+    });
+})();
+</script>

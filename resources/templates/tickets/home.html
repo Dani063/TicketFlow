@@ -63,7 +63,30 @@
 <div class="left-column">
     <div class="updates">
         <h3>Actualizaciones recientes</h3>
-        <ul id="updates-list"></ul>
+        <ul id="updates-list">
+            {# Skeleton placeholders shown until refreshUpdates() populates the list #}
+            <li class="skeleton-row" aria-hidden="true">
+                <span class="skeleton skeleton-circle"></span>
+                <div class="skeleton-content">
+                    <span class="skeleton skeleton-line" style="width: 75%;"></span>
+                    <span class="skeleton skeleton-line" style="width: 40%; height: 8px;"></span>
+                </div>
+            </li>
+            <li class="skeleton-row" aria-hidden="true">
+                <span class="skeleton skeleton-circle"></span>
+                <div class="skeleton-content">
+                    <span class="skeleton skeleton-line" style="width: 60%;"></span>
+                    <span class="skeleton skeleton-line" style="width: 35%; height: 8px;"></span>
+                </div>
+            </li>
+            <li class="skeleton-row" aria-hidden="true">
+                <span class="skeleton skeleton-circle"></span>
+                <div class="skeleton-content">
+                    <span class="skeleton skeleton-line" style="width: 85%;"></span>
+                    <span class="skeleton skeleton-line" style="width: 30%; height: 8px;"></span>
+                </div>
+            </li>
+        </ul>
     </div>
 </div>
 
@@ -187,7 +210,13 @@
             {% endfor %}
             {% else %}
             <tr>
-                <td colspan="8">No hay tickets pendientes.</td>
+                <td colspan="8">
+                    <div class="empty-state">
+                        <span class="empty-state-icon"><i class="fas fa-inbox"></i></span>
+                        <h4>Sin tickets pendientes</h4>
+                        <p>Cuando recibas un ticket aparecerá aquí.</p>
+                    </div>
+                </td>
             </tr>
             {% endif %}
         </tbody>

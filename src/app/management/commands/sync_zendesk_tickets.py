@@ -315,13 +315,19 @@ class Command(BaseCommand):
             metavar="N",
             help="Threads paralelos para procesar tickets (default: 6)",
         )
+        parser.add_argument(
+            "--only-missing",
+            action="store_true",
+            help="Importar solo IDs que aún no existen en BD (útil para retomar tras fallos)",
+        )
 
     def handle(self, *args, **options):
-        sync_all      = options["all"]
-        since_days    = options["since"]
+        sync_all       = options["all"]
+        since_days     = options["since"]
         since_date_str = options.get("since_date")
-        dry_run       = options["dry_run"]
-        workers       = max(1, options["workers"])
+        dry_run        = options["dry_run"]
+        only_missing   = options["only_missing"]
+        workers        = max(1, options["workers"])
 
         client = ZendeskClient(
             subdomain=getattr(settings, "ZENDESK_SUBDOMAIN", None),
@@ -357,6 +363,19 @@ class Command(BaseCommand):
 
         total = len(ticket_ids)
         self.stdout.write(f"\n  Total únicos: {total} tickets")
+
+        if only_missing and ticket_ids:
+            self.stdout.write("Filtrando IDs ya presentes en BD...")
+            existing = set(
+                Ticket.objects.filter(zendesk_id__isnull=False)
+                .values_list("zendesk_id", flat=True)
+            )
+            ticket_ids = [tid for tid in ticket_ids if tid not in existing]
+            self.stdout.write(
+                f"  {len(existing)} ya en BD, {total - len(ticket_ids)} omitidos — "
+                f"{len(ticket_ids)} pendientes de importar"
+            )
+            total = len(ticket_ids)
 
         if dry_run or total == 0:
             if dry_run:

@@ -93,6 +93,127 @@ _CUSTOMER_SORT_FIELDS = {
     'created_at': 'created_at',
 }
 
+_PROFILE_STATUS_FILTERS = {
+    'all':     None,
+    'open':    {'exclude': ['closed', 'resolved']},
+    'pending': {'filter': ['pending']},
+    'solved':  {'filter': ['closed', 'resolved']},
+}
+
+
+def _profile_tickets_context(request, base_qs):
+    """Paginated + filtered ticket section for profile pages.
+
+    Avoids loading thousands of tickets and N+1 comment lookups: we only
+    materialize the current page and attach last-comments to those rows.
+    """
+    status = (request.GET.get('status') or 'all').lower()
+    if status not in _PROFILE_STATUS_FILTERS:
+        status = 'all'
+    q = (request.GET.get('q') or '').strip()
+    page_size = _parse_page_size(request.GET.get('page_size'))
+    try:
+        page = max(1, int(request.GET.get('page') or 1))
+    except (ValueError, TypeError):
+        page = 1
+
+    qs = base_qs
+    rule = _PROFILE_STATUS_FILTERS[status]
+    if rule:
+        if 'filter' in rule:
+            qs = qs.filter(status__in=rule['filter'])
+        if 'exclude' in rule:
+            qs = qs.exclude(status__in=rule['exclude'])
+
+    if q:
+        if q.startswith('#') and q[1:].isdigit():
+            qs = qs.filter(id=int(q[1:]))
+        elif q.isdigit():
+            qs = qs.filter(Q(id=int(q)) | Q(subject__icontains=q))
+        else:
+            qs = qs.filter(subject__icontains=q)
+
+    qs = qs.select_related('requester', 'assignee').order_by('-updated_at')
+
+    total = qs.count()
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    if page > total_pages:
+        page = total_pages
+    start = (page - 1) * page_size
+    tickets = list(qs[start:start + page_size])
+    _attach_last_comments(tickets)
+
+    return {
+        'tickets': tickets,
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total': total,
+            'total_pages': total_pages,
+            'has_prev': page > 1,
+            'has_next': page < total_pages,
+            'prev_page': page - 1,
+            'next_page': page + 1,
+            'start_index': 0 if total == 0 else start + 1,
+            'end_index': min(start + page_size, total),
+        },
+        'filters': {'status': status, 'q': q},
+        'page_sizes': sorted(_ALLOWED_PAGE_SIZES),
+    }
+
+
+try:
+    import bleach
+    _HAS_BLEACH = True
+except ImportError:  # pragma: no cover - safety net for envs without bleach
+    _HAS_BLEACH = False
+
+_ALLOWED_HTML_TAGS = [
+    'a', 'b', 'blockquote', 'br', 'code', 'div', 'em', 'h1', 'h2', 'h3',
+    'h4', 'h5', 'h6', 'hr', 'i', 'img', 'li', 'ol', 'p', 'pre', 's',
+    'span', 'strike', 'strong', 'sub', 'sup', 'table', 'tbody', 'td',
+    'tfoot', 'th', 'thead', 'tr', 'u', 'ul',
+]
+_ALLOWED_HTML_ATTRS = {
+    '*': ['class', 'style', 'title'],
+    'a': ['href', 'target', 'rel'],
+    'img': ['src', 'alt', 'width', 'height'],
+    'td': ['colspan', 'rowspan'],
+    'th': ['colspan', 'rowspan'],
+}
+_ALLOWED_HTML_PROTOCOLS = ['http', 'https', 'mailto', 'tel', 'data']
+
+
+def _sanitize_email_html(html):
+    """Sanitize untrusted HTML coming from email bodies or the rich-text composer.
+
+    Allow-list approach: keeps formatting and email-friendly tables, strips
+    scripts / event handlers / unknown protocols.
+    """
+    if not html:
+        return ''
+    # Safety net: if the input arrives entity-encoded (e.g. some clients
+    # over-escape) decode once so bleach sees real tags rather than text.
+    import html as _htmllib
+    if '<' not in html and '&lt;' in html:
+        html = _htmllib.unescape(html)
+    if not _HAS_BLEACH:
+        return _htmllib.escape(html)
+    cleaned = bleach.clean(
+        html,
+        tags=_ALLOWED_HTML_TAGS,
+        attributes=_ALLOWED_HTML_ATTRS,
+        protocols=_ALLOWED_HTML_PROTOCOLS,
+        strip=True,
+    )
+    # Safety net: remove Quill-specific helper spans/elements that may persist
+    # (e.g. <span class="ql-ui">, <span class="ql-cursor">) and any empty spans
+    import re
+    cleaned = re.sub(r'<span\s+class="ql-[^"]*"\s*(?:data-[^\s]*="[^"]*"\s*)*(?:contenteditable="[^"]*"\s*)*>\s*</span>', '', cleaned)
+    cleaned = re.sub(r'<span\s*>\s*</span>', '', cleaned)
+    return cleaned
+
+
 def _attach_last_comments(ticket_list):
     if not ticket_list:
         return
@@ -453,18 +574,13 @@ def customer_profile(request):
     customer_id = request.GET.get("id")
     customer = get_object_or_404(User, id=customer_id)
 
-    tickets = list(
-        Ticket.objects.filter(
-            Q(requester__id=customer.id) | Q(assignee__id=customer.id) |
-            Q(ccs__id=customer.id) | Q(created_by_id=customer.id)
-        ).distinct().select_related('requester', 'assignee').order_by("-updated_at")
-    )
-    _attach_last_comments(tickets)
-
-    return render(request, "tickets/customer_profile.html", {
-        "customer": customer,
-        "tickets": tickets
-    })
+    base_qs = Ticket.objects.filter(
+        Q(requester__id=customer.id) | Q(assignee__id=customer.id) |
+        Q(ccs__id=customer.id) | Q(created_by_id=customer.id)
+    ).distinct()
+    ctx = _profile_tickets_context(request, base_qs)
+    ctx["customer"] = customer
+    return render(request, "tickets/customer_profile.html", ctx)
 
 @login_required
 def tags_api(request):
@@ -508,17 +624,13 @@ def settings(request):
 @login_required
 def profile(request):
     user = request.user
-    tickets = list(
-        Ticket.objects.filter(
-            Q(requester__id=user.id) | Q(assignee__id=user.id) |
-            Q(ccs__id=user.id) | Q(created_by_id=user.id)
-        ).distinct().select_related('requester', 'assignee').order_by("-updated_at")
-    )
-    _attach_last_comments(tickets)
-    return render(request, "tickets/profile.html", {
-        "user": user,
-        "tickets": tickets
-    })
+    base_qs = Ticket.objects.filter(
+        Q(requester__id=user.id) | Q(assignee__id=user.id) |
+        Q(ccs__id=user.id) | Q(created_by_id=user.id)
+    ).distinct()
+    ctx = _profile_tickets_context(request, base_qs)
+    ctx["user"] = user
+    return render(request, "tickets/profile.html", ctx)
 
 def login_redirect(request):
     """Redirige al login corporativo SSO."""
@@ -1028,10 +1140,15 @@ def add_comment(request, ticket_id):
     requested_public = bool(data.get('is_public', True))
     final_is_public = requested_public if _is_agent(request.user) else True  # clientes → siempre público
 
+    html_body = (data.get('html_body') or '').strip()
+    if html_body:
+        html_body = _sanitize_email_html(html_body)
+
     comment = Comment.objects.create(
         ticket=ticket,
         user=request.user,
         content=content,
+        html_body=html_body or None,
         created_at=timezone.now(),
         is_public=final_is_public,
     )
@@ -1071,13 +1188,16 @@ def add_comment(request, ticket_id):
     return JsonResponse({
         'id': comment.id,
         'content': comment.content,
+        'html_body': comment.html_body or '',
         'created_at': comment.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'created_at_iso': comment.created_at.isoformat(),
         'ticket_id': ticket.id,
         'user_id': request.user.id,
         'username': request.user.name,
+        'user_role': request.user.role.role_name if request.user.role else None,
         'is_public': comment.is_public,
         'attachments': list(atts),
-        'new_status': applied_status,  # ← devolver el estado final
+        'new_status': applied_status,
     })
 @login_required
 @login_required
@@ -1392,4 +1512,10 @@ def bulk_merge(request):
         merged_count += 1
 
     _notify_users(target, f'{merged_count} ticket(s) fusionados aquí', actor=request.user)
+
+
+@login_required
+def documentation(request):
+    """Render comprehensive documentation for TicketFlow."""
+    return render(request, 'documentation.html')
     return JsonResponse({'ok': True, 'merged': merged_count, 'target_id': target.id})

@@ -8,3 +8,4 @@ django-celery-beat
 msal
 gunicorn
 whitenoise
+bleach>=5.0.0

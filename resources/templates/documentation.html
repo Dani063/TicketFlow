@@ -1,0 +1,624 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TicketFlow - Documentación</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --color-primary: #5b67ca;
+            --color-bg: #ffffff;
+            --color-text: #1a1a1a;
+            --color-border: #e0e0e0;
+            --color-bg-alt: #f9f9f9;
+        }
+
+        [data-theme="dark"] {
+            --color-bg: #1e1e1e;
+            --color-text: #f0f0f0;
+            --color-border: #333;
+            --color-bg-alt: #2a2a2a;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--color-bg);
+            color: var(--color-text);
+            line-height: 1.6;
+        }
+
+        .doc-container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .doc-header {
+            text-align: center;
+            margin-bottom: 50px;
+            border-bottom: 2px solid var(--color-primary);
+            padding-bottom: 30px;
+        }
+
+        .doc-header h1 {
+            font-size: 2.5em;
+            color: var(--color-primary);
+            margin-bottom: 10px;
+        }
+
+        .doc-header p {
+            font-size: 1.1em;
+            color: var(--color-text);
+            opacity: 0.8;
+        }
+
+        .doc-toc {
+            background-color: var(--color-bg-alt);
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            padding: 25px;
+            margin-bottom: 40px;
+        }
+
+        .doc-toc h2 {
+            font-size: 1.3em;
+            margin-bottom: 15px;
+            color: var(--color-primary);
+        }
+
+        .doc-toc ul {
+            list-style: none;
+        }
+
+        .doc-toc li {
+            margin: 8px 0;
+        }
+
+        .doc-toc a {
+            color: var(--color-primary);
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .doc-toc a:hover {
+            text-decoration: underline;
+        }
+
+        .doc-section {
+            margin-bottom: 50px;
+            padding: 30px;
+            background-color: var(--color-bg);
+            border-left: 4px solid var(--color-primary);
+        }
+
+        .doc-section h2 {
+            font-size: 1.8em;
+            color: var(--color-primary);
+            margin-bottom: 15px;
+            margin-top: 0;
+        }
+
+        .doc-section h3 {
+            font-size: 1.3em;
+            color: var(--color-text);
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+
+        .doc-section p {
+            margin-bottom: 12px;
+            line-height: 1.8;
+        }
+
+        .doc-section ul, .doc-section ol {
+            margin-left: 20px;
+            margin-bottom: 15px;
+        }
+
+        .doc-section li {
+            margin-bottom: 8px;
+        }
+
+        .doc-feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .feature-card {
+            background-color: var(--color-bg-alt);
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .feature-card h4 {
+            color: var(--color-primary);
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .feature-card p {
+            font-size: 0.95em;
+            opacity: 0.9;
+        }
+
+        .keyboard-shortcuts {
+            background-color: var(--color-bg-alt);
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .kb-group {
+            margin-bottom: 20px;
+        }
+
+        .kb-group h4 {
+            color: var(--color-primary);
+            margin-bottom: 10px;
+            font-size: 1.05em;
+        }
+
+        .kb-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .kb-item:last-child {
+            border-bottom: none;
+        }
+
+        .kb-label {
+            flex: 1;
+        }
+
+        .kb-keys {
+            display: flex;
+            gap: 5px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-weight: 600;
+            color: var(--color-primary);
+        }
+
+        kbd {
+            background-color: var(--color-border);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            color: var(--color-text);
+        }
+
+        .code-block {
+            background-color: var(--color-border);
+            border-radius: 6px;
+            padding: 15px;
+            margin: 15px 0;
+            overflow-x: auto;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .print-button {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background-color: var(--color-primary);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+
+        .print-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+
+        .back-button {
+            display: inline-block;
+            margin-bottom: 20px;
+            padding: 10px 20px;
+            background-color: var(--color-primary);
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            transition: all 0.3s;
+        }
+
+        .back-button:hover {
+            opacity: 0.9;
+        }
+
+        @media print {
+            .print-button, .back-button, .doc-toc {
+                display: none;
+            }
+
+            body {
+                background-color: white;
+                color: black;
+            }
+
+            .doc-section {
+                page-break-inside: avoid;
+                border-left: none;
+                box-shadow: none;
+            }
+
+            a {
+                color: #0066cc;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .doc-container {
+                padding: 20px 10px;
+            }
+
+            .doc-header h1 {
+                font-size: 1.8em;
+            }
+
+            .doc-section {
+                padding: 20px;
+            }
+
+            .print-button {
+                bottom: 15px;
+                right: 15px;
+                padding: 10px 16px;
+                font-size: 0.9em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="doc-container">
+        <a href="/" class="back-button">← Volver al Dashboard</a>
+
+        <div class="doc-header">
+            <h1>TicketFlow</h1>
+            <p>Sistema de gestión de tickets tipo Zendesk</p>
+        </div>
+
+        <div class="doc-toc">
+            <h2>Tabla de contenidos</h2>
+            <ul>
+                <li><a href="#que-es">¿Qué es TicketFlow?</a></li>
+                <li><a href="#empezar">Empezar</a></li>
+                <li><a href="#crear-ticket">Crear un ticket</a></li>
+                <li><a href="#responder-tickets">Responder tickets</a></li>
+                <li><a href="#gestionar-tickets">Gestionar tickets</a></li>
+                <li><a href="#clientes">Gestión de clientes</a></li>
+                <li><a href="#reportes">Reportes</a></li>
+                <li><a href="#atajos">Atajos de teclado</a></li>
+                <li><a href="#tema">Cambiar tema</a></li>
+                <li><a href="#soporte">Soporte</a></li>
+            </ul>
+        </div>
+
+        <div class="doc-section" id="que-es">
+            <h2>¿Qué es TicketFlow?</h2>
+            <p>
+                TicketFlow es un <strong>sistema completo de gestión de tickets de soporte</strong> diseñado para equipos de atención al cliente.
+                Facilita la organización, asignación y seguimiento de solicitudes de clientes de manera eficiente y colaborativa.
+            </p>
+            <h3>Características principales</h3>
+            <div class="doc-feature-grid">
+                <div class="feature-card">
+                    <h4>📋 Gestión de tickets</h4>
+                    <p>Organiza y da seguimiento a todas las solicitudes de clientes</p>
+                </div>
+                <div class="feature-card">
+                    <h4>💬 Comentarios y respuestas</h4>
+                    <p>Comunícate con clientes directamente desde los tickets</p>
+                </div>
+                <div class="feature-card">
+                    <h4>👥 Clientes</h4>
+                    <p>Gestiona información detallada de todos tus clientes</p>
+                </div>
+                <div class="feature-card">
+                    <h4>📊 Reportes</h4>
+                    <p>Analiza métricas y estadísticas de desempeño</p>
+                </div>
+                <div class="feature-card">
+                    <h4>🏷️ Filtros avanzados</h4>
+                    <p>Filtra y agrupa tickets por múltiples criterios</p>
+                </div>
+                <div class="feature-card">
+                    <h4>🔗 Fusión de tickets</h4>
+                    <p>Combina tickets relacionados en uno solo</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="doc-section" id="empezar">
+            <h2>Empezar</h2>
+            <h3>Acceder a TicketFlow</h3>
+            <ol>
+                <li>Inicia sesión con tus credenciales</li>
+                <li>Serás dirigido automáticamente al Dashboard</li>
+                <li>Desde aquí puedes acceder a todas las funciones principales</li>
+            </ol>
+
+            <h3>Navegación principal</h3>
+            <ul>
+                <li><strong>Dashboard:</strong> Vista general de estadísticas</li>
+                <li><strong>Tickets:</strong> Lista completa de tickets</li>
+                <li><strong>Clientes:</strong> Directorio de clientes</li>
+                <li><strong>Reportes:</strong> Análisis y estadísticas</li>
+                <li><strong>Configuración:</strong> Ajustes de cuenta</li>
+            </ul>
+        </div>
+
+        <div class="doc-section" id="crear-ticket">
+            <h2>Crear un ticket</h2>
+            <h3>Pasos para crear un nuevo ticket</h3>
+            <ol>
+                <li>Haz clic en el botón <strong>"Nuevo ticket"</strong> o presiona <kbd>c</kbd></li>
+                <li>Completa los campos obligatorios:
+                    <ul>
+                        <li><strong>Asunto:</strong> Titulo corto del problema</li>
+                        <li><strong>Descripción:</strong> Detalles completos de la solicitud</li>
+                        <li><strong>Cliente:</strong> Selecciona o crea un nuevo cliente</li>
+                        <li><strong>Servicio:</strong> Categoría del ticket</li>
+                    </ul>
+                </li>
+                <li>Opcionalmente:
+                    <ul>
+                        <li>Añade etiquetas para mejor categorización</li>
+                        <li>Asigna el ticket a un agente</li>
+                        <li>Establece la prioridad</li>
+                        <li>Adjunta archivos relevantes</li>
+                    </ul>
+                </li>
+                <li>Haz clic en <strong>"Crear ticket"</strong> para guardar</li>
+            </ol>
+
+            <h3>Editor de contenido</h3>
+            <p>TicketFlow cuenta con un editor de texto enriquecido que permite:</p>
+            <ul>
+                <li><strong>Formato de texto:</strong> Negrita, cursiva, subrayado</li>
+                <li><strong>Listas:</strong> Viñetas y listas numeradas</li>
+                <li><strong>Bloques de código:</strong> Para contenido técnico</li>
+                <li><strong>Adjuntos:</strong> Imágenes y documentos</li>
+                <li><strong>Envío rápido:</strong> Ctrl+Enter para enviar</li>
+            </ul>
+        </div>
+
+        <div class="doc-section" id="responder-tickets">
+            <h2>Responder y comentar en tickets</h2>
+            <h3>Agregar comentarios</h3>
+            <ol>
+                <li>Abre un ticket desde la lista</li>
+                <li>Desplázate hasta la sección de comentarios</li>
+                <li>Escribe tu respuesta en el editor</li>
+                <li>Elige si es una respuesta visible para el cliente o un comentario interno</li>
+                <li>Presiona <strong>Ctrl+Enter</strong> o haz clic en "Enviar"</li>
+            </ol>
+
+            <h3>Tipos de comentarios</h3>
+            <ul>
+                <li><strong>Respuesta pública:</strong> El cliente verá tu respuesta</li>
+                <li><strong>Nota interna:</strong> Solo tu equipo verá el comentario</li>
+            </ul>
+
+            <h3>Formato de respuestas</h3>
+            <p>Usa el editor para dar formato a tus respuestas. El sistema soporta:</p>
+            <ul>
+                <li>HTML seguro (formatos de texto, listas, tablas)</li>
+                <li>Adjuntos (imágenes, documentos PDF, etc.)</li>
+                <li>Enlaces</li>
+                <li>Citas de mensajes anteriores</li>
+            </ul>
+        </div>
+
+        <div class="doc-section" id="gestionar-tickets">
+            <h2>Gestionar tickets</h2>
+            <h3>Cambiar estado</h3>
+            <p>Los tickets pueden estar en los siguientes estados:</p>
+            <ul>
+                <li><strong>Abierto:</strong> Nuevo ticket sin procesar</li>
+                <li><strong>Pendiente:</strong> Esperando respuesta del cliente</li>
+                <li><strong>Resuelto:</strong> Problema solucionado</li>
+                <li><strong>Cerrado:</strong> Ticket finalizado</li>
+            </ul>
+
+            <h3>Asignar tickets</h3>
+            <p>Puedes asignar tickets a ti mismo o a otros miembros del equipo:</p>
+            <ol>
+                <li>Abre el ticket</li>
+                <li>Haz clic en el campo "Asignado a"</li>
+                <li>Selecciona un agente del equipo</li>
+            </ol>
+
+            <h3>Fusionar tickets</h3>
+            <p>Si hay tickets duplicados o relacionados, puedes fusionarlos:</p>
+            <ol>
+                <li>Selecciona múltiples tickets con el checkbox</li>
+                <li>Haz clic en "Acciones masivas" → "Fusionar"</li>
+                <li>Elige el ticket destino</li>
+                <li>Los comentarios se consolidarán en uno solo</li>
+            </ol>
+
+            <h3>Eliminar tickets</h3>
+            <p>Para eliminar tickets (acción irreversible):</p>
+            <ol>
+                <li>Selecciona los tickets a eliminar</li>
+                <li>Haz clic en "Acciones masivas" → "Eliminar"</li>
+                <li>Confirma la acción</li>
+            </ol>
+        </div>
+
+        <div class="doc-section" id="clientes">
+            <h2>Gestión de clientes</h2>
+            <h3>Ver clientes</h3>
+            <p>Accede a la sección "Clientes" para ver un directorio completo de todos tus contactos:</p>
+            <ul>
+                <li>Busca por nombre o email</li>
+                <li>Filtra por rol o grupo</li>
+                <li>Ordena por diferentes criterios</li>
+            </ul>
+
+            <h3>Crear un nuevo cliente</h3>
+            <ol>
+                <li>Ve a "Clientes"</li>
+                <li>Haz clic en "Nuevo cliente"</li>
+                <li>Completa la información:
+                    <ul>
+                        <li>Nombre completo</li>
+                        <li>Email principal</li>
+                        <li>Teléfono (opcional)</li>
+                        <li>Rol y grupo</li>
+                    </ul>
+                </li>
+                <li>Guarda el cliente</li>
+            </ol>
+
+            <h3>Perfil de cliente</h3>
+            <p>En el perfil de cliente puedes:</p>
+            <ul>
+                <li>Ver todos sus tickets</li>
+                <li>Agregar notas internas</li>
+                <li>Ver historial de interacciones</li>
+                <li>Actualizar información de contacto</li>
+            </ul>
+        </div>
+
+        <div class="doc-section" id="reportes">
+            <h2>Reportes y estadísticas</h2>
+            <h3>Acceder a reportes</h3>
+            <p>Haz clic en "Reportes" en la barra lateral para ver analíticas detalladas sobre:</p>
+            <ul>
+                <li><strong>Volumen de tickets:</strong> Número de tickets por período</li>
+                <li><strong>Tiempo de respuesta:</strong> Promedio de respuestas</li>
+                <li><strong>Satisfacción:</strong> Calificaciones de clientes</li>
+                <li><strong>Desempeño por agente:</strong> Productividad del equipo</li>
+                <li><strong>Problemas frecuentes:</strong> Categorías más comunes</li>
+            </ul>
+
+            <h3>Filtrar datos</h3>
+            <p>Los reportes permiten filtrar por:</p>
+            <ul>
+                <li>Rango de fechas</li>
+                <li>Agente o equipo</li>
+                <li>Servicio o categoría</li>
+                <li>Estado del ticket</li>
+            </ul>
+        </div>
+
+        <div class="doc-section" id="atajos">
+            <h2>Atajos de teclado</h2>
+            <p>TicketFlow soporta varios atajos de teclado para mejorar tu productividad:</p>
+
+            <div class="keyboard-shortcuts">
+                <div class="kb-group">
+                    <h4>Navegación</h4>
+                    <div class="kb-item">
+                        <span class="kb-label">Ir al Dashboard</span>
+                        <span class="kb-keys"><kbd>g</kbd> <kbd>d</kbd></span>
+                    </div>
+                    <div class="kb-item">
+                        <span class="kb-label">Ir a la lista de tickets</span>
+                        <span class="kb-keys"><kbd>g</kbd> <kbd>t</kbd></span>
+                    </div>
+                    <div class="kb-item">
+                        <span class="kb-label">Enfocar buscador</span>
+                        <span class="kb-keys"><kbd>/</kbd></span>
+                    </div>
+                </div>
+
+                <div class="kb-group">
+                    <h4>Acciones</h4>
+                    <div class="kb-item">
+                        <span class="kb-label">Crear nuevo ticket</span>
+                        <span class="kb-keys"><kbd>c</kbd></span>
+                    </div>
+                    <div class="kb-item">
+                        <span class="kb-label">Enviar comentario</span>
+                        <span class="kb-keys"><kbd>Ctrl</kbd>+<kbd>Enter</kbd></span>
+                    </div>
+                    <div class="kb-item">
+                        <span class="kb-label">Cerrar modal / popup</span>
+                        <span class="kb-keys"><kbd>Esc</kbd></span>
+                    </div>
+                </div>
+
+                <div class="kb-group">
+                    <h4>Ayuda</h4>
+                    <div class="kb-item">
+                        <span class="kb-label">Mostrar esta lista</span>
+                        <span class="kb-keys"><kbd>?</kbd></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="doc-section" id="tema">
+            <h2>Personalización y tema</h2>
+            <h3>Cambiar tema</h3>
+            <p>TicketFlow soporta múltiples temas:</p>
+            <ul>
+                <li><strong>Modo claro:</strong> Ideal para ambientes con buena iluminación</li>
+                <li><strong>Modo oscuro:</strong> Reduce la fatiga visual en ambientes oscuros</li>
+                <li><strong>Tema del sistema:</strong> Se adapta automáticamente a tu configuración de SO</li>
+            </ul>
+
+            <h3>Cambiar el tema</h3>
+            <ol>
+                <li>Haz clic en tu avatar en la esquina superior derecha</li>
+                <li>Ve a "Appearance"</li>
+                <li>Selecciona tu tema preferido</li>
+                <li>Los cambios se guardan automáticamente</li>
+            </ol>
+        </div>
+
+        <div class="doc-section" id="soporte">
+            <h2>Soporte y ayuda</h2>
+            <h3>¿Necesitas ayuda?</h3>
+            <p>Si tienes preguntas o encuentras problemas, puedes:</p>
+            <ul>
+                <li><strong>Contactar soporte:</strong> molqueda@cloudwws.com</li>
+                <li><strong>Ver atajos de teclado:</strong> Presiona <kbd>?</kbd></li>
+                <li><strong>Revisar esta documentación:</strong> Accesible desde el menú de usuario</li>
+            </ul>
+
+            <h3>Consejos de productividad</h3>
+            <ol>
+                <li>Aprende los atajos de teclado principales</li>
+                <li>Usa etiquetas consistentemente para mejor categorización</li>
+                <li>Revisa regularmente los reportes para detectar tendencias</li>
+                <li>Mantén los perfiles de clientes actualizados</li>
+                <li>Usa notas internas para documentar decisiones importantes</li>
+            </ol>
+
+            <h3>Información de contacto</h3>
+            <p>Para cualquier pregunta, comentario o reporte de problemas:</p>
+            <div class="code-block">Email: molqueda@cloudwws.com</div>
+        </div>
+    </div>
+
+    <button class="print-button" onclick="window.print()">🖨️ Imprimir / PDF</button>
+</body>
+</html>

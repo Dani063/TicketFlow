@@ -34,6 +34,7 @@ urlpatterns = [
     path('reporting/', views.reporting, name='reporting'),
     path('settings/', views.settings, name='settings'),
     path('profile/', views.profile, name='profile'),
+    path('docs/', views.documentation, name='documentation'),
     path("api/users/<int:user_id>/notes/", views.update_user_notes, name="update_user_notes"),
     path("api/notifications/", views.notifications_api, name="notifications_api"),
     path("api/notifications/<int:notif_id>/read/", views.mark_notification_read, name="mark_notification_read"),
