@@ -3,7 +3,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Login - TicketFlow</title>
+    <title>Iniciar sesión - TicketFlow</title>
     <link rel="stylesheet" type="text/css" href="{% static 'tickets/login.css' %}">
     <link rel="stylesheet" href="{% static 'tickets/toast.css' %}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
@@ -17,50 +17,50 @@
         <div class="forms">
             <div class="form-wrapper is-active">
                 <button type="button" class="switcher switcher-login">
-                    Login
+                    Iniciar sesión
                     <span class="underline"></span>
                 </button>
                 <form class="form form-login" id="login-form">
                     <fieldset>
-                        <legend>Please, enter your email and password for login.</legend>
+                        <legend>Ingresa tu correo y contraseña para iniciar sesión.</legend>
                         <div class="input-block">
-                            <label for="login-email">E-mail</label>
+                            <label for="login-email">Correo electrónico</label>
                             <input id="login-email" type="email" required>
                         </div>
                         <div class="input-block">
-                            <label for="login-password">Password</label>
+                            <label for="login-password">Contraseña</label>
                             <input id="login-password" type="password" required>
                         </div>
                     </fieldset>
-                    <button type="submit" class="btn-login">Login</button>
+                    <button type="submit" class="btn-login">Iniciar sesión</button>
                 </form>
             </div>
             <div class="form-wrapper">
                 <button type="button" class="switcher switcher-signup">
-                    Sign Up
+                    Crear cuenta
                     <span class="underline"></span>
                 </button>
                 <form class="form form-signup" id="signup-form">
                     <fieldset>
-                        <legend>Please, enter your email, name, password and password confirmation for sign up.</legend>
+                        <legend>Ingresa tu correo, nombre, contraseña y confirmación de contraseña para crear una cuenta.</legend>
                         <div class="input-block">
-                            <label for="signup-email">E-mail</label>
+                            <label for="signup-email">Correo electrónico</label>
                             <input id="signup-email" type="email" required>
                         </div>
                         <div class="input-block">
-                            <label for="signup-name">Name</label>
+                            <label for="signup-name">Nombre</label>
                             <input id="signup-name" type="text" required>
                         </div>
                         <div class="input-block">
-                            <label for="signup-password">Password</label>
+                            <label for="signup-password">Contraseña</label>
                             <input id="signup-password" type="password" required>
                         </div>
                         <div class="input-block">
-                            <label for="signup-password-confirm">Confirm password</label>
+                            <label for="signup-password-confirm">Confirmar contraseña</label>
                             <input id="signup-password-confirm" type="password" required>
                         </div>
                     </fieldset>
-                    <button type="submit" class="btn-signup">Continue</button>
+                    <button type="submit" class="btn-signup">Continuar</button>
                 </form>
             </div>
         </div>

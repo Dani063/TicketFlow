@@ -4,7 +4,7 @@
 
 {% block title %}{% if ticket %}{{ ticket.subject }} – TicketFlow{% else %}Nuevo ticket – TicketFlow{% endif %}{% endblock %}
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s2.8">
+<link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s3.0">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/css/select2.min.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css">
 {% endblock %}
@@ -31,12 +31,12 @@
     </span>
     {% if can_use_internal and ticket.assignee_id != current_user_id %}
     <button type="button" id="take-it-btn" class="take-it-btn" data-ticket-id="{{ ticket.id }}">
-        <i class="fas fa-hand-point-right"></i> Take it
+        <i class="fas fa-hand-point-right"></i> Asignarme
     </button>
     {% endif %}
     {% if can_use_internal and not ticket.merged_into %}
     <button type="button" id="merge-btn" class="merge-btn" data-ticket-id="{{ ticket.id }}">
-        <i class="fas fa-code-branch"></i> Merge
+        <i class="fas fa-code-branch"></i> Fusionar
     </button>
     {% endif %}
     {% endif %}
@@ -54,7 +54,7 @@
     <div class="ticket-form" id="ticketLayout">
         <div class="column" id="panelLeft">
             <button type="button" class="panel-tab" id="toggleLeft">
-                <span class="panel-tab-label" id="labelLeft">Hide panel</span>
+                <span class="panel-tab-label" id="labelLeft">Ocultar panel</span>
                 <span class="panel-tab-arrow"><i class="fas fa-chevron-left" id="iconLeft"></i></span>
             </button>
             <div class="panel-inner" id="panelLeftInner">
@@ -104,7 +104,7 @@
                 </select>
             </div>
             <div class="form-group">
-                <label for="tags">Tags</label>
+                <label for="tags">Etiquetas</label>
                 <select id="tags" name="tags" class="select2" multiple>
                     {% for tag in tags %}
                     <option value="{{ tag.id }}">{{ tag.name }}</option>
@@ -452,10 +452,10 @@
                 </button>
                 <button id="dropdown-button" class="dropdown-btn"><i class="fas fa-caret-down"></i></button>
                 <div id="dropdown-content" class="dropdown-content">
-                    <a href="#" data-status="open">Open</a>
-                    <a href="#" data-status="pending">Pending</a>
-                    <a href="#" data-status="resolved">Resolved</a>
-                    <a href="#" data-status="closed">Closed</a>
+                    <a href="#" data-status="open">Abierto</a>
+                    <a href="#" data-status="pending">Pendiente</a>
+                    <a href="#" data-status="resolved">Resuelto</a>
+                    <a href="#" data-status="closed">Cerrado</a>
                 </div>
             </div>
         </div>
@@ -503,7 +503,7 @@
 <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
-<script src="{% static 'tickets/quill-composer.js' %}?v=s2.8"></script>
+<script src="{% static 'tickets/quill-composer.js' %}?v=s3.0"></script>
 
 <script>
   window.ticketId = {{ ticket.id|default:'null' }};
@@ -513,5 +513,5 @@
   window.urls.merge_ticket = window.ticketId ? `/tickets/${window.ticketId}/merge/` : null;
   window.urls.search = '/search/';
 </script>
-<script src="{% static 'tickets/create_ticket.js' %}?v=s2.8"></script>
+<script src="{% static 'tickets/create_ticket.js' %}?v=s3.0"></script>
 {% endblock %}

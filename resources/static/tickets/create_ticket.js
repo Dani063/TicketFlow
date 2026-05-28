@@ -988,11 +988,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (collapsed) {
                 panel.classList.add('collapsed');
                 if (icon) icon.style.transform = 'rotate(180deg)';
-                if (label) label.textContent = 'Show panel';
+                if (label) label.textContent = 'Mostrar panel';
             } else {
                 panel.classList.remove('collapsed');
                 if (icon) icon.style.transform = '';
-                if (label) label.textContent = 'Hide panel';
+                if (label) label.textContent = 'Ocultar panel';
             }
         }
 
