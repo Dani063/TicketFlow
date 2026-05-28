@@ -1,0 +1,831 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Administración – TicketFlow{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'tickets/home.css' %}">
+<style>
+/* ---------- layout ---------- */
+.ap-wrap {
+    margin-left: 59px;            /* sidebar width */
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 50px);   /* 50px = navbar height */
+    overflow: hidden;
+}
+.ap-header { padding: 14px 24px 0; flex-shrink: 0; }
+.ap-header h1 { margin: 0 0 2px 0; font-size: 20px; font-weight: 700; }
+.ap-header p  { margin: 0; color: var(--color-text-muted, #64748b); font-size: 13px; }
+
+/* tabs */
+.ap-tabs { display: flex; gap: 4px; padding: 10px 24px 0; border-bottom: 1px solid var(--color-divider, #e5e7eb); flex-shrink: 0; }
+.ap-tab  { padding: 9px 16px; background: transparent; border: none; border-bottom: 2px solid transparent;
+           cursor: pointer; font-size: 14px; color: var(--color-text-muted, #64748b); }
+.ap-tab:hover  { color: var(--color-text, #111827); }
+.ap-tab.active { color: #7c3aed; border-bottom-color: #7c3aed; font-weight: 600; }
+
+/* panel */
+.ap-panel { display: none; flex: 1 1 0; min-height: 0; flex-direction: column; }
+.ap-panel.active { display: flex; }
+
+/* toolbar */
+.ap-toolbar { display: flex; gap: 8px; align-items: center; padding: 10px 24px; flex-shrink: 0; flex-wrap: wrap; }
+.ap-toolbar input[type="text"], .ap-toolbar select {
+    padding: 7px 10px; border: 1px solid var(--color-input-border, #d1d5db); border-radius: 6px;
+    background: var(--color-input-bg, #fff); color: var(--color-input-text, #111827); font-size: 13px; }
+.ap-toolbar input[type="text"] { min-width: 220px; }
+.ap-toolbar .ap-grow { flex: 1; min-width: 0; }
+
+/* buttons */
+.ap-btn { padding: 7px 13px; border-radius: 6px; border: 1px solid transparent; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.ap-btn-primary   { background: #7c3aed; color: #fff; }
+.ap-btn-primary:hover { background: #6d28d9; }
+.ap-btn-secondary { background: var(--color-surface-2, #f3f4f6); color: var(--color-text, #111827); border-color: var(--color-divider, #e5e7eb); }
+.ap-btn-secondary:hover { background: var(--color-surface-hover, #e5e7eb); }
+.ap-btn-danger    { background: #dc2626; color: #fff; }
+.ap-btn-danger:hover { background: #b91c1c; }
+.ap-btn-small { padding: 4px 9px; font-size: 12px; }
+.ap-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* bulk bar */
+.ap-bulk-bar { display: none; align-items: center; gap: 10px; padding: 7px 24px;
+    background: #7c3aed; color: #fff; flex-shrink: 0; font-size: 13px; }
+.ap-bulk-bar.visible { display: flex; }
+.ap-bulk-bar strong { font-size: 14px; }
+.ap-bulk-bar .ap-grow { flex: 1; }
+.ap-bulk-bar button { background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.35);
+    color: #fff; border-radius: 5px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.ap-bulk-bar button:hover { background: rgba(255,255,255,.28); }
+.ap-bulk-bar button.danger { background: rgba(220,38,38,.55); }
+
+/* scrollable table area */
+.ap-table-area {
+    flex: 1 1 0; min-height: 0;
+    overflow-y: auto; overflow-x: auto;
+    padding: 0 24px;
+    /* hide scrollbar arrow buttons (the ☒ artefact) */
+    scrollbar-gutter: stable;
+}
+.ap-table-area::-webkit-scrollbar { width: 8px; height: 8px; }
+.ap-table-area::-webkit-scrollbar-track { background: transparent; }
+.ap-table-area::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+.ap-table-area::-webkit-scrollbar-button { display: none; }  /* ← quita el ☒ */
+.ap-table-area::-webkit-scrollbar-corner { background: transparent; }
+
+.ap-table { width: 100%; border-collapse: collapse; min-width: 600px; }
+.ap-table th, .ap-table td { padding: 9px 11px; text-align: left; font-size: 13px; white-space: nowrap; vertical-align: middle; border-bottom: 1px solid var(--color-divider, #f1f5f9); }
+.ap-table thead th { background: var(--color-surface, #fff); font-weight: 600; color: var(--color-text-muted, #64748b);
+    border-bottom: 2px solid var(--color-divider, #e5e7eb); position: sticky; top: 0; z-index: 1; }
+.ap-table tbody tr:hover { background: var(--color-surface-hover, rgba(0,0,0,0.025)); }
+.ap-table tbody tr.row-selected { background: rgba(124,58,237,.07); }
+.col-cb  { width: 36px; text-align: center; }
+.col-id  { width: 56px; }
+.col-name  { min-width: 140px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.col-email { min-width: 180px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.col-role, .col-group { width: 110px; }
+.col-status  { width: 80px; }
+.col-actions { width: 100px; text-align: right; }
+.ap-actions  { display: inline-flex; gap: 5px; justify-content: flex-end; }
+
+/* pills */
+.ap-pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+.ap-pill-active    { background: #dcfce7; color: #15803d; }
+.ap-pill-inactive  { background: #fee2e2; color: #b91c1c; }
+.ap-pill-protected { background: #fef3c7; color: #92400e; }
+
+/* pagination — reutiliza estilos de home.css (.pagination-bar, .page-num-btn, etc.) */
+.ap-pag { flex-shrink: 0; padding: 0 24px; }
+
+/* modals */
+.ap-modal-overlay { position: fixed; inset: 0; background: rgba(15,23,42,.5); display: none;
+    align-items: center; justify-content: center; z-index: 1000; }
+.ap-modal-overlay.show { display: flex; }
+.ap-modal { background: var(--color-surface, #fff); color: var(--color-text, #111827);
+    border-radius: 10px; padding: 20px 24px; width: 480px; max-width: 92vw;
+    box-shadow: 0 18px 50px rgba(0,0,0,.25); }
+.ap-modal h3 { margin: 0 0 14px 0; font-size: 17px; }
+.ap-modal-body { display: flex; flex-direction: column; gap: 12px; }
+.ap-field label { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; color: var(--color-text-muted, #64748b); }
+.ap-field input, .ap-field select, .ap-field textarea {
+    width: 100%; padding: 8px 10px; border-radius: 6px; font-size: 13px;
+    border: 1px solid var(--color-input-border, #d1d5db);
+    background: var(--color-input-bg, #fff); color: var(--color-input-text, #111827);
+    box-sizing: border-box; }
+.ap-modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.ap-alert { padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 8px; }
+.ap-alert-error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+
+/* dark */
+:root[data-theme="dark"] .ap-pill-active    { background: rgba(34,197,94,.18);  color: #4ade80; }
+:root[data-theme="dark"] .ap-pill-inactive  { background: rgba(239,68,68,.18);  color: #fca5a5; }
+:root[data-theme="dark"] .ap-pill-protected { background: rgba(245,158,11,.18); color: #fbbf24; }
+:root[data-theme="dark"] .ap-table thead th { background: var(--color-surface); }
+:root[data-theme="dark"] .ap-table-area::-webkit-scrollbar-thumb { background: #475569; }
+:root[data-theme="dark"] .ap-bulk-bar { background: #5b21b6; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ap-wrap">
+    <div class="ap-header">
+        <h1><i class="fas fa-shield-alt"></i> Administración</h1>
+        <p>Gestiona usuarios, roles y grupos. Solo visible para administradores.</p>
+    </div>
+
+    <div class="ap-tabs">
+        <button class="ap-tab active" data-tab="users">Usuarios</button>
+        <button class="ap-tab" data-tab="roles">Roles</button>
+        <button class="ap-tab" data-tab="groups">Grupos</button>
+    </div>
+
+    <!-- ======== USERS ======== -->
+    <div id="tab-users" class="ap-panel active">
+        <div class="ap-toolbar">
+            <input type="text" id="usersSearch" placeholder="Buscar por nombre o email…">
+            <select id="usersRoleFilter">
+                <option value="">Todos los roles</option>
+                {% for role in roles %}<option value="{{ role.id }}">{{ role.role_name }}</option>{% endfor %}
+            </select>
+            <select id="usersGroupFilter">
+                <option value="">Todos los grupos</option>
+                {% for group in groups %}<option value="{{ group.id }}">{{ group.group_name }}</option>{% endfor %}
+            </select>
+            <div class="ap-grow"></div>
+            <button class="ap-btn ap-btn-primary" id="btnNewUser"><i class="fas fa-plus"></i> Nuevo usuario</button>
+        </div>
+
+        <div class="ap-bulk-bar" id="usersBulkBar">
+            <strong id="usersBulkCount">0</strong> seleccionados
+            <div class="ap-grow"></div>
+            <button id="btnBulkDeactivate"><i class="fas fa-ban"></i> Desactivar</button>
+            <button class="danger" id="btnBulkDelete"><i class="fas fa-trash"></i> Eliminar</button>
+        </div>
+
+        <div class="ap-table-area" id="usersTableArea">
+            <table class="ap-table">
+                <thead>
+                    <tr>
+                        <th class="col-cb"><input type="checkbox" id="usersSelectAll"></th>
+                        <th class="col-id">ID</th>
+                        <th class="col-name">Nombre</th>
+                        <th class="col-email">Email</th>
+                        <th class="col-role">Rol</th>
+                        <th class="col-group">Grupo</th>
+                        <th class="col-status">Estado</th>
+                        <th class="col-actions">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTbody"><tr><td colspan="8" style="text-align:center;padding:20px;color:#64748b;">Cargando…</td></tr></tbody>
+            </table>
+        </div>
+
+        <!-- Paginación con estética de tickets -->
+        <div class="ap-pag">
+            <div class="pagination-bar" id="usersPagBar" style="display:none;">
+                <div class="page-numbers" id="usersPageNums"></div>
+                <span class="page-size-sep">| Ver</span>
+                <div class="page-size-wrapper">
+                    <select id="usersPageSize">
+                        <option value="25">25</option>
+                        <option value="50" selected>50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                    </select>
+                </div>
+                <span class="registros-info" id="usersRegInfo"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ======== ROLES ======== -->
+    <div id="tab-roles" class="ap-panel">
+        <div class="ap-toolbar">
+            <div class="ap-grow"></div>
+            <button class="ap-btn ap-btn-primary" id="btnNewRole"><i class="fas fa-plus"></i> Nuevo rol</button>
+        </div>
+        <div class="ap-table-area">
+            <table class="ap-table">
+                <thead>
+                    <tr>
+                        <th class="col-id">ID</th>
+                        <th>Rol</th>
+                        <th style="width:90px">Usuarios</th>
+                        <th class="col-actions">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="rolesTbody"><tr><td colspan="4" style="text-align:center;padding:20px;color:#64748b;">Cargando…</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ======== GROUPS ======== -->
+    <div id="tab-groups" class="ap-panel">
+        <div class="ap-toolbar">
+            <div class="ap-grow"></div>
+            <button class="ap-btn ap-btn-primary" id="btnNewGroup"><i class="fas fa-plus"></i> Nuevo grupo</button>
+        </div>
+        <div class="ap-table-area">
+            <table class="ap-table">
+                <thead>
+                    <tr>
+                        <th class="col-id">ID</th>
+                        <th>Grupo</th>
+                        <th style="width:90px">Usuarios</th>
+                        <th class="col-actions">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="groupsTbody"><tr><td colspan="4" style="text-align:center;padding:20px;color:#64748b;">Cargando…</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ======== USER MODAL ======== -->
+<div class="ap-modal-overlay" id="userModal">
+    <div class="ap-modal">
+        <h3 id="userModalTitle">Nuevo usuario</h3>
+        <div id="userModalError" class="ap-alert ap-alert-error" style="display:none;"></div>
+        <div class="ap-modal-body">
+            <input type="hidden" id="userModalId">
+            <div class="ap-field"><label>Nombre</label><input type="text" id="userModalName" placeholder="Nombre completo"></div>
+            <div class="ap-field"><label>Email</label><input type="email" id="userModalEmail" placeholder="usuario@dominio.com"></div>
+            <div class="ap-field">
+                <label>Rol</label>
+                <select id="userModalRole">
+                    <option value="">— sin rol —</option>
+                    {% for role in roles %}<option value="{{ role.id }}">{{ role.role_name }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="ap-field">
+                <label>Grupo</label>
+                <select id="userModalGroup">
+                    <option value="">— sin grupo —</option>
+                    {% for group in groups %}<option value="{{ group.id }}">{{ group.group_name }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="ap-field" id="userModalActiveField" style="display:none;">
+                <label>Estado</label>
+                <select id="userModalActive"><option value="true">Activo</option><option value="false">Inactivo</option></select>
+            </div>
+            <div class="ap-field">
+                <label>Contraseña (opcional)</label>
+                <input type="password" id="userModalPassword" placeholder="Vacío si usa SSO" autocomplete="new-password">
+            </div>
+        </div>
+        <div class="ap-modal-footer">
+            <button class="ap-btn ap-btn-secondary" data-close="userModal">Cancelar</button>
+            <button class="ap-btn ap-btn-primary" id="btnSaveUser">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<!-- ======== ROLE MODAL ======== -->
+<div class="ap-modal-overlay" id="roleModal">
+    <div class="ap-modal">
+        <h3 id="roleModalTitle">Nuevo rol</h3>
+        <div id="roleModalError" class="ap-alert ap-alert-error" style="display:none;"></div>
+        <div class="ap-modal-body">
+            <input type="hidden" id="roleModalId">
+            <div class="ap-field"><label>Nombre del rol</label><input type="text" id="roleModalName"></div>
+            <div class="ap-field"><label>Descripción</label><textarea id="roleModalDesc" rows="2"></textarea></div>
+        </div>
+        <div class="ap-modal-footer">
+            <button class="ap-btn ap-btn-secondary" data-close="roleModal">Cancelar</button>
+            <button class="ap-btn ap-btn-primary" id="btnSaveRole">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<!-- ======== GROUP MODAL ======== -->
+<div class="ap-modal-overlay" id="groupModal">
+    <div class="ap-modal">
+        <h3 id="groupModalTitle">Nuevo grupo</h3>
+        <div id="groupModalError" class="ap-alert ap-alert-error" style="display:none;"></div>
+        <div class="ap-modal-body">
+            <input type="hidden" id="groupModalId">
+            <div class="ap-field"><label>Nombre del grupo</label><input type="text" id="groupModalName"></div>
+            <div class="ap-field"><label>Descripción</label><textarea id="groupModalDesc" rows="2"></textarea></div>
+        </div>
+        <div class="ap-modal-footer">
+            <button class="ap-btn ap-btn-secondary" data-close="groupModal">Cancelar</button>
+            <button class="ap-btn ap-btn-primary" id="btnSaveGroup">Guardar</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const CUR_UID = {{ request.user.id }};
+
+    function csrf() {
+        for (const c of document.cookie.split(';')) {
+            const [k, v] = c.trim().split('=');
+            if (k === 'csrftoken') return decodeURIComponent(v || '');
+        }
+        return '';
+    }
+    function hdr() { return { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() }; }
+    function esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+    function showErr(id, msg) { const e=document.getElementById(id); e.textContent=msg; e.style.display='block'; }
+    function hideErr(id) { const e=document.getElementById(id); e.textContent=''; e.style.display='none'; }
+
+    /* ---- modal helpers ---- */
+    function openModal(id)  { document.getElementById(id).classList.add('show'); }
+    function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+    document.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', () => closeModal(btn.dataset.close)));
+    document.querySelectorAll('.ap-modal-overlay').forEach(o => o.addEventListener('click', e => { if(e.target===o) o.classList.remove('show'); }));
+
+    /* ---- tabs ---- */
+    document.querySelectorAll('.ap-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.ap-tab').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.ap-panel').forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+            if (btn.dataset.tab === 'roles')  loadRoles();
+            if (btn.dataset.tab === 'groups') loadGroups();
+        });
+    });
+
+    /* ================================================================
+       USERS
+       ================================================================ */
+    let _uPage = 1, _uPageSize = 50, _uTotal = 0, _uTotalPages = 1;
+    const _sel = new Set();
+    const _uMap = new Map();   /* id → user object — no JSON in onclick attrs */
+
+    function getPageRange(cur, tot) {
+        if (tot <= 7) return Array.from({length: tot}, (_, i) => i + 1);
+        if (cur <= 4) return [1,2,3,4,5,'…',tot];
+        if (cur >= tot-3) return [1,'…',tot-4,tot-3,tot-2,tot-1,tot];
+        return [1,'…',cur-1,cur,cur+1,'…',tot];
+    }
+
+    function renderPageNums(cur, tot) {
+        const container = document.getElementById('usersPageNums');
+        container.innerHTML = '';
+
+        const prev = document.createElement('button');
+        prev.className = 'page-num-btn page-arrow';
+        prev.innerHTML = '&#8249;';
+        prev.disabled = cur <= 1;
+        prev.onclick = () => usersGo(cur - 1);
+        container.appendChild(prev);
+
+        getPageRange(cur, tot).forEach(p => {
+            if (p === '…') {
+                const s = document.createElement('span');
+                s.className = 'page-ellipsis'; s.textContent = '…';
+                container.appendChild(s);
+            } else {
+                const b = document.createElement('button');
+                b.className = 'page-num-btn' + (p === cur ? ' active' : '');
+                b.textContent = p;
+                b.onclick = () => usersGo(p);
+                container.appendChild(b);
+            }
+        });
+
+        const next = document.createElement('button');
+        next.className = 'page-num-btn page-arrow';
+        next.innerHTML = '&#8250;';
+        next.disabled = cur >= tot;
+        next.onclick = () => usersGo(cur + 1);
+        container.appendChild(next);
+    }
+
+    function updateBulkBar() {
+        document.getElementById('usersBulkCount').textContent = _sel.size;
+        document.getElementById('usersBulkBar').classList.toggle('visible', _sel.size > 0);
+    }
+
+    function clearSel() {
+        _sel.clear();
+        document.querySelectorAll('#usersTbody .row-cb').forEach(cb => cb.checked = false);
+        document.querySelectorAll('#usersTbody tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+        const sa = document.getElementById('usersSelectAll');
+        if (sa) { sa.checked = false; sa.indeterminate = false; }
+        updateBulkBar();
+    }
+
+    function syncSelectAll() {
+        const all = document.querySelectorAll('#usersTbody .row-cb');
+        const chk = document.querySelectorAll('#usersTbody .row-cb:checked');
+        const sa  = document.getElementById('usersSelectAll');
+        if (!sa) return;
+        if (!all.length || !chk.length) { sa.checked=false; sa.indeterminate=false; }
+        else if (all.length===chk.length) { sa.checked=true; sa.indeterminate=false; }
+        else { sa.checked=false; sa.indeterminate=true; }
+    }
+
+    function usersGo(p) {
+        if (p < 1 || p > _uTotalPages) return;
+        _uPage = p;
+        loadUsers(false);
+    }
+
+    async function loadUsers(reset) {
+        if (reset !== false) { _uPage = 1; clearSel(); }
+        _uPageSize = parseInt(document.getElementById('usersPageSize').value, 10) || 50;
+
+        const params = new URLSearchParams({
+            page: _uPage, page_size: _uPageSize,
+            q:        document.getElementById('usersSearch').value.trim(),
+            role_id:  document.getElementById('usersRoleFilter').value,
+            group_id: document.getElementById('usersGroupFilter').value,
+        });
+
+        const tbody = document.getElementById('usersTbody');
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:#64748b;">Cargando…</td></tr>';
+
+        try {
+            const res  = await fetch('/api/admin/users/?' + params);
+            const data = await res.json();
+            const pag  = data.pagination || {};
+            _uTotal      = pag.total || 0;
+            _uTotalPages = pag.total_pages || 1;
+            _uPage       = pag.page || 1;
+            _uMap.clear();
+
+            if (!data.users || !data.users.length) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:#64748b;">Sin resultados</td></tr>';
+            } else {
+                const frag = document.createDocumentFragment();
+                data.users.forEach(u => {
+                    _uMap.set(u.id, u);
+                    const tr = document.createElement('tr');
+                    if (_sel.has(u.id)) tr.classList.add('row-selected');
+                    /* Use data-id attrs — never put user data inside onclick="" */
+                    tr.innerHTML =
+                        `<td class="col-cb" style="text-align:center;">
+                            <input type="checkbox" class="row-cb" data-id="${u.id}"${_sel.has(u.id)?' checked':''}>
+                        </td>
+                        <td class="col-id">${u.id}</td>
+                        <td class="col-name" title="${esc(u.name)}">${esc(u.name)}</td>
+                        <td class="col-email" title="${esc(u.email)}">${esc(u.email)}</td>
+                        <td class="col-role">${esc(u.role_name||'—')}</td>
+                        <td class="col-group">${esc(u.group_name||'—')}</td>
+                        <td class="col-status">
+                            <span class="ap-pill ${u.is_active?'ap-pill-active':'ap-pill-inactive'}">${u.is_active?'Activo':'Inactivo'}</span>
+                        </td>
+                        <td class="col-actions">
+                            <div class="ap-actions">
+                                <button class="ap-btn ap-btn-secondary ap-btn-small" data-action="edit" data-id="${u.id}" title="Editar"><i class="fas fa-pen"></i></button>
+                                <button class="ap-btn ap-btn-secondary ap-btn-small" data-action="pwd"  data-id="${u.id}" title="Contraseña"><i class="fas fa-key"></i></button>
+                                <button class="ap-btn ap-btn-danger ap-btn-small"    data-action="del"  data-id="${u.id}" title="Eliminar"><i class="fas fa-trash"></i></button>
+                            </div>
+                        </td>`;
+                    frag.appendChild(tr);
+                });
+                tbody.innerHTML = '';
+                tbody.appendChild(frag);
+            }
+
+            /* pagination bar */
+            const bar = document.getElementById('usersPagBar');
+            bar.style.display = '';
+            renderPageNums(_uPage, _uTotalPages);
+            const from = _uTotal ? (_uPage-1)*_uPageSize+1 : 0;
+            const to   = Math.min(_uPage*_uPageSize, _uTotal);
+            document.getElementById('usersRegInfo').textContent =
+                `registros (mostrando ${from}–${to} de ${_uTotal.toLocaleString()})`;
+            document.getElementById('usersPageSize').value = _uPageSize;
+
+        } catch(e) {
+            tbody.innerHTML = '<tr><td colspan="8" style="color:#dc2626;padding:12px;">Error al cargar usuarios</td></tr>';
+        }
+    }
+
+    /* event delegation — no onclick attrs with user data */
+    document.getElementById('usersTbody').addEventListener('click', e => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        const id  = parseInt(btn.dataset.id, 10);
+        const act = btn.dataset.action;
+        if (act === 'edit') openUserModal(_uMap.get(id));
+        if (act === 'pwd')  resetPassword(id);
+        if (act === 'del')  deleteUser(id);
+    });
+
+    document.getElementById('usersTbody').addEventListener('change', e => {
+        const cb = e.target.closest('.row-cb');
+        if (!cb) return;
+        const id = parseInt(cb.dataset.id, 10);
+        const tr = cb.closest('tr');
+        if (cb.checked) { _sel.add(id); tr.classList.add('row-selected'); }
+        else            { _sel.delete(id); tr.classList.remove('row-selected'); }
+        updateBulkBar(); syncSelectAll();
+    });
+
+    document.getElementById('usersSelectAll').addEventListener('change', function() {
+        document.querySelectorAll('#usersTbody .row-cb').forEach(cb => {
+            cb.checked = this.checked;
+            const id = parseInt(cb.dataset.id, 10);
+            const tr = cb.closest('tr');
+            if (this.checked) { _sel.add(id); tr.classList.add('row-selected'); }
+            else              { _sel.delete(id); tr.classList.remove('row-selected'); }
+        });
+        updateBulkBar();
+    });
+
+    document.getElementById('usersPageSize').addEventListener('change', function() {
+        _uPageSize = parseInt(this.value, 10); usersGo(1);
+    });
+
+    /* search / filter */
+    let _st = null;
+    document.getElementById('usersSearch').addEventListener('input', () => {
+        clearTimeout(_st); _st = setTimeout(loadUsers, 260);
+    });
+    document.getElementById('usersRoleFilter').addEventListener('change', loadUsers);
+    document.getElementById('usersGroupFilter').addEventListener('change', loadUsers);
+
+    /* ---- new user button ---- */
+    document.getElementById('btnNewUser').addEventListener('click', () => openUserModal(null));
+
+    /* bulk actions */
+    document.getElementById('btnBulkDeactivate').addEventListener('click', async () => {
+        if (!_sel.size) return;
+        const ok = await window.dialog.confirm({
+            title:'Desactivar usuarios', message:`¿Desactivar ${_sel.size} usuario(s)?`,
+            confirmText:'Desactivar', cancelText:'Cancelar', variant:'danger',
+        });
+        if (!ok) return;
+        let n = 0;
+        for (const id of _sel) {
+            try {
+                const r = await fetch('/api/admin/users/', { method:'PUT', headers:hdr(), body:JSON.stringify({id, is_active:false}) });
+                if ((await r.json()).ok) n++;
+            } catch(_) {}
+        }
+        window.toast.success(`${n} usuario(s) desactivado(s)`);
+        clearSel(); loadUsers(false);
+    });
+
+    document.getElementById('btnBulkDelete').addEventListener('click', async () => {
+        if (!_sel.size) return;
+        const ok = await window.dialog.confirm({
+            title:'Eliminar usuarios',
+            message:`¿Eliminar ${_sel.size} usuario(s)? Los que tengan tickets se desactivarán.`,
+            confirmText:'Eliminar', cancelText:'Cancelar', variant:'danger',
+        });
+        if (!ok) return;
+        let del=0, deact=0;
+        for (const id of _sel) {
+            if (id === CUR_UID) continue;
+            try {
+                const r = await fetch('/api/admin/users/?id='+id, { method:'DELETE', headers:hdr() });
+                const d = await r.json();
+                if (d.ok) { d.deactivated ? deact++ : del++; }
+            } catch(_) {}
+        }
+        window.toast.success([del&&`${del} eliminado(s)`,deact&&`${deact} desactivado(s)`].filter(Boolean).join(', ')||'Hecho');
+        clearSel(); loadUsers(false);
+    });
+
+    /* ---- individual user actions ---- */
+    function openUserModal(u) {
+        hideErr('userModalError');
+        document.getElementById('userModalId').value    = u ? u.id : '';
+        document.getElementById('userModalTitle').textContent = u ? 'Editar usuario' : 'Nuevo usuario';
+        document.getElementById('userModalName').value  = u ? u.name : '';
+        document.getElementById('userModalEmail').value = u ? u.email : '';
+        document.getElementById('userModalRole').value  = u && u.role_id  ? u.role_id  : '';
+        document.getElementById('userModalGroup').value = u && u.group_id ? u.group_id : '';
+        document.getElementById('userModalActive').value = u ? String(u.is_active) : 'true';
+        document.getElementById('userModalActiveField').style.display = u ? 'block' : 'none';
+        document.getElementById('userModalPassword').value = '';
+        openModal('userModal');
+    }
+
+    document.getElementById('btnSaveUser').addEventListener('click', async () => {
+        hideErr('userModalError');
+        const id      = document.getElementById('userModalId').value;
+        const payload = {
+            name:     document.getElementById('userModalName').value.trim(),
+            email:    document.getElementById('userModalEmail').value.trim(),
+            role_id:  document.getElementById('userModalRole').value  || null,
+            group_id: document.getElementById('userModalGroup').value || null,
+        };
+        if (id) {
+            payload.id = parseInt(id, 10);
+            payload.is_active = document.getElementById('userModalActive').value === 'true';
+        } else {
+            const pwd = document.getElementById('userModalPassword').value;
+            if (pwd) payload.password = pwd;
+        }
+        try {
+            const res  = await fetch('/api/admin/users/', { method:id?'PUT':'POST', headers:hdr(), body:JSON.stringify(payload) });
+            const data = await res.json();
+            if (!data.ok) { showErr('userModalError', data.error||'Error al guardar'); return; }
+            closeModal('userModal');
+            window.toast.success(id ? 'Usuario actualizado' : 'Usuario creado');
+            loadUsers(false);
+        } catch(e) { showErr('userModalError', 'Error de red'); }
+    });
+
+    async function deleteUser(id) {
+        if (id === CUR_UID) { window.toast.warning('No puedes eliminar tu propia cuenta'); return; }
+        const ok = await window.dialog.confirm({
+            title:'Eliminar usuario', message:'Si tiene tickets, se desactivará en lugar de borrarse.',
+            confirmText:'Eliminar', cancelText:'Cancelar', variant:'danger',
+        });
+        if (!ok) return;
+        try {
+            const res  = await fetch('/api/admin/users/?id='+id, { method:'DELETE', headers:hdr() });
+            const data = await res.json();
+            if (!data.ok) { window.toast.error(data.error||'Error'); return; }
+            window.toast.success(data.deactivated ? 'Usuario desactivado' : 'Usuario eliminado');
+            clearSel(); loadUsers(false);
+        } catch(e) { window.toast.error('Error de red'); }
+    }
+
+    async function resetPassword(id) {
+        const pwd = window.prompt('Nueva contraseña (mín. 8 caracteres). Vacío para invalidarla:', '');
+        if (pwd === null) return;
+        try {
+            const res  = await fetch(`/api/admin/users/${id}/password/`, { method:'POST', headers:hdr(), body:JSON.stringify({password:pwd}) });
+            const data = await res.json();
+            if (!data.ok) { window.toast.error(data.error||'Error'); return; }
+            window.toast.success('Contraseña actualizada');
+        } catch(e) { window.toast.error('Error de red'); }
+    }
+
+    /* ================================================================
+       ROLES
+       ================================================================ */
+    const _rMap = new Map();
+
+    async function loadRoles() {
+        const tbody = document.getElementById('rolesTbody');
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:#64748b;">Cargando…</td></tr>';
+        try {
+            const res  = await fetch('/api/admin/roles/');
+            const data = await res.json();
+            _rMap.clear();
+            if (!data.roles || !data.roles.length) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:#64748b;">Sin roles</td></tr>';
+                return;
+            }
+            const frag = document.createDocumentFragment();
+            data.roles.forEach(r => {
+                _rMap.set(r.id, r);
+                const tr = document.createElement('tr');
+                tr.innerHTML =
+                    `<td class="col-id">${r.id}</td>
+                    <td>${esc(r.role_name)} ${r.protected?'<span class="ap-pill ap-pill-protected">Sistema</span>':''}</td>
+                    <td>${r.user_count.toLocaleString()}</td>
+                    <td class="col-actions"><div class="ap-actions">
+                        <button class="ap-btn ap-btn-secondary ap-btn-small" data-action="edit" data-id="${r.id}" ${r.protected?'disabled':''} title="Editar"><i class="fas fa-pen"></i></button>
+                        <button class="ap-btn ap-btn-danger ap-btn-small" data-action="del" data-id="${r.id}" ${r.protected||r.user_count>0?'disabled':''} title="Eliminar"><i class="fas fa-trash"></i></button>
+                    </div></td>`;
+                frag.appendChild(tr);
+            });
+            tbody.innerHTML = '';
+            tbody.appendChild(frag);
+        } catch(e) {
+            tbody.innerHTML = '<tr><td colspan="4" style="color:#dc2626;padding:12px;">Error al cargar</td></tr>';
+        }
+    }
+
+    document.getElementById('rolesTbody').addEventListener('click', e => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn || btn.disabled) return;
+        const id = parseInt(btn.dataset.id, 10);
+        if (btn.dataset.action === 'edit') openRoleModal(_rMap.get(id));
+        if (btn.dataset.action === 'del')  deleteRole(id);
+    });
+
+    document.getElementById('btnNewRole').addEventListener('click', () => openRoleModal(null));
+
+    function openRoleModal(r) {
+        hideErr('roleModalError');
+        document.getElementById('roleModalId').value   = r ? r.id : '';
+        document.getElementById('roleModalTitle').textContent = r ? 'Editar rol' : 'Nuevo rol';
+        document.getElementById('roleModalName').value = r ? r.role_name : '';
+        document.getElementById('roleModalDesc').value = r ? r.description : '';
+        openModal('roleModal');
+    }
+
+    document.getElementById('btnSaveRole').addEventListener('click', async () => {
+        hideErr('roleModalError');
+        const id = document.getElementById('roleModalId').value;
+        const payload = { role_name: document.getElementById('roleModalName').value.trim(), description: document.getElementById('roleModalDesc').value.trim() };
+        if (id) payload.id = parseInt(id, 10);
+        try {
+            const res  = await fetch('/api/admin/roles/', { method:id?'PUT':'POST', headers:hdr(), body:JSON.stringify(payload) });
+            const data = await res.json();
+            if (!data.ok) { showErr('roleModalError', data.error||'Error'); return; }
+            closeModal('roleModal'); window.toast.success(id?'Rol actualizado':'Rol creado'); loadRoles();
+        } catch(e) { showErr('roleModalError', 'Error de red'); }
+    });
+
+    async function deleteRole(id) {
+        const ok = await window.dialog.confirm({ title:'Eliminar rol', message:'¿Eliminar este rol?', confirmText:'Eliminar', cancelText:'Cancelar', variant:'danger' });
+        if (!ok) return;
+        try {
+            const res  = await fetch('/api/admin/roles/?id='+id, { method:'DELETE', headers:hdr() });
+            const data = await res.json();
+            if (!data.ok) { window.toast.error(data.error||'Error'); return; }
+            window.toast.success('Rol eliminado'); loadRoles();
+        } catch(e) { window.toast.error('Error de red'); }
+    }
+
+    /* ================================================================
+       GROUPS
+       ================================================================ */
+    const _gMap = new Map();
+
+    async function loadGroups() {
+        const tbody = document.getElementById('groupsTbody');
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:#64748b;">Cargando…</td></tr>';
+        try {
+            const res  = await fetch('/api/admin/groups/');
+            const data = await res.json();
+            _gMap.clear();
+            if (!data.groups || !data.groups.length) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:#64748b;">Sin grupos</td></tr>';
+                return;
+            }
+            const frag = document.createDocumentFragment();
+            data.groups.forEach(g => {
+                _gMap.set(g.id, g);
+                const tr = document.createElement('tr');
+                tr.innerHTML =
+                    `<td class="col-id">${g.id}</td>
+                    <td>${esc(g.group_name)}</td>
+                    <td>${g.user_count.toLocaleString()}</td>
+                    <td class="col-actions"><div class="ap-actions">
+                        <button class="ap-btn ap-btn-secondary ap-btn-small" data-action="edit" data-id="${g.id}" title="Editar"><i class="fas fa-pen"></i></button>
+                        <button class="ap-btn ap-btn-danger ap-btn-small" data-action="del" data-id="${g.id}" title="Eliminar"><i class="fas fa-trash"></i></button>
+                    </div></td>`;
+                frag.appendChild(tr);
+            });
+            tbody.innerHTML = '';
+            tbody.appendChild(frag);
+        } catch(e) {
+            tbody.innerHTML = '<tr><td colspan="4" style="color:#dc2626;padding:12px;">Error al cargar</td></tr>';
+        }
+    }
+
+    document.getElementById('groupsTbody').addEventListener('click', e => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn || btn.disabled) return;
+        const id = parseInt(btn.dataset.id, 10);
+        if (btn.dataset.action === 'edit') openGroupModal(_gMap.get(id));
+        if (btn.dataset.action === 'del')  deleteGroup(id);
+    });
+
+    document.getElementById('btnNewGroup').addEventListener('click', () => openGroupModal(null));
+
+    function openGroupModal(g) {
+        hideErr('groupModalError');
+        document.getElementById('groupModalId').value   = g ? g.id : '';
+        document.getElementById('groupModalTitle').textContent = g ? 'Editar grupo' : 'Nuevo grupo';
+        document.getElementById('groupModalName').value = g ? g.group_name : '';
+        document.getElementById('groupModalDesc').value = g ? g.description : '';
+        openModal('groupModal');
+    }
+
+    document.getElementById('btnSaveGroup').addEventListener('click', async () => {
+        hideErr('groupModalError');
+        const id = document.getElementById('groupModalId').value;
+        const payload = { group_name: document.getElementById('groupModalName').value.trim(), description: document.getElementById('groupModalDesc').value.trim() };
+        if (id) payload.id = parseInt(id, 10);
+        try {
+            const res  = await fetch('/api/admin/groups/', { method:id?'PUT':'POST', headers:hdr(), body:JSON.stringify(payload) });
+            const data = await res.json();
+            if (!data.ok) { showErr('groupModalError', data.error||'Error'); return; }
+            closeModal('groupModal'); window.toast.success(id?'Grupo actualizado':'Grupo creado'); loadGroups();
+        } catch(e) { showErr('groupModalError', 'Error de red'); }
+    });
+
+    async function deleteGroup(id) {
+        const g   = _gMap.get(id);
+        const cnt = g ? g.user_count : 0;
+        const ok  = await window.dialog.confirm({
+            title:'Eliminar grupo',
+            message: cnt > 0 ? `Hay ${cnt} usuario(s) que quedarán sin grupo. ¿Continuar?` : '¿Eliminar este grupo?',
+            confirmText:'Eliminar', cancelText:'Cancelar', variant:'danger',
+        });
+        if (!ok) return;
+        try {
+            const res  = await fetch('/api/admin/groups/?id='+id, { method:'DELETE', headers:hdr() });
+            const data = await res.json();
+            if (!data.ok) { window.toast.error(data.error||'Error'); return; }
+            window.toast.success('Grupo eliminado'); loadGroups();
+        } catch(e) { window.toast.error('Error de red'); }
+    }
+
+    /* initial load */
+    loadUsers();
+})();
+</script>
+{% endblock %}

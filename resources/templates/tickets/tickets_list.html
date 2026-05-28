@@ -8,7 +8,8 @@
 {% endblock %}
 
 {% block content %}
-<!-- Bulk merge modal -->
+<!-- Bulk merge modal (solo para agentes) -->
+{% if user.role and user.role.role_name|lower not in 'end user,end-user,cliente,customer' %}
 <div id="bulkMergeOverlay" class="bulk-merge-overlay">
     <div class="bulk-merge-modal">
         <div class="bmm-header">
@@ -28,8 +29,10 @@
         </div>
     </div>
 </div>
+{% endif %}
 
-<!-- Bulk action bar -->
+<!-- Bulk action bar (solo para agentes) -->
+{% if user.role and user.role.role_name|lower not in 'end user,end-user,cliente,customer' %}
 <div id="ticketActionBar" class="ticket-action-bar">
     <span class="tab-action-count"><strong id="tabActionCount">0</strong> tickets seleccionados</span>
     <div class="tab-action-buttons">
@@ -41,6 +44,7 @@
         </button>
     </div>
 </div>
+{% endif %}
 
 <div id="ticket-preview-card">
     <div class="tpc-header">
@@ -71,118 +75,135 @@
         </button>
     </h2>
     <ul id="filters">
-        <li data-view="telefonica_mes" class="active">
-            <span class="filter-name">Tickets Telefónica último mes</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="unsolved_no_tareas">
-            <span class="filter-name">Tus tickets no resueltos (sin tareas)</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="unassigned">
-            <span class="filter-name">Tickets sin asignar</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="all_unsolved_no_tareas">
-            <span class="filter-name">Todos los tickets no resueltos (sin tareas)</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="recently_updated">
-            <span class="filter-name">Tickets actualizados recientemente</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="recently_solved">
-            <span class="filter-name">Tickets resueltos recientemente</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="pendientes">
-            <span class="filter-name">Todos los Tickets pendientes</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="tareas">
-            <span class="filter-name">Todas las tareas</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="unsolved_groups">
-            <span class="filter-name">Unsolved tickets in your groups</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="rated_last7">
-            <span class="filter-name">Rated tickets from the last 7 days</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="internos_comuny">
-            <span class="filter-name">Tickets INTERNOS abiertos de Comunycarse</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="abiertos_ecomfax">
-            <span class="filter-name">Abiertos eComFax</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="recordia_sgsd">
-            <span class="filter-name">Recordia SGSD</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="closed">
-            <span class="filter-name">Todos Tickets Cerrados</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="sus_pendientes">
-            <span class="filter-name">Sus tickets pendientes</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="espera">
-            <span class="filter-name">Todos Tickets ESPERA</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="abiertos">
-            <span class="filter-name">Todos Tickets ABIERTO</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="sus_no_cerrados">
-            <span class="filter-name">Sus Tickets (NO CERRADOS)</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="ultimos_cerrados">
-            <span class="filter-name">Ultimos Tickets Cerrados</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="no_resueltos">
-            <span class="filter-name">Todos los tickets No Resueltos</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="twitter">
-            <span class="filter-name">Recibido por Twitter</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="twitter_dm">
-            <span class="filter-name">Recibido por Twitter Mensaje directo</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="twitter_like">
-            <span class="filter-name">Recibido por Twitter "Me gusta"</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="sus_tareas">
-            <span class="filter-name">Todas sus tareas</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="resueltos">
-            <span class="filter-name">Todos Tickets Resueltos</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="new_in_groups">
-            <span class="filter-name">New tickets in your groups</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="open">
-            <span class="filter-name">Tickets Abiertos (Open)</span>
-            <span class="filter-count">–</span>
-        </li>
-        <li data-view="no_update_48h">
-            <span class="filter-name">Tickets sin actualizar en 48 horas</span>
-            <span class="filter-count">–</span>
-        </li>
+        {% if user.role and user.role.role_name|lower in 'end user,end-user,cliente,customer' %}
+            {# Filtros simplificados para end users #}
+            <li data-view="mis_tickets" class="active">
+                <span class="filter-name">Todos tus tickets</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="unsolved_no_tareas">
+                <span class="filter-name">Abiertos</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="resueltos">
+                <span class="filter-name">Resueltos</span>
+                <span class="filter-count">–</span>
+            </li>
+        {% else %}
+            {# Filtros completos para agentes #}
+            <li data-view="telefonica_mes" class="active">
+                <span class="filter-name">Tickets Telefónica último mes</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="unsolved_no_tareas">
+                <span class="filter-name">Tus tickets no resueltos (sin tareas)</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="unassigned">
+                <span class="filter-name">Tickets sin asignar</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="all_unsolved_no_tareas">
+                <span class="filter-name">Todos los tickets no resueltos (sin tareas)</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="recently_updated">
+                <span class="filter-name">Tickets actualizados recientemente</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="recently_solved">
+                <span class="filter-name">Tickets resueltos recientemente</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="pendientes">
+                <span class="filter-name">Todos los Tickets pendientes</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="tareas">
+                <span class="filter-name">Todas las tareas</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="unsolved_groups">
+                <span class="filter-name">Unsolved tickets in your groups</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="rated_last7">
+                <span class="filter-name">Rated tickets from the last 7 days</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="internos_comuny">
+                <span class="filter-name">Tickets INTERNOS abiertos de Comunycarse</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="abiertos_ecomfax">
+                <span class="filter-name">Abiertos eComFax</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="recordia_sgsd">
+                <span class="filter-name">Recordia SGSD</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="closed">
+                <span class="filter-name">Todos Tickets Cerrados</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="sus_pendientes">
+                <span class="filter-name">Sus tickets pendientes</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="espera">
+                <span class="filter-name">Todos Tickets ESPERA</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="abiertos">
+                <span class="filter-name">Todos Tickets ABIERTO</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="sus_no_cerrados">
+                <span class="filter-name">Sus Tickets (NO CERRADOS)</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="ultimos_cerrados">
+                <span class="filter-name">Ultimos Tickets Cerrados</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="no_resueltos">
+                <span class="filter-name">Todos los tickets No Resueltos</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="twitter">
+                <span class="filter-name">Recibido por Twitter</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="twitter_dm">
+                <span class="filter-name">Recibido por Twitter Mensaje directo</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="twitter_like">
+                <span class="filter-name">Recibido por Twitter "Me gusta"</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="sus_tareas">
+                <span class="filter-name">Todas sus tareas</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="resueltos">
+                <span class="filter-name">Todos Tickets Resueltos</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="new_in_groups">
+                <span class="filter-name">New tickets in your groups</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="open">
+                <span class="filter-name">Tickets Abiertos (Open)</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="no_update_48h">
+                <span class="filter-name">Tickets sin actualizar en 48 horas</span>
+                <span class="filter-count">–</span>
+            </li>
+        {% endif %}
     </ul>
 </div>
 
@@ -517,8 +538,9 @@
             updateActionBar();
         });
 
-        // Action bar — Delete
-        document.getElementById('actionDelete').addEventListener('click', async () => {
+        // Action bar — Delete (solo agentes)
+        const _elActionDelete = document.getElementById('actionDelete');
+        if (_elActionDelete) _elActionDelete.addEventListener('click', async () => {
             if (_selectedIds.size === 0) return;
             const ok = await window.dialog.confirm({
                 title: 'Eliminar tickets',
@@ -545,27 +567,33 @@
             } catch (e) { window.toast.error('Error de red'); }
         });
 
-        // Action bar — Merge
-        document.getElementById('actionMerge').addEventListener('click', () => {
+        // Action bar — Merge (solo agentes)
+        const _elActionMerge = document.getElementById('actionMerge');
+        if (_elActionMerge) _elActionMerge.addEventListener('click', () => {
             if (_selectedIds.size === 0) return;
             openBulkMergeModal();
         });
 
-        // Merge modal wiring
-        document.getElementById('bmmClose').addEventListener('click', closeBulkMergeModal);
-        document.getElementById('bmmCancel').addEventListener('click', closeBulkMergeModal);
-        document.getElementById('bulkMergeOverlay').addEventListener('click', (e) => {
-            if (e.target === document.getElementById('bulkMergeOverlay')) closeBulkMergeModal();
+        // Merge modal wiring (solo agentes)
+        const _elBmmClose = document.getElementById('bmmClose');
+        if (_elBmmClose) _elBmmClose.addEventListener('click', closeBulkMergeModal);
+        const _elBmmCancel = document.getElementById('bmmCancel');
+        if (_elBmmCancel) _elBmmCancel.addEventListener('click', closeBulkMergeModal);
+        const _elBmmOverlay = document.getElementById('bulkMergeOverlay');
+        if (_elBmmOverlay) _elBmmOverlay.addEventListener('click', (e) => {
+            if (e.target === _elBmmOverlay) closeBulkMergeModal();
         });
 
         let _bmmSearchTimer = null;
-        document.getElementById('bmmSearch').addEventListener('input', function() {
+        const _elBmmSearch = document.getElementById('bmmSearch');
+        if (_elBmmSearch) _elBmmSearch.addEventListener('input', function() {
             clearTimeout(_bmmSearchTimer);
             _bmmSearchTimer = setTimeout(() => bmmSearch(this.value.trim()), 300);
         });
 
-        document.getElementById('bmmConfirm').addEventListener('click', async () => {
-            const targetId = parseInt(document.getElementById('bmmConfirm').dataset.targetId || '0', 10);
+        const _elBmmConfirm = document.getElementById('bmmConfirm');
+        if (_elBmmConfirm) _elBmmConfirm.addEventListener('click', async () => {
+            const targetId = parseInt(_elBmmConfirm.dataset.targetId || '0', 10);
             if (!targetId) return;
             try {
                 const resp = await fetch('/tickets/bulk_merge/', {
@@ -589,10 +617,13 @@
     // ---- Selection helpers ----
     function updateActionBar() {
         const count = _selectedIds.size;
-        document.getElementById('tabActionCount').textContent = count;
+        const countEl = document.getElementById('tabActionCount');
+        if (countEl) countEl.textContent = count;
         const bar = document.getElementById('ticketActionBar');
-        if (count > 0) bar.classList.add('visible');
-        else           bar.classList.remove('visible');
+        if (bar) {
+            if (count > 0) bar.classList.add('visible');
+            else           bar.classList.remove('visible');
+        }
     }
 
     function syncSelectAll() {

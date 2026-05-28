@@ -33,6 +33,12 @@ urlpatterns = [
     path("customers/profile/", views.customer_profile, name="customer_profile"),
     path('reporting/', views.reporting, name='reporting'),
     path('settings/', views.settings, name='settings'),
+    # Admin panel (solo accesible para usuarios con rol admin)
+    path('admin-panel/', views.admin_panel, name='admin_panel'),
+    path('api/admin/users/', views.admin_users_api, name='admin_users_api'),
+    path('api/admin/users/<int:user_id>/password/', views.admin_reset_password_api, name='admin_reset_password_api'),
+    path('api/admin/roles/', views.admin_roles_api, name='admin_roles_api'),
+    path('api/admin/groups/', views.admin_groups_api, name='admin_groups_api'),
     path('profile/', views.profile, name='profile'),
     path('docs/', views.documentation, name='documentation'),
     path("api/users/<int:user_id>/notes/", views.update_user_notes, name="update_user_notes"),

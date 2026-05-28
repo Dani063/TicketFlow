@@ -345,6 +345,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'app.tasks.poll_m365_mailboxes',
         'schedule': 120.0,
     },
+    'auto-assign-unassigned-tickets': {
+        'task': 'app.tasks.auto_assign_unassigned_tickets',
+        'schedule': 300.0,  # Cada 5 minutos
+    },
 }
 
 # === Azure AD (lectura buzones M365) ===

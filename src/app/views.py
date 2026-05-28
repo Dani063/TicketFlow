@@ -46,6 +46,7 @@ _TICKET_SORT_FIELDS = {
 
 # Subfiltro (agrupación) por vista, replicando el comportamiento de Zendesk
 _TICKET_GROUP_BY = {
+    'mis_tickets':            'status',
     'telefonica_mes':         'assignee',
     'unsolved_no_tareas':     'status',
     'unassigned':             'status',
@@ -330,6 +331,7 @@ def filter_tickets(request):
     filtros = {}
     if compute_counts:
         filtros = {
+            "mis_tickets": base_qs.count(),
             "telefonica_mes": base_qs.filter(service="Telefonica", created_at__gte=timezone.now()-timedelta(days=30)).count(),
             "unsolved_no_tareas": base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea")).count(),
             "unassigned": base_qs.filter(assignee__isnull=True).count(),
@@ -347,7 +349,7 @@ def filter_tickets(request):
             "sus_pendientes": base_qs.filter(requester=request.user, status="pending").count(),
             "espera": base_qs.filter(status="espera").count() if hasattr(Ticket, "espera") else 0,
             "abiertos": base_qs.filter(status="open").count(),
-            "sus_no_cerrados": base_qs.filter(requester=request.user).exclude(status="closed").count(),
+            "sus_no_cerrados": (base_qs.exclude(status="closed") if not _is_agent(request.user) else base_qs.filter(requester=request.user).exclude(status="closed")).count(),
             "ultimos_cerrados": base_qs.filter(status="closed").count(),
             "no_resueltos": base_qs.exclude(status="resolved").count(),
             "twitter": base_qs.filter(channel="twitter").count(),
@@ -360,7 +362,11 @@ def filter_tickets(request):
             "no_update_48h": base_qs.filter(updated_at__lte=timezone.now()-timedelta(hours=48)).count(),
         }
 
-    if view == "telefonica_mes":
+    if view == "mis_tickets":
+        # Vista de end user: TODOS sus tickets (requester o cc), incluidos cerrados/resueltos.
+        # base_qs ya está filtrado por requester/cc para end users; agentes ven todo.
+        tickets = base_qs
+    elif view == "telefonica_mes":
         tickets = base_qs.filter(service="Telefonica", created_at__gte=timezone.now()-timedelta(days=30))
     elif view == "unsolved_no_tareas":
         tickets = base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea"))
@@ -399,7 +405,12 @@ def filter_tickets(request):
     elif view == "abiertos":
         tickets = base_qs.filter(status="open")
     elif view == "sus_no_cerrados":
-        tickets = base_qs.filter(requester=request.user).exclude(status="closed")
+        # Para end users: todos sus tickets (requester o ccs) sin cerrados
+        # Para agentes: solo tickets donde son requester, sin cerrados
+        if _is_agent(request.user):
+            tickets = base_qs.filter(requester=request.user).exclude(status="closed")
+        else:
+            tickets = base_qs.exclude(status="closed")
     elif view == "ultimos_cerrados":
         tickets = base_qs.filter(status="closed")
     elif view == "no_resueltos":
@@ -751,6 +762,7 @@ def ticket_detail_api(request, ticket_id):
     if not _is_agent(request.user):
         is_involved = (
             ticket.requester_id == request.user.id or
+            ticket.created_by_id == request.user.id or
             ticket.ccs.filter(id=request.user.id).exists()
         )
         if not is_involved:
@@ -957,6 +969,21 @@ def create_ticket(request):
         return redirect(f'{request.path}?id={ticket.id}')
 
     # GET .
+    # Gate: end users only see tickets they are involved in (requester / cc / created_by).
+    # Otherwise their tab opens and renders, but the JS XHR /api/tickets/<id>/ fails with
+    # 403 and form fields stay empty — which the user perceives as "ticket viewing error".
+    if id_param and id_param.isdigit():
+        _ticket_check = get_object_or_404(Ticket, id=int(id_param))
+        if not _is_agent(request.user):
+            _involved = (
+                _ticket_check.requester_id == request.user.id or
+                _ticket_check.created_by_id == request.user.id or
+                _ticket_check.ccs.filter(id=request.user.id).exists()
+            )
+            if not _involved:
+                return render(request, "tickets/403.html",
+                              {"error": "No tienes acceso a este ticket."}, status=403)
+
     usuarios = User.objects.filter(is_active=True).only('id', 'name', 'email').order_by('name')
     agentes = User.objects.filter(group=2).only('id', 'name', 'email').order_by('name')
     tags = TicketTag.objects.only('id', 'name').all()
@@ -1232,9 +1259,17 @@ def notifications_api(request):
 
 @login_required
 def recent_activity_api(request):
+    # Solo actualizaciones de los últimos 30 días — sin este corte los tickets
+    # importados de Zendesk muestran updated_at de hace años en el dashboard.
+    recent_cutoff = timezone.now() - timedelta(days=30)
+    base = Ticket.objects.filter(
+        merged_into__isnull=True,
+        is_deleted=False,
+        updated_at__gte=recent_cutoff,
+    )
     if _is_agent(request.user):
         tickets = (
-            Ticket.objects
+            base
             .filter(Q(assignee=request.user) | Q(created_by=request.user))
             .select_related('requester', 'assignee')
             .order_by('-updated_at')
@@ -1242,8 +1277,8 @@ def recent_activity_api(request):
         )
     else:
         tickets = (
-            Ticket.objects
-            .filter(Q(requester=request.user) | Q(ccs=request.user))
+            base
+            .filter(Q(requester=request.user) | Q(ccs=request.user) | Q(created_by=request.user))
             .select_related('requester', 'assignee')
             .order_by('-updated_at')
             .distinct()[:10]
@@ -1518,4 +1553,389 @@ def bulk_merge(request):
 def documentation(request):
     """Render comprehensive documentation for TicketFlow."""
     return render(request, 'documentation.html')
-    return JsonResponse({'ok': True, 'merged': merged_count, 'target_id': target.id})
+
+
+# ---------------------------------------------------------------------------
+# Panel de administración (solo rol admin)
+# ---------------------------------------------------------------------------
+
+import re as _re_admin
+_EMAIL_RE = _re_admin.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+def _admin_required(view_func):
+    """Decorator: 403 si no es admin; redirige a login si no autenticado."""
+    from functools import wraps
+
+    @wraps(view_func)
+    def _wrapped(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            return redirect('login')
+        if not _is_admin(request.user):
+            # Para vistas API devolver JSON; para vistas HTML, renderizar 403
+            if request.path.startswith('/api/'):
+                return JsonResponse({'error': 'Forbidden'}, status=403)
+            return render(request, "tickets/403.html",
+                          {"error": "Solo los administradores pueden acceder a esta sección."},
+                          status=403)
+        return view_func(request, *args, **kwargs)
+    return _wrapped
+
+
+@_admin_required
+def admin_panel(request):
+    users = (
+        User.objects
+        .select_related('role', 'group')
+        .order_by('name')
+    )
+    roles = Role.objects.order_by('role_name')
+    groups = Group.objects.order_by('group_name')
+    return render(request, 'admin_panel.html', {
+        'users': users,
+        'roles': roles,
+        'groups': groups,
+        'username': request.user.name,
+        'email': request.user.email,
+    })
+
+
+def _admin_serialize_user(u):
+    return {
+        'id': u.id,
+        'name': u.name,
+        'email': u.email,
+        'role_id': u.role_id,
+        'role_name': u.role.role_name if u.role else None,
+        'group_id': u.group_id,
+        'group_name': u.group.group_name if u.group else None,
+        'is_active': bool(u.is_active),
+        'created_at': u.created_at.strftime('%d/%m/%Y') if u.created_at else '',
+    }
+
+
+@_admin_required
+@csrf_exempt
+def admin_users_api(request):
+    """CRUD de usuarios para administradores.
+
+    GET  /api/admin/users/            → lista (opcional ?q=, ?role_id=, ?group_id=)
+    POST /api/admin/users/            → crea {name, email, role_id, group_id, password?}
+    PUT  /api/admin/users/            → actualiza {id, name?, email?, role_id?, group_id?, is_active?}
+    DELETE /api/admin/users/?id=N     → desactiva (soft-delete) o borra si no tiene tickets
+    """
+    if request.method == 'GET':
+        qs = User.objects.select_related('role', 'group').order_by('name')
+        q = (request.GET.get('q') or '').strip()
+        if q:
+            qs = qs.filter(Q(name__icontains=q) | Q(email__icontains=q))
+        role_id = request.GET.get('role_id')
+        group_id = request.GET.get('group_id')
+        if role_id and role_id.isdigit():
+            qs = qs.filter(role_id=int(role_id))
+        if group_id and group_id.isdigit():
+            qs = qs.filter(group_id=int(group_id))
+        # Paginación server-side
+        try:
+            page = max(1, int(request.GET.get('page') or 1))
+        except (ValueError, TypeError):
+            page = 1
+        try:
+            page_size = int(request.GET.get('page_size') or 50)
+            if page_size not in (25, 50, 100, 200):
+                page_size = 50
+        except (ValueError, TypeError):
+            page_size = 50
+        total = qs.count()
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = min(page, total_pages)
+        offset = (page - 1) * page_size
+        users = list(qs[offset:offset + page_size])
+        return JsonResponse({
+            'users': [_admin_serialize_user(u) for u in users],
+            'pagination': {
+                'total': total, 'page': page,
+                'total_pages': total_pages, 'page_size': page_size,
+            },
+        })
+
+    try:
+        data = json.loads(request.body or '{}')
+    except ValueError:
+        return JsonResponse({'error': 'JSON inválido'}, status=400)
+
+    if request.method == 'POST':
+        name = (data.get('name') or '').strip()
+        email = (data.get('email') or '').strip().lower()
+        if not name:
+            return JsonResponse({'error': 'El nombre es obligatorio'}, status=400)
+        if not _EMAIL_RE.match(email):
+            return JsonResponse({'error': 'Email no válido'}, status=400)
+        if User.objects.filter(email__iexact=email).exists():
+            return JsonResponse({'error': 'Ya existe un usuario con ese email'}, status=400)
+
+        role = None
+        if data.get('role_id'):
+            role = Role.objects.filter(id=data['role_id']).first()
+            if not role:
+                return JsonResponse({'error': 'Rol no encontrado'}, status=400)
+        group = None
+        if data.get('group_id'):
+            group = Group.objects.filter(id=data['group_id']).first()
+            if not group:
+                return JsonResponse({'error': 'Grupo no encontrado'}, status=400)
+
+        user = User(email=email, name=name, role=role, group=group, is_active=True)
+        password = (data.get('password') or '').strip()
+        if password:
+            user.set_password(password)
+        else:
+            user.set_unusable_password()
+        user.save()
+        return JsonResponse({'ok': True, 'user': _admin_serialize_user(user)})
+
+    if request.method == 'PUT':
+        try:
+            user_id = int(data.get('id') or 0)
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'id requerido'}, status=400)
+        if not user_id:
+            return JsonResponse({'error': 'id requerido'}, status=400)
+        user = User.objects.filter(id=user_id).first()
+        if not user:
+            return JsonResponse({'error': 'Usuario no encontrado'}, status=404)
+
+        # No permitir que un admin se desactive a sí mismo (riesgo lockout)
+        if user.id == request.user.id and data.get('is_active') is False:
+            return JsonResponse({'error': 'No puedes desactivar tu propia cuenta'}, status=400)
+
+        if 'name' in data:
+            name = (data.get('name') or '').strip()
+            if not name:
+                return JsonResponse({'error': 'El nombre no puede estar vacío'}, status=400)
+            user.name = name
+
+        if 'email' in data:
+            new_email = (data.get('email') or '').strip().lower()
+            if not _EMAIL_RE.match(new_email):
+                return JsonResponse({'error': 'Email no válido'}, status=400)
+            if User.objects.filter(email__iexact=new_email).exclude(id=user.id).exists():
+                return JsonResponse({'error': 'Ya existe otro usuario con ese email'}, status=400)
+            user.email = new_email
+
+        if 'role_id' in data:
+            rid = data.get('role_id')
+            if rid in (None, '', 0):
+                user.role = None
+            else:
+                role = Role.objects.filter(id=rid).first()
+                if not role:
+                    return JsonResponse({'error': 'Rol no encontrado'}, status=400)
+                # Si quitamos el rol admin a un admin, asegurarnos de no dejar el sistema sin admins
+                if (user.role and _is_admin(user) and role.role_name.lower()
+                        not in ('admin', 'administrator', 'administrador')):
+                    if not User.objects.filter(role__role_name__iexact='admin', is_active=True).exclude(id=user.id).exists():
+                        return JsonResponse({'error': 'Debe quedar al menos un administrador activo'}, status=400)
+                user.role = role
+
+        if 'group_id' in data:
+            gid = data.get('group_id')
+            if gid in (None, '', 0):
+                user.group = None
+            else:
+                group = Group.objects.filter(id=gid).first()
+                if not group:
+                    return JsonResponse({'error': 'Grupo no encontrado'}, status=400)
+                user.group = group
+
+        if 'is_active' in data:
+            user.is_active = bool(data['is_active'])
+
+        user.save()
+        return JsonResponse({'ok': True, 'user': _admin_serialize_user(user)})
+
+    if request.method == 'DELETE':
+        try:
+            user_id = int(request.GET.get('id') or 0)
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'id requerido'}, status=400)
+        if not user_id:
+            return JsonResponse({'error': 'id requerido'}, status=400)
+        if user_id == request.user.id:
+            return JsonResponse({'error': 'No puedes eliminar tu propia cuenta'}, status=400)
+        user = User.objects.filter(id=user_id).first()
+        if not user:
+            return JsonResponse({'error': 'Usuario no encontrado'}, status=404)
+
+        # Si tiene tickets relacionados, mejor desactivar que borrar para preservar FK
+        has_tickets = (
+            Ticket.objects.filter(Q(requester=user) | Q(assignee=user) | Q(created_by=user)).exists()
+            or Comment.objects.filter(user=user).exists()
+        )
+        if has_tickets:
+            user.is_active = False
+            user.save(update_fields=['is_active'])
+            return JsonResponse({'ok': True, 'deactivated': True})
+        user.delete()
+        return JsonResponse({'ok': True, 'deleted': True})
+
+    return JsonResponse({'error': 'Método no permitido'}, status=405)
+
+
+@_admin_required
+@csrf_exempt
+def admin_groups_api(request):
+    """CRUD de grupos (solo admin)."""
+    if request.method == 'GET':
+        data = [
+            {
+                'id': g.id,
+                'group_name': g.group_name,
+                'description': g.description or '',
+                'user_count': User.objects.filter(group=g).count(),
+            }
+            for g in Group.objects.order_by('group_name')
+        ]
+        return JsonResponse({'groups': data})
+
+    try:
+        data = json.loads(request.body or '{}')
+    except ValueError:
+        return JsonResponse({'error': 'JSON inválido'}, status=400)
+
+    if request.method == 'POST':
+        name = (data.get('group_name') or '').strip()
+        if not name:
+            return JsonResponse({'error': 'group_name requerido'}, status=400)
+        if Group.objects.filter(group_name__iexact=name).exists():
+            return JsonResponse({'error': 'Ya existe un grupo con ese nombre'}, status=400)
+        g = Group.objects.create(group_name=name, description=(data.get('description') or '').strip() or None)
+        return JsonResponse({'ok': True, 'group': {'id': g.id, 'group_name': g.group_name}})
+
+    if request.method == 'PUT':
+        try:
+            gid = int(data.get('id') or 0)
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'id requerido'}, status=400)
+        g = Group.objects.filter(id=gid).first()
+        if not g:
+            return JsonResponse({'error': 'Grupo no encontrado'}, status=404)
+        if 'group_name' in data:
+            new_name = (data.get('group_name') or '').strip()
+            if not new_name:
+                return JsonResponse({'error': 'group_name no puede estar vacío'}, status=400)
+            if Group.objects.filter(group_name__iexact=new_name).exclude(id=g.id).exists():
+                return JsonResponse({'error': 'Ya existe otro grupo con ese nombre'}, status=400)
+            g.group_name = new_name
+        if 'description' in data:
+            g.description = (data.get('description') or '').strip() or None
+        g.save()
+        return JsonResponse({'ok': True, 'group': {'id': g.id, 'group_name': g.group_name}})
+
+    if request.method == 'DELETE':
+        try:
+            gid = int(request.GET.get('id') or 0)
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'id requerido'}, status=400)
+        g = Group.objects.filter(id=gid).first()
+        if not g:
+            return JsonResponse({'error': 'Grupo no encontrado'}, status=404)
+        # Cualquier usuario que esté en este grupo queda sin grupo (SET_NULL ya lo hace)
+        g.delete()
+        return JsonResponse({'ok': True, 'deleted': True})
+
+    return JsonResponse({'error': 'Método no permitido'}, status=405)
+
+
+@_admin_required
+@csrf_exempt
+def admin_roles_api(request):
+    """CRUD de roles (solo admin)."""
+    _PROTECTED_ROLES = {'admin', 'administrator', 'administrador', 'end user', 'end-user'}
+
+    if request.method == 'GET':
+        data = [
+            {
+                'id': r.id,
+                'role_name': r.role_name,
+                'description': r.description or '',
+                'user_count': User.objects.filter(role=r).count(),
+                'protected': r.role_name.lower() in _PROTECTED_ROLES,
+            }
+            for r in Role.objects.order_by('role_name')
+        ]
+        return JsonResponse({'roles': data})
+
+    try:
+        data = json.loads(request.body or '{}')
+    except ValueError:
+        return JsonResponse({'error': 'JSON inválido'}, status=400)
+
+    if request.method == 'POST':
+        name = (data.get('role_name') or '').strip()
+        if not name:
+            return JsonResponse({'error': 'role_name requerido'}, status=400)
+        if Role.objects.filter(role_name__iexact=name).exists():
+            return JsonResponse({'error': 'Ya existe un rol con ese nombre'}, status=400)
+        r = Role.objects.create(role_name=name, description=(data.get('description') or '').strip() or None)
+        return JsonResponse({'ok': True, 'role': {'id': r.id, 'role_name': r.role_name}})
+
+    if request.method == 'PUT':
+        try:
+            rid = int(data.get('id') or 0)
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'id requerido'}, status=400)
+        r = Role.objects.filter(id=rid).first()
+        if not r:
+            return JsonResponse({'error': 'Rol no encontrado'}, status=404)
+        if r.role_name.lower() in _PROTECTED_ROLES:
+            return JsonResponse({'error': 'Este rol es del sistema y no puede modificarse'}, status=400)
+        if 'role_name' in data:
+            new_name = (data.get('role_name') or '').strip()
+            if not new_name:
+                return JsonResponse({'error': 'role_name no puede estar vacío'}, status=400)
+            if Role.objects.filter(role_name__iexact=new_name).exclude(id=r.id).exists():
+                return JsonResponse({'error': 'Ya existe otro rol con ese nombre'}, status=400)
+            r.role_name = new_name
+        if 'description' in data:
+            r.description = (data.get('description') or '').strip() or None
+        r.save()
+        return JsonResponse({'ok': True, 'role': {'id': r.id, 'role_name': r.role_name}})
+
+    if request.method == 'DELETE':
+        try:
+            rid = int(request.GET.get('id') or 0)
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'id requerido'}, status=400)
+        r = Role.objects.filter(id=rid).first()
+        if not r:
+            return JsonResponse({'error': 'Rol no encontrado'}, status=404)
+        if r.role_name.lower() in _PROTECTED_ROLES:
+            return JsonResponse({'error': 'Este rol es del sistema y no puede borrarse'}, status=400)
+        if User.objects.filter(role=r).exists():
+            return JsonResponse({'error': 'No puedes borrar un rol con usuarios asignados'}, status=400)
+        r.delete()
+        return JsonResponse({'ok': True, 'deleted': True})
+
+    return JsonResponse({'error': 'Método no permitido'}, status=405)
+
+
+@_admin_required
+@csrf_exempt
+@require_POST
+def admin_reset_password_api(request, user_id):
+    """Permite al admin establecer una contraseña nueva o invalidarla."""
+    user = get_object_or_404(User, id=user_id)
+    try:
+        data = json.loads(request.body or '{}')
+    except ValueError:
+        return JsonResponse({'error': 'JSON inválido'}, status=400)
+    new_password = (data.get('password') or '').strip()
+    if new_password:
+        if len(new_password) < 8:
+            return JsonResponse({'error': 'La contraseña debe tener al menos 8 caracteres'}, status=400)
+        user.set_password(new_password)
+    else:
+        user.set_unusable_password()
+    user.save()
+    return JsonResponse({'ok': True})

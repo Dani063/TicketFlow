@@ -8,7 +8,8 @@
 {% endblock %}
 
 {% block content %}
-<!-- Bulk merge modal -->
+<!-- Bulk merge modal (solo para agentes) -->
+{% if user.role and user.role.role_name|lower not in 'end user,end-user,cliente,customer' %}
 <div id="homeBulkMergeOverlay" class="bulk-merge-overlay">
     <div class="bulk-merge-modal">
         <div class="bmm-header">
@@ -28,7 +29,9 @@
         </div>
     </div>
 </div>
-<!-- Bulk action bar -->
+{% endif %}
+<!-- Bulk action bar (solo para agentes) -->
+{% if user.role and user.role.role_name|lower not in 'end user,end-user,cliente,customer' %}
 <div id="homeTicketActionBar" class="ticket-action-bar">
     <span class="tab-action-count"><strong id="homeTabActionCount">0</strong> tickets seleccionados</span>
     <div class="tab-action-buttons">
@@ -40,6 +43,7 @@
         </button>
     </div>
 </div>
+{% endif %}
 <div id="ticket-preview-card">
     <div class="tpc-header">
         <span class="tpc-status"></span>

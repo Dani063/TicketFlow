@@ -346,17 +346,23 @@ body {
     }
 
 .navbar-center {
-    flex-grow: 1;
+    flex: 1 1 auto;
     display: flex;
     justify-content: center;
+    position: relative; /* necesario para posicionar el dropdown relativo a la barra */
+    min-width: 0;
 }
 
 .search-bar {
-    width: 60%;
+    flex: 0 1 500px;
+    width: 500px;
+    max-width: 500px;
+    min-width: 200px;
     padding: 8px;
     border: 1px solid #ccc;
     border-radius: 4px;
     font-size: 14px;
+    box-sizing: border-box;
 }
 
 .navbar-right {
@@ -1217,10 +1223,6 @@ body, html {
 .status-resolved { background: #22c55e; }
 .status-closed   { background: #6b7280; }
 /* ===== Resultados de búsqueda ===== */
-.navbar-center {
-    position: relative; /* necesario para posicionar el dropdown relativo a la barra */
-}
-
 .search-results {
     position: absolute;
     top: 100%; /* justo debajo de la barra */

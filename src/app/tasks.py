@@ -104,6 +104,47 @@ def _normalize_subject(subject):
     return s.lower()
 
 
+_AUTO_ASSIGN_TARGETS = ('Laura Moccia', 'Guillermo Soret', 'Jose Maria')
+
+
+def _get_auto_assign_pool():
+    """Return the three target users (Laura, Guillermo, José María), or [] if any is missing."""
+    from app.models import User
+    pool = []
+    for name in _AUTO_ASSIGN_TARGETS:
+        user = User.objects.filter(name__icontains=name).first()
+        if user:
+            pool.append(user)
+    if len(pool) != len(_AUTO_ASSIGN_TARGETS):
+        logger.warning(
+            'auto_assign: pool incompleto (%d/%d) — no auto-asignaré',
+            len(pool), len(_AUTO_ASSIGN_TARGETS),
+        )
+        return []
+    return pool
+
+
+def _next_round_robin_assignee(pool):
+    """Pick the assignee with the fewest currently-open tickets among the pool.
+    Tie-break by id so the choice is deterministic. Equivalent to balanced round-robin
+    over the long run without needing external counter state."""
+    from django.db.models import Count
+    from app.models import Ticket
+    if not pool:
+        return None
+    pool_ids = [u.id for u in pool]
+    counts = dict(
+        Ticket.objects
+        .filter(assignee_id__in=pool_ids, is_deleted=False)
+        .exclude(status__in=['closed', 'resolved'])
+        .values_list('assignee_id')
+        .annotate(n=Count('id'))
+        .values_list('assignee_id', 'n')
+    )
+    pool_sorted = sorted(pool, key=lambda u: (counts.get(u.id, 0), u.id))
+    return pool_sorted[0]
+
+
 _BODY_RE = re.compile(r'<body[^>]*>(.*?)</body>', re.DOTALL | re.IGNORECASE)
 # Whitelist of tags that indicate actual HTML formatting (not email addresses like <user@host>)
 _FORMAT_TAG_RE = re.compile(
@@ -170,11 +211,16 @@ def _process_message(message, brand):
             ticket.save(update_fields=['status'])
         return 'comment_added'
     else:
+        # Tickets entrantes (creados por el worker) deben repartirse equitativamente
+        # entre Laura, Guillermo y José María en lugar de quedar sin asignar.
+        pool = _get_auto_assign_pool()
+        assignee = _next_round_robin_assignee(pool) if pool else None
         ticket = Ticket.objects.create(
             subject=subject,
             description=text_body or html_body or '',
             requester=requester,
             created_by=requester,
+            assignee=assignee,
             brand=brand,
             channel='email',
             status='open',
@@ -251,5 +297,39 @@ def poll_m365_mailboxes():
                 )
             except Exception as exc:
                 logger.warning('poll_m365 [%s] mark-read failed %s…: %s', mailbox, msg_id[:16], exc)
+
+
+@shared_task(name='app.tasks.auto_assign_unassigned_tickets')
+def auto_assign_unassigned_tickets():
+    """Auto-assign unassigned tickets equitably to Laura Moccia, Guillermo Soret, Jose Maria.
+
+    Selecciona en cada iteración al miembro del pool con menos tickets abiertos, de
+    modo que la distribución converge a un reparto equilibrado aunque haya cambios
+    intermedios (cierres, reasignaciones manuales, etc.).
+    """
+    from app.models import Ticket
+
+    pool = _get_auto_assign_pool()
+    if not pool:
+        return 'assigned_count: 0 (missing assignees)'
+
+    unassigned = Ticket.objects.filter(
+        assignee__isnull=True, is_deleted=False, merged_into__isnull=True,
+    ).order_by('created_at')
+    if not unassigned.exists():
+        logger.info('auto_assign: no unassigned tickets found')
+        return 'assigned_count: 0'
+
+    assigned_count = 0
+    for ticket in unassigned:
+        assignee = _next_round_robin_assignee(pool)
+        if not assignee:
+            break
+        ticket.assignee = assignee
+        ticket.save(update_fields=['assignee'])
+        assigned_count += 1
+
+    logger.info('auto_assign: assigned %d tickets', assigned_count)
+    return f'assigned_count: {assigned_count}'
 
 

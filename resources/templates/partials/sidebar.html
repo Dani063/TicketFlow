@@ -14,10 +14,10 @@
         <li><a href="{% url 'reporting' %}"><i class="fas fa-chart-bar"></i><span class="tooltip">Reporting</span></a></li>
         {% endcomment %}
         {% endif %}
-        {% comment %}Admin/Settings oculto hasta que tenga contenido; ruta intacta para dev.
-        <li class="{% if request.resolver_match.url_name == 'settings' %}active{% endif %}">
-            <a href="{% url 'settings' %}"><i class="fas fa-cog"></i><span class="tooltip">Admin</span></a>
+        {% if user.role and user.role.role_name|lower in 'admin,administrator,administrador' %}
+        <li class="{% if request.resolver_match.url_name == 'admin_panel' %}active{% endif %}">
+            <a href="{% url 'admin_panel' %}"><i class="fas fa-shield-alt"></i><span class="tooltip">Administración</span></a>
         </li>
-        {% endcomment %}
+        {% endif %}
     </ul>
 </div>
