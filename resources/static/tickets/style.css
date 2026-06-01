@@ -1603,3 +1603,118 @@ body, html {
     color: var(--color-text);
     line-height: 1;
 }
+
+
+/* ============================================================
+   Modo iframe (tab caching): cuando una página se carga dentro
+   de un <iframe> de pestaña, oculta el chrome (nav + sidebar)
+   para que solo el contenido del ticket sea visible.
+   Detectado por base.html con: html.in-frame
+   ============================================================ */
+html.in-frame .sidebar-navigation,
+html.in-frame .navbar {
+    display: none !important;
+}
+html.in-frame body {
+    overflow: auto;
+}
+/* El contenido ocupa todo el espacio sin márgenes del sidebar */
+html.in-frame .ticket-form,
+html.in-frame form,
+html.in-frame .title-bar,
+html.in-frame .merge-banner {
+    margin-left: 0 !important;
+}
+
+/* Capa de iframes para tab caching.
+   top/left se calculan dinámicamente en JS (getBoundingClientRect del navbar/sidebar)
+   para que el layer quede justo debajo de la navbar y a la derecha del sidebar. */
+#tf-frame-layer {
+    /* position/top/left/right/bottom set by JS */
+    z-index: 100;
+    display: none;
+    background: var(--color-bg, #f5f6f8);
+}
+#tf-frame-layer iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: none;
+}
+#tf-frame-layer iframe.tf-frame-active {
+    display: block;
+}
+
+/* Spinner de carga mientras el iframe de pestaña termina de renderizar */
+.tf-frame-spinner {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-bg, #f5f6f8);
+    z-index: 1;
+    pointer-events: none;
+}
+.tf-frame-spinner-dot {
+    width: 36px;
+    height: 36px;
+    border: 3px solid var(--color-border, #e2e8f0);
+    border-top-color: var(--color-primary, #7c3aed);
+    border-radius: 50%;
+    animation: tf-spin 0.7s linear infinite;
+}
+@keyframes tf-spin {
+    to { transform: rotate(360deg); }
+}
+
+
+/* ============================================================
+   Workspace pane system (SPA-style tabs)
+   Each opened ticket lives as a .ticket-pane inside #workspace.
+   Inactive panes are hidden with display:none, not removed —
+   so switching back to them is instant (cached widget state).
+   ============================================================ */
+#workspace {
+    position: relative;
+    min-height: 200px;
+}
+#workspace > .ticket-pane.tf-pane-hidden {
+    display: none !important;
+}
+/* Spinner del workspace: usa position:fixed para que no dependa de la altura
+   de #workspace (que puede ser 0 mientras todos los panes están hidden). */
+.tf-pane-spinner {
+    position: fixed;
+    top: 60px;       /* debajo del navbar */
+    left: 59px;      /* a la derecha del sidebar */
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-bg, #f5f6f8);
+    z-index: 10;
+    pointer-events: none;
+}
+
+
+/* Overlay de carga al hacer click en tab / link de navegación.
+   Se queda hasta que el navegador reemplaza el DOM al cargar la página nueva.
+   Sirve como feedback visual durante los 2-3s de full-page reload. */
+#tf-nav-loading {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(245, 246, 248, 0.75);
+    backdrop-filter: blur(2px);
+    pointer-events: all;
+}
+:root[data-theme="dark"] #tf-nav-loading {
+    background: rgba(15, 23, 42, 0.75);
+}

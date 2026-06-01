@@ -1,6 +1,28 @@
 ﻿// app/static/tickets/create_ticket.js
 
-document.addEventListener('DOMContentLoaded', () => {
+// app/static/tickets/create_ticket.js
+//
+// Pane-scoped initializer: invoked once per ticket pane (either deep-link page
+// load or fragment fetch via tabs.js). Replaces the global DOMContentLoaded
+// pattern so multiple panes can coexist mounted in the DOM at once.
+//
+// Inside this function:
+//   - `rootEl` is the .ticket-pane DOM element this pane belongs to
+//   - `$root` is the jQuery-wrapped pane
+//   - `ctx`   is { ticketId, currentUserId, addCommentUrl, mergeTicketUrl, searchUrl }
+// All DOM queries for elements inside the pane are scoped to $root / rootEl.
+// References to window.ticketId have been replaced with ctx.ticketId.
+
+window.initTicketPane = function (root, ctx) {
+    const rootEl = (root && root.jquery) ? root[0] : root;
+    const $root  = (root && root.jquery) ? root   : window.jQuery(rootEl);
+    ctx = ctx || {};
+    if (ctx.ticketId == null) {
+        ctx.ticketId = rootEl ? rootEl.getAttribute('data-ticket-id') : null;
+        if (ctx.ticketId === '' || ctx.ticketId === 'null') ctx.ticketId = null;
+        if (ctx.ticketId != null) ctx.ticketId = parseInt(ctx.ticketId, 10) || ctx.ticketId;
+    }
+
     function getCookie(name) {
         let cookieValue = null;
         if (document.cookie && document.cookie !== '') {
@@ -15,18 +37,52 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return cookieValue;
     }
-    // Inicialización de Select2 para todos los selects
+    // Inicialización de Select2
+    // Los selects de usuario (solicitante, ccs) usan AJAX para evitar renderizar
+    // 6.892 <option> en el HTML — eso costaba ~4-5s de JS init por cada carga de pestaña.
+    const _userAjaxConfig = {
+        url: '/api/users/search/',
+        dataType: 'json',
+        delay: 200,
+        data: params => ({ q: params.term || '', page: params.page || 1 }),
+        processResults: data => data,
+        cache: true,
+    };
+
     const initializeSelect2 = () => {
-        $('select.select2').select2({
-            width: '100%',
-            placeholder: function () {
-                return $(this).attr('placeholder') || "Selecciona una opción";
-            },
-            allowClear: false
+        const selects = $root.find('select.select2');
+        console.debug('[initTicketPane] initializing Select2 on', selects.length, 'selects for ticket', ctx.ticketId);
+        if (!selects.length) {
+            console.warn('[initTicketPane] no select.select2 found in pane — pane structure may be broken');
+            return;
+        }
+        selects.each(function () {
+            try {
+                const isAjaxUser = $(this).data('select2Type') === 'ajax-user';
+                // Skip re-initialization if already initialized (e.g. user clicked
+                // tab very fast and we triggered init twice).
+                if ($(this).hasClass('select2-hidden-accessible')) return;
+                if (isAjaxUser) {
+                    $(this).select2({
+                        width: '100%',
+                        placeholder: '-',
+                        allowClear: true,
+                        minimumInputLength: 0,
+                        ajax: _userAjaxConfig,
+                    });
+                } else {
+                    $(this).select2({
+                        width: '100%',
+                        placeholder: $(this).attr('placeholder') || 'Selecciona una opción',
+                        allowClear: false,
+                    });
+                }
+            } catch (e) {
+                console.error('[initTicketPane] Select2 failed on', this.id || this.name, e);
+            }
         });
     };
 
-    // Inicializar Select2
     initializeSelect2();
     function middleEllipsis(filename, max = 26, filler = '…') {
         if (!filename) return '';
@@ -46,17 +102,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // ---- Adjuntos: subir y preparar para el comentario ----
     window.pendingAttachmentIds = [];
 
-    const attachBtn = document.getElementById('attach-btn');
-    const attachInput = document.getElementById('attach-input');
-    const pendingBox = document.getElementById('pending-attachments');
-    const composerArea = document.getElementById('messageInputArea');
-    const composerTextarea = document.getElementById('new-message');
+    const attachBtn = rootEl.querySelector('#attach-btn');
+    const attachInput = rootEl.querySelector('#attach-input');
+    const pendingBox = rootEl.querySelector('#pending-attachments');
+    const composerArea = rootEl.querySelector('#messageInputArea');
+    const composerTextarea = rootEl.querySelector('#new-message');
 
     function isImageType(t) { return t && t.startsWith('image/'); }
 
     async function uploadFiles(files) {
         if (!files || !files.length) return;
-        if (!window.ticketId) {
+        if (!ctx.ticketId) {
             window.toast.warning('Guarda el ticket antes de adjuntar archivos.');
             return;
         }
@@ -64,7 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const fd = new FormData();
             fd.append('file', file);
             try {
-                const res = await fetch(`/tickets/${window.ticketId}/attachments/upload/`, {
+                const res = await fetch(`/tickets/${ctx.ticketId}/attachments/upload/`, {
                     method: 'POST',
                     headers: { 'X-CSRFToken': getCookie('csrftoken') }, // NO pongas Content-Type aquí
                     body: fd
@@ -101,7 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (attachBtn && attachInput) {
         attachBtn.addEventListener('click', () => {
-            if (!window.ticketId) {
+            if (!ctx.ticketId) {
                 window.toast.warning('Guarda el ticket antes de adjuntar archivos.');
                 return;
             }
@@ -163,9 +219,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // ---- Desplegable Público/Interno ----
-    const isPublicInput = document.getElementById('is_public_input');
-    const visBtn = document.getElementById('visBtn');
-    const visMenu = document.getElementById('visMenu');
+    const isPublicInput = rootEl.querySelector('#is_public_input');
+    const visBtn = rootEl.querySelector('#visBtn');
+    const visMenu = rootEl.querySelector('#visMenu');
 
     function setVisibility(publicVal) {
         const isPub = publicVal === true || publicVal === 'true';
@@ -223,22 +279,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const sendMessage = async (ev) => {
         if (ev) { ev.preventDefault(); ev.stopPropagation(); }
 
-        const textarea = document.getElementById('new-message');
+        const textarea = rootEl.querySelector('#new-message');
         const content = (textarea?.value || '').trim();
 
         // Si aún no existe id real, validar como en "Publicar"
-        if (!window.ticketId) {
+        if (!ctx.ticketId) {
             const errors = [];
-            const brand = (document.getElementById('empresa')?.value || '').trim();
-            const subject = (document.getElementById('subject')?.value || '').trim();
+            const brand = (rootEl.querySelector('#empresa')?.value || '').trim();
+            const subject = (rootEl.querySelector('#subject')?.value || '').trim();
             if (!brand) errors.push('Please provide a ticket brand');
             if (!content) errors.push('Please provide a ticket description');
             if (!subject) errors.push('Please provide a ticket subject');
             if (errors.length) { errors.forEach(e => window.toast.warning(e)); return; }
 
             // Inyecta status y crea/redirige
-            const ticketForm = document.getElementById('ticket-form');
-            const selectedStatus = document.getElementById('selected-status')?.textContent?.trim() || '';
+            const ticketForm = rootEl.querySelector('#ticket-form');
+            const selectedStatus = rootEl.querySelector('#selected-status')?.textContent?.trim() || '';
             let statusInput = ticketForm.querySelector('input[name="status"]');
             if (!statusInput) {
                 statusInput = document.createElement('input');
@@ -264,7 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.pendingAttachmentIds?.length) payload.attachment_ids = window.pendingAttachmentIds;
 
         try {
-            const response = await fetch(`/tickets/${window.ticketId}/add_comment/`, {
+            const response = await fetch(`/tickets/${ctx.ticketId}/add_comment/`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -280,7 +336,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            const messagesBox = document.getElementById('messagesBox');
+            const messagesBox = rootEl.querySelector('#messagesBox');
             const newComment = document.createElement('div');
             const isMe = Number(data.user_id) === Number(window.currentUserId);
             newComment.className = 'message' + (isMe ? ' me' : '') + (data.is_public ? '' : ' internal');
@@ -375,10 +431,10 @@ document.addEventListener('DOMContentLoaded', () => {
     async function publishComment(ev) {
         if (ev) { ev.preventDefault(); ev.stopPropagation(); }
 
-        if (!window.ticketId) {
+        if (!ctx.ticketId) {
             // Reutiliza tu flujo de creación
-            const ticketForm = document.getElementById('ticket-form');
-            const selectedStatus = document.getElementById('selected-status')?.textContent?.trim() || 'open';
+            const ticketForm = rootEl.querySelector('#ticket-form');
+            const selectedStatus = rootEl.querySelector('#selected-status')?.textContent?.trim() || 'open';
             let statusInput = ticketForm.querySelector('input[name="status"]');
             if (!statusInput) {
                 statusInput = document.createElement('input');
@@ -391,12 +447,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const textarea = document.getElementById('new-message');
+        const textarea = rootEl.querySelector('#new-message');
         const content = (textarea?.value || '').trim();
         if (!content) { window.toast.warning('El contenido no puede estar vacío.'); return; }
 
         const isPublic = (typeof isPublicInput !== 'undefined') ? (isPublicInput.value === 'true') : true;
-        const newStatus = (document.getElementById('selected-status')?.textContent || 'open').trim().toLowerCase();
+        const newStatus = (rootEl.querySelector('#selected-status')?.textContent || 'open').trim().toLowerCase();
 
         const payload = { content, is_public: isPublic, new_status: newStatus };
         const _html2 = window.QuillComposer?.getHtml?.();
@@ -404,7 +460,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.pendingAttachmentIds?.length) payload.attachment_ids = window.pendingAttachmentIds;
 
         try {
-            const response = await fetch(`/tickets/${window.ticketId}/add_comment/`, {
+            const response = await fetch(`/tickets/${ctx.ticketId}/add_comment/`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
                 body: JSON.stringify(payload)
@@ -413,7 +469,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) { window.toast.error(data.error || 'No se pudo publicar.'); return; }
 
             // Pinta el nuevo comentario (idéntico a sendMessage)
-            const messagesBox = document.getElementById('messagesBox');
+            const messagesBox = rootEl.querySelector('#messagesBox');
             const newComment = document.createElement('div');
             const isMe = Number(data.user_id) === Number(window.currentUserId);
             newComment.className = 'message' + (isMe ? ' me' : '') + (data.is_public ? '' : ' internal');
@@ -493,7 +549,7 @@ document.addEventListener('DOMContentLoaded', () => {
             messagesBox.scrollTop = messagesBox.scrollHeight;
 
             // Actualiza el estado en la UI (span del footer y, si tienes, badge/campo de estado)
-            const statusSpan = document.getElementById('selected-status');
+            const statusSpan = rootEl.querySelector('#selected-status');
             if (statusSpan && data.new_status) statusSpan.textContent = data.new_status;
 
             // Limpia composer
@@ -508,19 +564,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 
-    const sendMessageButton = document.getElementById('send-message-btn');
+    const sendMessageButton = rootEl.querySelector('#send-message-btn');
     if (sendMessageButton) {
         sendMessageButton.addEventListener('click', sendMessage);
     }
 
-    const ticketForm = document.getElementById('ticket-form');
+    const ticketForm = rootEl.querySelector('#ticket-form');
     if (ticketForm) {
         ticketForm.addEventListener('submit', (e) => {
             // Solo bloqueamos el submit automático en tickets NUEVOS si faltan datos
-            if (!window.ticketId) {
-                const brand = (document.getElementById('empresa')?.value || '').trim();
-                const subject = (document.getElementById('subject')?.value || '').trim();
-                const description = (document.getElementById('new-message')?.value || '').trim();
+            if (!ctx.ticketId) {
+                const brand = (rootEl.querySelector('#empresa')?.value || '').trim();
+                const subject = (rootEl.querySelector('#subject')?.value || '').trim();
+                const description = (rootEl.querySelector('#new-message')?.value || '').trim();
 
                 const errors = [];
                 if (!brand) errors.push('Please provide a ticket brand');
@@ -538,11 +594,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Manejo del Dropdown de Estado
     const manageStatusDropdown = () => {
-        const publishButton = document.getElementById('publish-button');
-        const dropdownButton = document.getElementById('dropdown-button');
-        const dropdownContent = document.getElementById('dropdown-content');
-        const selectedStatus = document.getElementById('selected-status');
-        const ticketForm = document.getElementById('ticket-form');
+        const publishButton = rootEl.querySelector('#publish-button');
+        const dropdownButton = rootEl.querySelector('#dropdown-button');
+        const dropdownContent = rootEl.querySelector('#dropdown-content');
+        const selectedStatus = rootEl.querySelector('#selected-status');
+        const ticketForm = rootEl.querySelector('#ticket-form');
 
         if (selectedStatus && dropdownContent) {
             const current = selectedStatus.textContent.trim().toLowerCase();
@@ -575,22 +631,22 @@ document.addEventListener('DOMContentLoaded', () => {
         publishButton.addEventListener('click', (event) => {
             event.preventDefault();
             // Si hay ticketId → publicar vía AJAX con cambio de estado
-            if (window.ticketId) {
+            if (ctx.ticketId) {
                 publishComment(event);
                 return;
             }
 
             // Ticket nuevo → validación + submit (tu flujo actual)
             const errors = [];
-            const brand = (document.getElementById('empresa')?.value || '').trim();
-            const subject = (document.getElementById('subject')?.value || '').trim();
-            const description = (document.getElementById('new-message')?.value || '').trim();
+            const brand = (rootEl.querySelector('#empresa')?.value || '').trim();
+            const subject = (rootEl.querySelector('#subject')?.value || '').trim();
+            const description = (rootEl.querySelector('#new-message')?.value || '').trim();
             if (!brand) errors.push('Please provide a ticket brand');
             if (!description) errors.push('Please provide a ticket description');
             if (!subject) errors.push('Please provide a ticket subject');
             if (errors.length) { errors.forEach(err => window.toast.warning(err)); return; }
 
-            const selectedStatus = document.getElementById('selected-status').textContent.trim();
+            const selectedStatus = rootEl.querySelector('#selected-status').textContent.trim();
             let statusInput = ticketForm.querySelector('input[name="status"]');
             if (!statusInput) {
                 statusInput = document.createElement('input');
@@ -607,7 +663,7 @@ document.addEventListener('DOMContentLoaded', () => {
     manageStatusDropdown();
 
     // Manejo de Creación de Etiquetas en Select2
-    $('#tags').select2({
+    $root.find('#tags').select2({
         width: '100%',
         tags: true,
         tokenSeparators: [','],
@@ -638,7 +694,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const isValidTag = /^[a-zA-Z0-9]+$/.test(newTag);
             if (newTag && isValidTag) {
                 let exists = false;
-                $('#tags option').each(function () {
+                $root.find('#tags option').each(function () {
                     if ($(this).val() === newTag) {
                         exists = true;
                         return false;
@@ -647,13 +703,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (!exists) {
                     const newOption = new Option(newTag, newTag, true, true);
-                    $('#tags').append(newOption).trigger('change');
+                    $root.find('#tags').append(newOption).trigger('change');
                 }
 
-                $('#tags').find('option[value="create_new_tag"]').remove();
+                $root.find('#tags').find('option[value="create_new_tag"]').remove();
             } else {
                 window.toast.warning('El tag solo puede contener letras y números, sin espacios en blanco.');
-                $('#tags').find('option[value="create_new_tag"]').remove();
+                $root.find('#tags').find('option[value="create_new_tag"]').remove();
             }
         }
     });
@@ -664,7 +720,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveFormData = () => {
         if (!ticketId) return;
         const formData = {};
-        $('select.select2').each(function () {
+        $root.find('select.select2').each(function () {
+            if ($(this).data('select2Type') === 'ajax-user') return; // la API repopula estos
             formData[this.id] = $(this).val();
         });
         localStorage.setItem(`ticketFormData_${ticketId}`, JSON.stringify(formData));
@@ -674,7 +731,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!ticketId) return;
         const formData = JSON.parse(localStorage.getItem(`ticketFormData_${ticketId}`));
         if (formData) {
-            $('select.select2').each(function () {
+            $root.find('select.select2').each(function () {
+                if ($(this).data('select2Type') === 'ajax-user') return; // la API repopula estos
                 if (formData[this.id]) {
                     $(this).val(formData[this.id]).trigger('change');
                 }
@@ -682,7 +740,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    $('select.select2').on('change', saveFormData);
+    $root.find('select.select2').on('change', saveFormData);
     loadFormData();
 
     // Cargar Información del Ticket si Existe
@@ -690,29 +748,47 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch(`/api/tickets/${ticketId}/`)
             .then(response => response.json())
             .then(data => {
-                $('#empresa').val(data.empresa || '').trigger('change');
-                $('#solicitante').val(data.solicitante).trigger('change');
-                $('#asignado').val(data.asignado || '').trigger('change');
-                $('#grupo').val(data.grupo || '').trigger('change');
-                $('#ccs').val(data.ccs).trigger('change');
-                $('#tags').val(data.tags).trigger('change');
-                $('#tipo').val(data.tipo).trigger('change');
-                $('#prioridad').val(data.prioridad || '').trigger('change');
-                $('#servicio').val(data.servicio).trigger('change');
-                $('#canal').val(data.canal).trigger('change');
-                $('#idioma').val(data.idioma).trigger('change');
-                $('#categoria').val(data.categoria).trigger('change');
-                $('#security_related').prop('checked', !!data.security_related);
-                $('#monitoring').prop('checked', !!data.monitoring);
-                $('#approval_status').val(data.approval_status || '');
-                $('#subject').val(data.subject);
-                
+                $root.find('#empresa').val(data.empresa || '').trigger('change');
+                $root.find('#asignado').val(data.asignado || '').trigger('change');
+                $root.find('#grupo').val(data.grupo || '').trigger('change');
+                $root.find('#tags').val(data.tags).trigger('change');
+                $root.find('#tipo').val(data.tipo).trigger('change');
+                $root.find('#prioridad').val(data.prioridad || '').trigger('change');
+                $root.find('#servicio').val(data.servicio).trigger('change');
+                $root.find('#canal').val(data.canal).trigger('change');
+                $root.find('#idioma').val(data.idioma).trigger('change');
+                $root.find('#categoria').val(data.categoria).trigger('change');
+                $root.find('#security_related').prop('checked', !!data.security_related);
+                $root.find('#monitoring').prop('checked', !!data.monitoring);
+                $root.find('#approval_status').val(data.approval_status || '');
+                $root.find('#subject').val(data.subject);
+
+                // Selects AJAX: añadir la opción inicial programáticamente porque no hay
+                // <option> pre-renderizadas. El template ya incluye la opción inicial si
+                // el ticket tiene requester/ccs, pero la API puede corregirlos si difieren.
+                if (data.solicitante) {
+                    const $sel = $root.find('#solicitante');
+                    if (!$sel.find(`option[value="${data.solicitante}"]`).length) {
+                        $sel.append(new Option(data.solicitante_name || data.solicitante, data.solicitante, true, true));
+                    }
+                    $sel.val(data.solicitante).trigger('change');
+                }
+                if (data.ccs && data.ccs.length) {
+                    const $ccs = $root.find('#ccs');
+                    $ccs.find('option').remove();
+                    data.ccs.forEach(cc => {
+                        const id = cc.id !== undefined ? cc.id : cc;
+                        const name = cc.name || id;
+                        $ccs.append(new Option(name, id, true, true));
+                    });
+                    $ccs.trigger('change');
+                }
             })
             .catch(error => console.error('Error al cargar el ticket:', error));
     }
 
     // ---- Scroll al último comentario ----
-    const messagesBox = document.getElementById('messagesBox');
+    const messagesBox = rootEl.querySelector('#messagesBox');
     if (messagesBox) messagesBox.scrollTop = messagesBox.scrollHeight;
 
     // ---- Avatares: color por nombre ----
@@ -726,18 +802,18 @@ document.addEventListener('DOMContentLoaded', () => {
         return palette[Math.abs(hash) % palette.length];
     }
 
-    document.querySelectorAll('.msg-avatar').forEach(el => {
+    rootEl.querySelectorAll('.msg-avatar').forEach(el => {
         const authorName = el.closest('.message')?.querySelector('.msg-author')?.textContent.trim() || '?';
         el.style.background = avatarColor(authorName);
     });
 
     // Avatar del side panel del solicitante (gris neutro fijo, sin color por nombre)
-    document.querySelectorAll('.rq-avatar-initials').forEach(el => {
+    rootEl.querySelectorAll('.rq-avatar-initials').forEach(el => {
         el.style.background = '#8a9ba8';
     });
 
     // Auto-guardar notas del solicitante al perder el foco
-    document.querySelectorAll('.rq-notes-input').forEach(textarea => {
+    rootEl.querySelectorAll('.rq-notes-input').forEach(textarea => {
         let original = textarea.value;
         textarea.addEventListener('blur', () => {
             if (textarea.value === original) return;
@@ -756,7 +832,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ---- Blockquotes colapsables ----
-    document.querySelectorAll('.msg-body').forEach(body => {
+    rootEl.querySelectorAll('.msg-body').forEach(body => {
         const quotes = body.querySelectorAll('blockquote');
         if (!quotes.length) return;
         quotes.forEach(q => {
@@ -775,11 +851,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ---- Macros panel ----
-    const macroBtn    = document.getElementById('macro-btn');
-    const macroPanel  = document.getElementById('macro-panel');
-    const macroList   = document.getElementById('macro-list');
-    const macroSearch = document.getElementById('macro-search');
-    const macroCaret  = document.getElementById('macro-caret');
+    const macroBtn    = rootEl.querySelector('#macro-btn');
+    const macroPanel  = rootEl.querySelector('#macro-panel');
+    const macroList   = rootEl.querySelector('#macro-list');
+    const macroSearch = rootEl.querySelector('#macro-search');
+    const macroCaret  = rootEl.querySelector('#macro-caret');
 
     if (macroBtn && macroPanel) {
         let macrosCache = null;
@@ -805,23 +881,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Status
             if (a.status) {
-                const statusSpan = document.getElementById('selected-status');
+                const statusSpan = rootEl.querySelector('#selected-status');
                 if (statusSpan) statusSpan.textContent = a.status;
             }
 
             // Priority
             if (a.priority && typeof $ !== 'undefined') {
-                $('#prioridad').val(a.priority).trigger('change');
+                $root.find('#prioridad').val(a.priority).trigger('change');
             }
 
             // Assignee
             if (a.assignee_id != null && typeof $ !== 'undefined') {
-                $('#asignado').val(String(a.assignee_id)).trigger('change');
+                $root.find('#asignado').val(String(a.assignee_id)).trigger('change');
             }
 
             // Canned comment
             if (a.comment) {
-                const ta = document.getElementById('new-message');
+                const ta = rootEl.querySelector('#new-message');
                 if (ta) { ta.value = a.comment; ta.focus(); }
             }
 
@@ -934,7 +1010,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tlHideTimer = setTimeout(() => tlPopup.classList.remove('visible'), 150);
     }
 
-    document.querySelectorAll('.tl-item').forEach(item => {
+    rootEl.querySelectorAll('.tl-item').forEach(item => {
         item.addEventListener('mouseenter', () => showTlPopup(item));
         item.addEventListener('mouseleave', hideTlPopup);
     });
@@ -947,10 +1023,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ===== Ajuste dinámico de altura del layout =====
     function fitLayout() {
-        const layout = document.getElementById('ticketLayout');
+        const layout = rootEl.querySelector('#ticketLayout');
         if (!layout) return;
         const top     = layout.getBoundingClientRect().top;
-        const footer  = document.querySelector('.footer-bar');
+        const footer  = rootEl.querySelector('.footer-bar');
         const footerH = footer ? footer.offsetHeight : 44;
         const h = Math.max(200, window.innerHeight - top - footerH);
         layout.style.height = h + 'px';
@@ -960,19 +1036,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ===== Panel collapse + resize =====
     (function initPanels() {
-        const layout    = document.getElementById('ticketLayout');
+        const layout    = rootEl.querySelector('#ticketLayout');
         if (!layout) return;
 
-        const panelLeft  = document.getElementById('panelLeft');
-        const panelRight = document.getElementById('panelRight');
-        const toggleLeft  = document.getElementById('toggleLeft');
-        const toggleRight = document.getElementById('toggleRight');
-        const iconLeft    = document.getElementById('iconLeft');
-        const iconRight   = document.getElementById('iconRight');
-        const labelLeft   = document.getElementById('labelLeft');
-        const labelRight  = document.getElementById('labelRight');
-        const resizerLeft  = document.getElementById('resizerLeft');
-        const resizerRight = document.getElementById('resizerRight');
+        const panelLeft  = rootEl.querySelector('#panelLeft');
+        const panelRight = rootEl.querySelector('#panelRight');
+        const toggleLeft  = rootEl.querySelector('#toggleLeft');
+        const toggleRight = rootEl.querySelector('#toggleRight');
+        const iconLeft    = rootEl.querySelector('#iconLeft');
+        const iconRight   = rootEl.querySelector('#iconRight');
+        const labelLeft   = rootEl.querySelector('#labelLeft');
+        const labelRight  = rootEl.querySelector('#labelRight');
+        const resizerLeft  = rootEl.querySelector('#resizerLeft');
+        const resizerRight = rootEl.querySelector('#resizerRight');
 
         const LS_KEY = 'tf_panel_state';
 
@@ -1078,11 +1154,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // ---- Compose area vertical resize ----
-        const composeResizer = document.getElementById('composeResizer');
-        const column2 = document.querySelector('.column2');
+        const composeResizer = rootEl.querySelector('#composeResizer');
+        const column2 = rootEl.querySelector('.column2');
         if (composeResizer && column2) {
             let startY, startH;
-            const measureEl = document.getElementById('quill-editor') || document.getElementById('new-message');
+            const measureEl = rootEl.querySelector('#quill-editor') || rootEl.querySelector('#new-message');
             const MIN_H = 80, MAX_H = 500;
 
             composeResizer.addEventListener('mousedown', e => {
@@ -1126,7 +1202,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateRelativeTimestamps() {
-        document.querySelectorAll('[data-ts]').forEach(el => {
+        rootEl.querySelectorAll('[data-ts]').forEach(el => {
             const rel = timeAgo(el.dataset.ts);
             if (rel) el.textContent = rel;
         });
@@ -1136,7 +1212,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(updateRelativeTimestamps, 60000);
 
     // ---- Botón Take it ----
-    const takeItBtn = document.getElementById('take-it-btn');
+    const takeItBtn = rootEl.querySelector('#take-it-btn');
     if (takeItBtn) {
         takeItBtn.addEventListener('click', async () => {
             const ticketId = takeItBtn.dataset.ticketId;
@@ -1148,7 +1224,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 const data = await resp.json();
                 if (data.success) {
-                    const sel = document.getElementById('asignado');
+                    const sel = rootEl.querySelector('#asignado');
                     if (sel) {
                         if (!sel.querySelector(`option[value="${data.assignee_id}"]`)) {
                             const opt = new Option(data.assignee_name, data.assignee_id, true, true);
@@ -1168,16 +1244,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ---- Merge de tickets ----
-    const mergeBtn = document.getElementById('merge-btn');
-    const mergeModal = document.getElementById('merge-modal');
-    const mergeModalClose = document.getElementById('merge-modal-close');
-    const mergeCancelBtn = document.getElementById('merge-cancel-btn');
-    const mergeConfirmBtn = document.getElementById('merge-confirm-btn');
-    const mergeSearchInput = document.getElementById('merge-search-input');
-    const mergeSearchResults = document.getElementById('merge-search-results');
-    const mergeSelected = document.getElementById('merge-selected');
-    const mergeSelectedLabel = document.getElementById('merge-selected-label');
-    const mergeTargetId = document.getElementById('merge-target-id');
+    const mergeBtn = rootEl.querySelector('#merge-btn');
+    const mergeModal = rootEl.querySelector('#merge-modal');
+    const mergeModalClose = rootEl.querySelector('#merge-modal-close');
+    const mergeCancelBtn = rootEl.querySelector('#merge-cancel-btn');
+    const mergeConfirmBtn = rootEl.querySelector('#merge-confirm-btn');
+    const mergeSearchInput = rootEl.querySelector('#merge-search-input');
+    const mergeSearchResults = rootEl.querySelector('#merge-search-results');
+    const mergeSelected = rootEl.querySelector('#merge-selected');
+    const mergeSelectedLabel = rootEl.querySelector('#merge-selected-label');
+    const mergeTargetId = rootEl.querySelector('#merge-target-id');
 
     if (mergeBtn && mergeModal) {
         let searchTimer = null;
@@ -1209,7 +1285,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const res = await fetch(`${window.urls.search}?q=${encodeURIComponent(q)}`);
                 const data = await res.json();
                 mergeSearchResults.innerHTML = '';
-                const tickets = (data.tickets || []).filter(t => t.id !== window.ticketId);
+                const tickets = (data.tickets || []).filter(t => t.id !== ctx.ticketId);
                 if (!tickets.length) {
                     mergeSearchResults.innerHTML = '<li class="merge-result-empty">Sin resultados</li>';
                     return;
@@ -1262,4 +1338,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+
+};
+
+// Auto-bootstrap for the deep-link page load (legacy path).
+// When the user navigates to /tickets/create/?id=N directly, Django renders
+// create_ticket.html which includes _ticket_pane.html inside #workspace. We
+// detect that single pre-rendered pane on DOMContentLoaded and init it.
+document.addEventListener('DOMContentLoaded', () => {
+    const pane = document.querySelector('#workspace > .ticket-pane');
+    if (!pane) return;
+    if (pane.dataset.tfInitialized === '1') return;
+    pane.dataset.tfInitialized = '1';
+    const tid = pane.getAttribute('data-ticket-id');
+    const parsedTid = tid && tid !== 'null' ? (parseInt(tid, 10) || tid) : null;
+    window.initTicketPane(window.jQuery ? window.jQuery(pane) : pane, {
+        ticketId: parsedTid,
+        currentUserId: window.currentUserId,
+        addCommentUrl: parsedTid ? ('/tickets/' + parsedTid + '/add_comment/') : null,
+        mergeTicketUrl: parsedTid ? ('/tickets/' + parsedTid + '/merge/') : null,
+        searchUrl: '/search/',
+    });
 });

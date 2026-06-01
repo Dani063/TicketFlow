@@ -4,6 +4,7 @@
 <head>
     <meta charset="utf-8">
     <title>{% block title %}TicketFlow{% endblock %}</title>
+    <link rel="icon" type="image/png" href="{% static 'tickets/logo.png' %}">
 
     {# Apply theme as early as possible to avoid FOUC #}
     <script>
@@ -23,10 +24,19 @@
 
     {# Bump ?v= on each Sprint deploy to bust browser cache on legacy clients. #}
     <!-- CSS globales -->
-    <link rel="stylesheet" href="{% static 'tickets/style.css' %}?v=s3.3">
-    <link rel="stylesheet" href="{% static 'tickets/toast.css' %}?v=s3.3">
-    <link rel="stylesheet" href="{% static 'tickets/dialog.css' %}?v=s3.3">
+    <link rel="stylesheet" href="{% static 'tickets/style.css' %}?v=s4.0">
+    <link rel="stylesheet" href="{% static 'tickets/toast.css' %}?v=s4.0">
+    <link rel="stylesheet" href="{% static 'tickets/dialog.css' %}?v=s4.0">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <!-- Select2 and Quill loaded globally so ticket panes can mount without re-parsing libraries. -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/css/select2.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css">
+    <!-- create_ticket.css loaded globally so ticket panes are styled even when
+         the user navigates to a non-ticket page first (e.g. Home → ticket). -->
+    <link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s4.0">
+    <!-- home.css is the shared sidebar-page stylesheet; load globally so
+         SPA fragment swaps don't lose styling. -->
+    <link rel="stylesheet" href="{% static 'tickets/home.css' %}?v=s4.0">
 
     {% block extra_css %}{% endblock %}
 </head>
@@ -36,7 +46,9 @@
     {% include 'partials/navbar.html' %}
     {% include 'partials/popups.html' %}
 
-    {% block content %}{% endblock %}
+    <!-- SPA shell: two sibling containers, only one visible at a time. -->
+    <div id="app-content">{% block content %}{% endblock %}</div>
+    <div id="workspace" hidden>{% block ticket_workspace %}{% endblock %}</div>
 
     <!-- JS globales (centralizados) -->
     <script>
@@ -64,11 +76,23 @@
     };
     window.static_urls = { logo: "{% static 'tickets/logo.png' %}" };
     window.currentUserId = {{ request.user.id|default:'null' }};
+    // Enable SPA-style fragment tab switching. Set to false in console to fall
+    // back to full-page navigation if needed.
+    window.TF_USE_PANES = true;
     </script>
-    <script src="{% static 'tickets/toast.js' %}?v=s3.3"></script>
-    <script src="{% static 'tickets/dialog.js' %}?v=s3.3"></script>
-    <script src="{% static 'tickets/tabs.js' %}?v=s3.3"></script>
-    <script src="{% static 'tickets/theme.js' %}?v=s3.3"></script>
+    <!-- Core libs loaded once globally so ticket panes can be swapped in-place. -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+    <script src="{% static 'tickets/quill-composer.js' %}?v=s4.0"></script>
+
+    <script src="{% static 'tickets/toast.js' %}?v=s4.0"></script>
+    <script src="{% static 'tickets/dialog.js' %}?v=s4.0"></script>
+    <script src="{% static 'tickets/tabs.js' %}?v=s4.0"></script>
+    <script src="{% static 'tickets/theme.js' %}?v=s4.0"></script>
+    <!-- create_ticket.js loaded globally so initTicketPane is available even
+         when the user navigates Home → ticket via SPA (no full page reload). -->
+    <script src="{% static 'tickets/create_ticket.js' %}?v=s4.0"></script>
 
     {% block extra_js %}{% endblock %}
 </body>

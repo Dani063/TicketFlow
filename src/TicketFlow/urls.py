@@ -26,6 +26,7 @@ urlpatterns = [
     path('api/tickets/<int:ticket_id>/', views.ticket_detail_api, name='ticket_detail_api'),
     path("tickets/filter/", views.filter_tickets, name="filter_tickets"),
     path('api/tags/', views.tags_api, name='tags_api'),
+    path('api/users/search/', views.users_search_api, name='users_search_api'),
     path('tickets/<int:ticket_id>/attachments/upload/', views.upload_attachment, name='upload_attachment'),
 
     path("customers/filter/", views.filter_customers, name="filter_customers"),

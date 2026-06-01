@@ -1,0 +1,505 @@
+{% load static %}
+{# Ticket pane partial: rendered standalone when ?fragment=1, or included in create_ticket.html for deep-link page loads. #}
+<div class="ticket-pane" data-ticket-id="{{ ticket.id|default:'' }}">
+{% if ticket and ticket.merged_into %}
+<div class="merge-banner">
+    <i class="fas fa-code-branch"></i>
+    Este ticket fue fusionado en
+    <a href="{% url 'create_ticket' %}?id={{ ticket.merged_into.id }}">
+        #{{ ticket.merged_into.zendesk_id|default:ticket.merged_into.id }} — {{ ticket.merged_into.subject }}
+    </a>
+</div>
+{% endif %}
+<div class="title-bar">
+    <h1>{% if ticket %}{{ ticket.subject }}{% else %}Nuevo ticket{% endif %}</h1>
+    {% if ticket %}
+    <span class="ticket-status-badge status-badge-{{ ticket.status }}">{{ ticket.get_status_display }}</span>
+    {% if ticket.zendesk_id %}<span class="ticket-zd-id">#{{ ticket.zendesk_id }}</span>{% endif %}
+    <span class="ticket-meta-dates">
+        <span title="Creado">Creado: <strong>{{ ticket.created_at|date:"d/m/Y H:i" }}</strong></span>
+        <span class="meta-sep">·</span>
+        <span title="Última actualización">Actualizado: <strong>{{ ticket.updated_at|date:"d/m/Y H:i" }}</strong></span>
+    </span>
+    {% if can_use_internal and ticket.assignee_id != current_user_id %}
+    <button type="button" id="take-it-btn" class="take-it-btn" data-ticket-id="{{ ticket.id }}">
+        <i class="fas fa-hand-point-right"></i> Asignarme
+    </button>
+    {% endif %}
+    {% if can_use_internal and not ticket.merged_into %}
+    <button type="button" id="merge-btn" class="merge-btn" data-ticket-id="{{ ticket.id }}">
+        <i class="fas fa-code-branch"></i> Fusionar
+    </button>
+    {% endif %}
+    {% endif %}
+    {% if ticket_satisfaction %}
+    <span class="sat-badge sat-{{ ticket_satisfaction.score }}" {% if ticket_satisfaction.comment %}title="{{ ticket_satisfaction.comment|escapejs }}"{% endif %}>
+        <i class="fas {% if ticket_satisfaction.score == 'good' %}fa-thumbs-up{% else %}fa-thumbs-down{% endif %}"></i>
+        {% if ticket_satisfaction.score == 'good' %}Buena valoración{% else %}Mala valoración{% endif %}
+    </span>
+    {% endif %}
+</div>
+
+<form id="ticket-form" method="post"
+      action="{% url 'create_ticket' %}{% if ticket %}?id={{ ticket.id }}{% elif request.GET.id %}?id={{ request.GET.id }}{% endif %}">
+    {% csrf_token %}
+    <div class="ticket-form" id="ticketLayout">
+        <div class="column" id="panelLeft">
+            <button type="button" class="panel-tab" id="toggleLeft">
+                <span class="panel-tab-label" id="labelLeft">Ocultar panel</span>
+                <span class="panel-tab-arrow"><i class="fas fa-chevron-left" id="iconLeft"></i></span>
+            </button>
+            <div class="panel-inner" id="panelLeftInner">
+            <!-- Campos del Formulario -->
+            <div class="form-group">
+                <label for="empresa">Empresa</label>
+                <select id="empresa" name="empresa" class="select2">
+                    <option value="" selected>-</option>
+                    {% for brand in empresas %}
+                    <option value="{{ brand }}">{{ brand }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="solicitante">Solicitante</label>
+                <select id="solicitante" name="solicitante" class="select2" data-select2-type="ajax-user">
+                    <option value="" disabled selected>-</option>
+                    {% if ticket and ticket.requester %}
+                    <option value="{{ ticket.requester.id }}" selected>{{ ticket.requester.name }}</option>
+                    {% endif %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="asignado">Asignado</label>
+                <select id="asignado" name="asignado" class="select2">
+                    <option value="" selected>-</option>
+                    {% for user in agentes %}
+                    <option value="{{ user.id }}">{{ user.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="grupo">Grupo</label>
+                <select id="grupo" name="grupo" class="select2">
+                    <option value="" selected>-</option>
+                    {% for g in grupos %}
+                    <option value="{{ g.id }}">{{ g.group_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="ccs">CCs</label>
+                <select id="ccs" name="ccs" class="select2" multiple data-select2-type="ajax-user">
+                    {% if ticket %}
+                    {% for u in ticket.ccs.all %}
+                    <option value="{{ u.id }}" selected>{{ u.name }}</option>
+                    {% endfor %}
+                    {% endif %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="tags">Etiquetas</label>
+                <select id="tags" name="tags" class="select2" multiple>
+                    {% for tag in tags %}
+                    <option value="{{ tag.id }}">{{ tag.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="tipo">Tipo</label>
+                    <select id="tipo" name="tipo" class="select2">
+                        <option value="" selected>-</option>
+                        <option value="incidencia">Incidencia</option>
+                        <option value="consulta">Consulta</option>
+                        <option value="mejora">Problema</option>
+                        <option value="tarea">Tarea</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="prioridad">Prioridad</label>
+                    <select id="prioridad" name="prioridad" class="select2">
+                        <option value="" selected>-</option>
+                        <option value="low">Baja</option>
+                        <option value="normal">Media</option>
+                        <option value="high">Alta</option>
+                        <option value="urgent">Urgente</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="servicio">Servicio</label>
+                <select id="servicio" name="servicio" class="select2">
+                    <option value="" selected>-</option>
+                    <option value="ecomfax">EcomFax</option>
+                    <option value="ecomfaxpro">EcomFaxPro</option>
+                    <option value="recordia">Recordia</option>
+                    <option value="aplicateca">Aplicateca</option>
+                    <option value="audiolog">Audiolog</option>
+                    <option value="cisco_telefonia">Cisco Telefonia</option>
+                    <option value="rightfax">Rightfax</option>
+                    <option value="internocomuny">InternoComuny</option>
+                    <option value="rts">RTS</option>
+                    <option value="otros">Otros</option>
+                    <option value="cognitia">Cognitia</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="canal">Canal</label>
+                <select id="canal" name="canal" class="select2">
+                    <option value="" selected>-</option>
+                    <option value="email">Email</option>
+                    <option value="telefono">Teléfono</option>
+                    <option value="web">Web</option>
+                    <option value="api">API</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="due_at">Fecha límite</label>
+                <input type="datetime-local" id="due_at" name="due_at" class="form-control-input"
+                       {% if ticket and ticket.due_at %}value="{{ ticket.due_at|date:'Y-m-d' }}T{{ ticket.due_at|date:'H:i' }}"{% endif %}>
+            </div>
+            <div class="form-group">
+                <label for="idioma">Idioma</label>
+                <select id="idioma" name="idioma" class="select2">
+                    <option value="" selected>-</option>
+                    <option value="es">Español</option>
+                    <option value="en">Inglés</option>
+                    <option value="español">Español (Zendesk)</option>
+                    <option value="inglés">Inglés (Zendesk)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="categoria">Categoría</label>
+                <select id="categoria" name="categoria" class="select2">
+                    <option value="" selected>-</option>
+                    <option value="communication">Communication</option>
+                    <option value="hardware">Hardware</option>
+                    <option value="base_software">Base software</option>
+                    <option value="app_functionality">App Functionality</option>
+                    <option value="database">Database</option>
+                    <option value="api">App Program Interface (API)</option>
+                    <option value="webservice">WebService</option>
+                    <option value="configuration">Configuration</option>
+                    <option value="others">Others</option>
+                    <option value="information">Information</option>
+                </select>
+            </div>
+            <div class="form-group form-checkbox">
+                <label><input type="checkbox" id="security_related" name="security_related" value="1"> Security related</label>
+            </div>
+            <div class="form-group form-checkbox">
+                <label><input type="checkbox" id="monitoring" name="monitoring" value="1"> Monitoring</label>
+            </div>
+            <div class="form-group">
+                <label for="approval_status">Approval status</label>
+                <input type="text" id="approval_status" name="approval_status" placeholder="-">
+            </div>
+            <hr class="margin-bottom-large">
+            </div><!-- /.panel-inner -->
+        </div><!-- /#panelLeft -->
+        <div class="resize-handle" id="resizerLeft"></div>
+
+        <div class="column2">
+            <!-- Barra de Subject -->
+            <div class="subject-bar">
+                <input type="text" id="subject" name="subject" placeholder="Subject">
+            </div>
+
+            <!-- Cuadro de Mensajes -->
+            <div class="messages-box" id="messagesBox">
+                {% if ticket %}
+                {% for item in feed %}
+                {% if item.item_type == 'comment' %}
+                {% with c=item.obj %}
+                <div class="message{% if not c.is_public %} internal{% endif %}" data-comment-id="{{ c.pk }}">
+                    <div class="msg-header">
+                        <div class="msg-avatar" data-initials="{{ c.user.name|slice:':1'|upper }}">{{ c.user.name|slice:':1'|upper }}</div>
+                        <div class="msg-meta">
+                            {% if can_use_internal %}
+                            <a class="msg-author" href="{% url 'customer_profile' %}?id={{ c.user.id }}">{{ c.user.name }}</a>
+                            {% else %}
+                            <span class="msg-author">{{ c.user.name }}</span>
+                            {% endif %}
+                            {% if c.user.role %}<span class="msg-role">{{ c.user.role.role_name }}</span>{% endif %}
+                        </div>
+                        <div class="msg-right">
+                            {% if not c.is_public and can_use_internal %}<span class="badge-internal">Interno</span>{% endif %}
+                            {% if c.via_channel %}<span class="msg-channel" title="Canal: {{ c.via_channel }}"><i class="fas {% if c.via_channel == 'email' %}fa-envelope{% elif c.via_channel == 'web' %}fa-globe{% elif c.via_channel == 'api' %}fa-code{% elif c.via_channel == 'twitter' %}fa-hashtag{% elif c.via_channel == 'voice' or c.via_channel == 'phone' %}fa-phone{% elif c.via_channel == 'chat' %}fa-comment{% else %}fa-circle{% endif %}"></i> {{ c.via_channel }}</span>{% endif %}
+                            <span class="msg-timestamp" data-ts="{{ c.created_at|date:'c' }}" title="{{ c.created_at|date:'d/m/Y H:i' }}">{{ c.created_at|date:'d/m/Y H:i' }}</span>
+                        </div>
+                    </div>
+                    <div class="msg-body">
+                        {% if c.html_body %}
+                            <div class="email-html">{{ c.html_body|safe }}</div>
+                        {% else %}
+                            {{ c.content|urlize|linebreaksbr }}
+                        {% endif %}
+                    </div>
+                    {% with atts=c.attachment_set.all %}
+                    {% if atts %}
+                    <div class="attachments">
+                        {% for a in atts %}
+                        {% if a.file_type and a.file_type|slice:":6" == "image/" %}
+                        <a href="{{ a.file_url }}" target="_blank"><img src="{{ a.file_url }}" alt="adjunto"></a>
+                        {% else %}
+                        <a href="{{ a.file_url }}" target="_blank" class="file-pill">
+                            <i class="fas fa-paperclip"></i> Archivo
+                        </a>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% endwith %}
+                </div>
+                {% endwith %}
+                {% else %}
+                {% with e=item.obj %}
+                <div class="sys-event">
+                    <span class="sys-text">
+                        <span class="sys-actor">{{ e.actor.name|default:"Sistema" }}</span>
+                        cambió <span class="sys-field">{{ item.field_label }}</span>
+                        {% if e.old_value %}<span class="sys-old">{{ e.old_value }}</span> →{% endif %}
+                        <span class="sys-new">{{ e.new_value|default:"(vacío)" }}</span>
+                    </span>
+                    <span class="sys-time" data-ts="{{ e.created_at|date:'c' }}" title="{{ e.created_at|date:'d/m/Y H:i' }}">{{ e.created_at|date:'d/m/Y H:i' }}</span>
+                </div>
+                {% endwith %}
+                {% endif %}
+                {% empty %}
+                <div class="message"><em>Sin mensajes aún.</em></div>
+                {% endfor %}
+                {% else %}
+                <div class="message"><em>Guarda el ticket para comenzar a comentar.</em></div>
+                {% endif %}
+            </div>
+            <!-- Resize handle compose -->
+            <div class="compose-resize-handle" id="composeResizer"></div>
+            <!-- Input de Mensaje -->
+            <div class="message-input" id="messageInputArea">
+                <div class="dropzone-overlay" id="composerDropzone" aria-hidden="true">
+                    <div class="dropzone-overlay__inner">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <span>Suelta los archivos aquí para adjuntar</span>
+                    </div>
+                </div>
+                <div id="quill-toolbar" class="quill-toolbar">
+                    <span class="ql-formats">
+                        <button class="ql-bold" title="Negrita"></button>
+                        <button class="ql-italic" title="Cursiva"></button>
+                        <button class="ql-underline" title="Subrayado"></button>
+                        <button class="ql-strike" title="Tachado"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <button class="ql-list" value="ordered" title="Lista numerada"></button>
+                        <button class="ql-list" value="bullet" title="Lista con vi&#241;etas"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <button class="ql-link" title="Enlace"></button>
+                        <button class="ql-code-block" title="Bloque de c&#243;digo"></button>
+                        <button class="ql-blockquote" title="Cita"></button>
+                    </span>
+                    <span class="ql-formats">
+                        <button class="ql-clean" title="Quitar formato"></button>
+                    </span>
+                </div>
+                <div id="quill-editor" class="quill-editor"></div>
+                <textarea id="new-message" name="message" placeholder="Escribe un mensaje... (puedes pegar o arrastrar archivos)" hidden></textarea>
+                <div class="compose-toolbar">
+                    {# Solo agentes ven el toggle Público/Interno #}
+                    {% if can_use_internal %}
+                    <div class="visibility-control dropdown">
+                        <button type="button" class="vis-btn" id="visBtn" aria-haspopup="true" aria-expanded="false">
+                            <i class="fas fa-eye"></i>
+                            <span class="vis-label">Público</span>
+                            <i class="fas fa-chevron-down caret"></i>
+                        </button>
+                        <ul class="vis-menu" id="visMenu" role="menu" aria-labelledby="visBtn">
+                            <li role="menuitem">
+                                <button type="button" class="vis-option" data-public="true">
+                                    <i class="fas fa-eye"></i>
+                                    <div class="txt">
+                                        <strong>Público</strong>
+                                        <small>visible al cliente</small>
+                                    </div>
+                                </button>
+                            </li>
+                            <li role="menuitem">
+                                <button type="button" class="vis-option" data-public="false">
+                                    <i class="fas fa-user-shield"></i>
+                                    <div class="txt">
+                                        <strong>Interno</strong>
+                                        <small>solo agentes</small>
+                                    </div>
+                                </button>
+                            </li>
+                        </ul>
+                        <input type="hidden" name="is_public" id="is_public_input" value="true">
+                    </div>
+                    {% endif %}
+                    <!-- Botón y input de adjuntos -->
+                    <button type="button" class="attach-btn" id="attach-btn" title="Adjuntar">
+                        <i class="fas fa-paperclip"></i>
+                    </button>
+                    <input type="file" id="attach-input"
+                           accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt"
+                           multiple hidden>
+                    <!-- Previsualización de adjuntos pendientes de enviar -->
+                    <div class="pending-attachments" id="pending-attachments"></div>
+                    <!-- Enviar -->
+                    <button type="button" id="send-message-btn" title="Enviar">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+            <!-- Columna solicitante -->
+            {% if ticket and ticket.requester %}
+        <div class="resize-handle" id="resizerRight"></div>
+        <div class="column3 requester-info" id="panelRight">
+            <button type="button" class="panel-tab panel-tab-right" id="toggleRight">
+                <span class="panel-tab-arrow"><i class="fas fa-chevron-right" id="iconRight"></i></span>
+                <span class="panel-tab-label" id="labelRight">Hide panel</span>
+            </button>
+            <div class="panel-inner" id="panelRightInner">
+            {% with u=ticket.requester %}
+            <!-- Cabecera -->
+            <div class="rq-header">
+                {% if u.photo_url %}
+                <img src="{{ u.photo_url }}" alt="Avatar" class="rq-avatar rq-avatar-img">
+                {% else %}
+                <div class="rq-avatar rq-avatar-initials" data-name="{{ u.name }}">{{ u.name|slice:":1"|upper }}</div>
+                {% endif %}
+                <div class="rq-header-meta">
+                    <div class="rq-name-row">
+                        <span class="rq-name">{{ u.name }}</span>
+                        <a href="{% url 'customer_profile' %}?id={{ u.id }}" class="rq-ext-link" title="Ver perfil completo"><i class="fas fa-external-link-alt"></i></a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Datos rápidos -->
+            <div class="rq-details">
+                <div class="rq-row"><span class="rq-label">Email</span><span class="rq-value rq-link">{{ u.email }}</span></div>
+                {% if u.phone %}<div class="rq-row"><span class="rq-label">Teléfono</span><span class="rq-value">{{ u.phone }}</span></div>{% endif %}
+                {% if u.organization %}<div class="rq-row"><span class="rq-label">Org.</span><span class="rq-value rq-link">{{ u.organization.name }}</span></div>{% endif %}
+                {% if u.time_zone %}<div class="rq-row"><span class="rq-label">Zona horaria</span><span class="rq-value">{{ u.time_zone }}</span></div>{% endif %}
+                {% if u.locale %}<div class="rq-row"><span class="rq-label">Idioma</span><span class="rq-value">{{ u.locale }}</span></div>{% endif %}
+                {% if u.role %}<div class="rq-row"><span class="rq-label">Rol</span><span class="rq-value">{{ u.role.role_name }}</span></div>{% endif %}
+                <div class="rq-row rq-notes-row">
+                    <span class="rq-label">Notas</span>
+                    <textarea class="rq-notes-input" placeholder="Añadir nota sobre el usuario..." data-user-id="{{ u.id }}">{{ u.notes|default:'' }}</textarea>
+                </div>
+            </div>
+
+            <div class="rq-section-title">
+                Historial de interacciones
+            </div>
+            <ul class="timeline user-timeline">
+                {% for t in user_timeline %}
+                <li class="tl-item {% if ticket and t.id == ticket.id %}active{% endif %}"
+                    onclick="openTicket('{{ t.id }}', '{{ t.subject|escapejs }}')"
+                    data-id="{{ t.id }}"
+                    data-zid="{{ t.zendesk_id|default:'' }}"
+                    data-subject="{{ t.subject }}"
+                    data-status="{{ t.status }}"
+                    data-desc="{{ t.description }}"
+                    data-comment="{{ t.last_comment }}">
+                    <span class="tl-badge status-{{ t.status|lower }}">{{ t.status|slice:":1"|upper }}</span>
+                    <div class="tl-content">
+                        <div class="tl-subject">{{ t.subject }}</div>
+                        <div class="tl-when">{{ t.updated_at }}</div>
+                    </div>
+                </li>
+                {% empty %}
+                <li class="tl-empty">Sin tickets previos.</li>
+                {% endfor %}
+            </ul>
+            {% endwith %}
+            </div><!-- /.panel-inner -->
+        </div><!-- /#panelRight -->
+            {% endif %}
+        </div><!-- /.ticket-form -->
+    <!-- Barra de Pie de Formulario -->
+    <div class="footer-bar">
+        <div class="footer-right">
+            {% if ticket and can_use_internal %}
+            <div class="macro-wrap">
+                <button type="button" class="macro-btn" id="macro-btn">
+                    <i class="fas fa-magic"></i> Macros <i class="fas fa-chevron-up macro-caret" id="macro-caret"></i>
+                </button>
+                <div class="macro-panel" id="macro-panel">
+                    <div class="macro-search-wrap">
+                        <i class="fas fa-search macro-search-icon"></i>
+                        <input type="text" class="macro-search" id="macro-search" placeholder="Buscar macro…">
+                    </div>
+                    <ul class="macro-list" id="macro-list">
+                        <li class="macro-empty">Cargando…</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-sep"></div>
+            {% endif %}
+            <div class="publish-group">
+                <button type="button" id="publish-button" class="main-btn">
+                    Publicar como <span id="selected-status">{{ ticket.status|default:"open" }}</span>
+                </button>
+                <button id="dropdown-button" class="dropdown-btn"><i class="fas fa-caret-down"></i></button>
+                <div id="dropdown-content" class="dropdown-content">
+                    <a href="#" data-status="open">Abierto</a>
+                    <a href="#" data-status="pending">Pendiente</a>
+                    <a href="#" data-status="resolved">Resuelto</a>
+                    <a href="#" data-status="closed">Cerrado</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+{% if ticket and can_use_internal and not ticket.merged_into %}
+<div id="merge-modal" class="merge-modal-overlay" style="display:none">
+    <div class="merge-modal">
+        <div class="merge-modal-header">
+            <h3><i class="fas fa-code-branch"></i> Fusionar ticket</h3>
+            <button type="button" id="merge-modal-close" class="merge-modal-close">&times;</button>
+        </div>
+        <div class="merge-modal-body">
+            <p>El ticket actual (<strong>#{{ ticket.zendesk_id|default:ticket.id }}</strong>) se cerrará y sus comentarios pasarán al ticket destino.</p>
+            <label for="merge-search-input">Buscar ticket destino por ID o asunto:</label>
+            <input type="text" id="merge-search-input" class="merge-search-input" placeholder="Escribe para buscar…" autocomplete="off">
+            <ul id="merge-search-results" class="merge-search-results"></ul>
+            <div id="merge-selected" class="merge-selected" style="display:none">
+                Destino seleccionado: <strong id="merge-selected-label"></strong>
+                <input type="hidden" id="merge-target-id">
+            </div>
+        </div>
+        <div class="merge-modal-footer">
+            <button type="button" id="merge-confirm-btn" class="main-btn" disabled>Confirmar fusión</button>
+            <button type="button" id="merge-cancel-btn" class="cancel-btn">Cancelar</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+<script>
+// Per-pane context — picked up by initTicketPane() based on data-ticket-id.
+// Also publishes legacy window.ticketId/window.urls so create_ticket.js works
+// unchanged in the deep-link page-load path.
+(function() {
+    var tid = {{ ticket.id|default:'null' }};
+    if (!window.tfPaneContext) window.tfPaneContext = {};
+    window.tfPaneContext[tid] = {
+        ticketId: tid,
+        currentUserId: {{ request.user.id|default:'null' }},
+        addCommentUrl: tid ? ('/tickets/' + tid + '/add_comment/') : null,
+        mergeTicketUrl: tid ? ('/tickets/' + tid + '/merge/') : null,
+        searchUrl: '/search/',
+    };
+    // Legacy globals — kept for current create_ticket.js (will be removed in step 6)
+    window.ticketId = tid;
+    window.currentUserId = {{ request.user.id|default:'null' }};
+    window.urls = window.urls || {};
+    window.urls.add_comment = tid ? ('/tickets/' + tid + '/add_comment/') : null;
+    window.urls.merge_ticket = tid ? ('/tickets/' + tid + '/merge/') : null;
+    window.urls.search = '/search/';
+})();
+</script>
+</div>
