@@ -24,19 +24,19 @@
 
     {# Bump ?v= on each Sprint deploy to bust browser cache on legacy clients. #}
     <!-- CSS globales -->
-    <link rel="stylesheet" href="{% static 'tickets/style.css' %}?v=s4.3">
-    <link rel="stylesheet" href="{% static 'tickets/toast.css' %}?v=s4.3">
-    <link rel="stylesheet" href="{% static 'tickets/dialog.css' %}?v=s4.3">
+    <link rel="stylesheet" href="{% static 'tickets/style.css' %}?v=s4.4">
+    <link rel="stylesheet" href="{% static 'tickets/toast.css' %}?v=s4.4">
+    <link rel="stylesheet" href="{% static 'tickets/dialog.css' %}?v=s4.4">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <!-- Select2 and Quill loaded globally so ticket panes can mount without re-parsing libraries. -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/css/select2.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css">
     <!-- create_ticket.css loaded globally so ticket panes are styled even when
          the user navigates to a non-ticket page first (e.g. Home → ticket). -->
-    <link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s4.3">
+    <link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s4.4">
     <!-- home.css is the shared sidebar-page stylesheet; load globally so
          SPA fragment swaps don't lose styling. -->
-    <link rel="stylesheet" href="{% static 'tickets/home.css' %}?v=s4.3">
+    <link rel="stylesheet" href="{% static 'tickets/home.css' %}?v=s4.4">
 
     {% block extra_css %}{% endblock %}
 </head>
@@ -84,15 +84,15 @@
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
-    <script src="{% static 'tickets/quill-composer.js' %}?v=s4.3"></script>
+    <script src="{% static 'tickets/quill-composer.js' %}?v=s4.4"></script>
 
-    <script src="{% static 'tickets/toast.js' %}?v=s4.3"></script>
-    <script src="{% static 'tickets/dialog.js' %}?v=s4.3"></script>
-    <script src="{% static 'tickets/tabs.js' %}?v=s4.3"></script>
-    <script src="{% static 'tickets/theme.js' %}?v=s4.3"></script>
+    <script src="{% static 'tickets/toast.js' %}?v=s4.4"></script>
+    <script src="{% static 'tickets/dialog.js' %}?v=s4.4"></script>
+    <script src="{% static 'tickets/tabs.js' %}?v=s4.4"></script>
+    <script src="{% static 'tickets/theme.js' %}?v=s4.4"></script>
     <!-- create_ticket.js loaded globally so initTicketPane is available even
          when the user navigates Home → ticket via SPA (no full page reload). -->
-    <script src="{% static 'tickets/create_ticket.js' %}?v=s4.3"></script>
+    <script src="{% static 'tickets/create_ticket.js' %}?v=s4.4"></script>
 
     {% block extra_js %}{% endblock %}
 </body>

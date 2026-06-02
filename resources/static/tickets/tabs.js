@@ -212,6 +212,12 @@
             try { window.tfApplyPaneSelect2(paneEl, { force: true }); }
             catch (e) { console.error('[tabs] Select2 re-init failed on re-attach', e); }
         }
+        // Rebind window.QuillComposer to this pane's instance (idempotent;
+        // if the pane never had Quill it inits now, otherwise it's a no-op).
+        if (window.QuillComposer && typeof window.QuillComposer.initFor === 'function') {
+            try { window.QuillComposer.initFor(paneEl); }
+            catch (e) { console.error('[tabs] Quill re-bind failed on re-attach', e); }
+        }
     }
 
     function _getOrCreatePaneSpinner() {

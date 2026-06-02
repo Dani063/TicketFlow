@@ -635,6 +635,9 @@ def filter_customers(request):
     view = request.GET.get("view")
     sort_by  = request.GET.get("sort_by", "")
     sort_dir = request.GET.get("sort_dir", "asc") if request.GET.get("sort_dir") in ("asc", "desc") else "asc"
+    q = (request.GET.get("q") or "").strip()
+    role_id = (request.GET.get("role_id") or "").strip()
+    group_id = (request.GET.get("group_id") or "").strip()
     try:
         page = max(1, int(request.GET.get("page", 1) or 1))
     except (ValueError, TypeError):
@@ -649,6 +652,13 @@ def filter_customers(request):
         users = base_queryset.filter(group__group_name="Suspended")
     else:  # "all"
         users = base_queryset.exclude(group__group_name="Suspended")
+
+    if q:
+        users = users.filter(Q(name__icontains=q) | Q(email__icontains=q))
+    if role_id.isdigit():
+        users = users.filter(role_id=int(role_id))
+    if group_id.isdigit():
+        users = users.filter(group_id=int(group_id))
 
     filtros = {
         "all": base_queryset.exclude(group__group_name="Suspended").count(),
@@ -718,10 +728,17 @@ def customers_list(request):
     if not _is_agent(request.user) and not _is_admin(request.user):
          return render(request, "tickets/403.html", {"error": "No tienes permisos para ver clientes."}, status=403)
 
+    role_qs = Role.objects.all().order_by('role_name')
+    group_qs = Group.objects.all().order_by('group_name')
+    if not _is_admin(request.user):
+        role_qs = role_qs.exclude(role_name__in=['admin', 'administrator'])
+
     context = {
         'username': request.user.name,
         'email': request.user.email,
         'is_admin': _is_admin(request.user),
+        'roles': role_qs,
+        'groups': group_qs,
     }
     return render(request, "tickets/customers_list.html", context)
 

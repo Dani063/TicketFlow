@@ -4,6 +4,34 @@
 {% block title %}TicketFlow – Customers{% endblock %}
 
 {% block extra_css %}
+<style>
+.customers-toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 12px;
+    flex-wrap: nowrap;
+}
+.customers-toolbar input[type="text"],
+.customers-toolbar select {
+    padding: 8px 12px;
+    border: 1px solid var(--color-input-border, #d1d5db);
+    border-radius: 8px;
+    background: var(--color-input-bg, #fff);
+    color: var(--color-input-text, #111827);
+    font-size: 13px;
+    min-width: 0;
+    box-sizing: border-box;
+}
+.customers-toolbar input[type="text"]:focus,
+.customers-toolbar select:focus {
+    outline: none;
+    border-color: #7c3aed;
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, .15);
+}
+.customers-toolbar input[type="text"] { flex: 2 1 0; min-width: 200px; max-width: 480px; }
+.customers-toolbar select { flex: 1 1 0; min-width: 140px; max-width: 220px; }
+</style>
 {% endblock %}
 
 {% block content %}
@@ -30,6 +58,17 @@
 <div class="profile-content">
     <div class="stats-group with-pagination" style="width: 100%;">
         <h2>Usuarios</h2>
+        <div class="customers-toolbar">
+            <input type="text" id="customersSearch" placeholder="Buscar por nombre o email…">
+            <select id="customersRoleFilter">
+                <option value="">Todos los roles</option>
+                {% for role in roles %}<option value="{{ role.id }}">{{ role.role_name }}</option>{% endfor %}
+            </select>
+            <select id="customersGroupFilter">
+                <option value="">Todos los grupos</option>
+                {% for group in groups %}<option value="{{ group.id }}">{{ group.group_name }}</option>{% endfor %}
+            </select>
+        </div>
         <div class="tabla">
             <div id="loadingSpinner" style="display:none; text-align:center; padding:20px;">
                 <i class="fas fa-spinner fa-spin" style="font-size:24px; color:#007BFF;"></i>
@@ -185,8 +224,15 @@ async function loadCustomers(view, page, updateUrl) {
         spinner.style.display = "block";
         tbody.innerHTML = "";
 
+        const q       = (document.getElementById('customersSearch')?.value || '').trim();
+        const roleId  = document.getElementById('customersRoleFilter')?.value || '';
+        const groupId = document.getElementById('customersGroupFilter')?.value || '';
+
         let fetchUrl = `/customers/filter/?view=${encodeURIComponent(view)}&page=${page}&page_size=${_pageSize}`;
         if (_sortBy) fetchUrl += `&sort_by=${_sortBy}&sort_dir=${_sortDir}`;
+        if (q)       fetchUrl += `&q=${encodeURIComponent(q)}`;
+        if (roleId)  fetchUrl += `&role_id=${encodeURIComponent(roleId)}`;
+        if (groupId) fetchUrl += `&group_id=${encodeURIComponent(groupId)}`;
         const response = await fetch(fetchUrl);
         const data = await response.json();
 
@@ -228,6 +274,9 @@ async function loadCustomers(view, page, updateUrl) {
             u.searchParams.set("page_size", _pageSize);
             if (_sortBy) { u.searchParams.set("sort_by", _sortBy); u.searchParams.set("sort_dir", _sortDir); }
             else { u.searchParams.delete("sort_by"); u.searchParams.delete("sort_dir"); }
+            if (q)       u.searchParams.set("q", q);            else u.searchParams.delete("q");
+            if (roleId)  u.searchParams.set("role_id", roleId); else u.searchParams.delete("role_id");
+            if (groupId) u.searchParams.set("group_id", groupId); else u.searchParams.delete("group_id");
             window.history.replaceState({}, "", u);
         }
     } catch (err) {
@@ -272,6 +321,29 @@ document.addEventListener("DOMContentLoaded", () => {
         });
         if (f.dataset.view === activeView) f.classList.add("active");
     });
+
+    // Toolbar filters: debounced search + immediate change on selects.
+    const searchInput = document.getElementById('customersSearch');
+    const roleSel     = document.getElementById('customersRoleFilter');
+    const groupSel    = document.getElementById('customersGroupFilter');
+
+    // Restore from URL so refresh / deep-link keeps state.
+    const qParam = getUrlParam("q");
+    if (qParam && searchInput) searchInput.value = qParam;
+    const roleParam = getUrlParam("role_id");
+    if (roleParam && roleSel) roleSel.value = roleParam;
+    const groupParam = getUrlParam("group_id");
+    if (groupParam && groupSel) groupSel.value = groupParam;
+
+    let _filterTimer = null;
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            clearTimeout(_filterTimer);
+            _filterTimer = setTimeout(() => loadCustomers(_currentView, 1), 260);
+        });
+    }
+    if (roleSel)  roleSel.addEventListener('change',  () => loadCustomers(_currentView, 1));
+    if (groupSel) groupSel.addEventListener('change', () => loadCustomers(_currentView, 1));
 
     if (activeView) loadCustomers(activeView, activePage, false);
 });

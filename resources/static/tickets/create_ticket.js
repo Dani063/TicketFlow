@@ -111,6 +111,14 @@ window.initTicketPane = function (root, ctx) {
     // Initial Select2 application — delegated to the module-level
     // tfApplyPaneSelect2 so tabs.js can re-run the same logic after detach/re-attach.
     window.tfApplyPaneSelect2(rootEl);
+
+    // Pane-scoped Quill init. Required for SPA-loaded panes: quill-composer.js
+    // only runs its DOMContentLoaded handler once per page, so panes mounted
+    // after first load (sidebar → ticket, or new ticket via tab) would never
+    // get a working composer without this call.
+    if (window.QuillComposer && typeof window.QuillComposer.initFor === 'function') {
+        window.QuillComposer.initFor(rootEl);
+    }
     function middleEllipsis(filename, max = 26, filler = '…') {
         if (!filename) return '';
         // separa extensión
