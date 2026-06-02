@@ -171,17 +171,47 @@
 
     function _getWorkspace() { return document.getElementById('workspace'); }
 
-    function _hideAllPanes() {
+    // Detach (preserve in JS, remove from DOM) all panes in the workspace that
+    // are NOT paneEl. This is critical because every pane shares the same set
+    // of IDs (#empresa, #solicitante, #tags, ...) — keeping multiple panes
+    // mounted simultaneously creates duplicate-ID collisions that break
+    // Select2 widget anchoring on the second pane onwards.
+    //
+    // jQuery's .detach() preserves attached data and event handlers, so the
+    // Select2/Quill instances stay alive on the detached pane and re-attach
+    // when the pane is re-appended on its tab being clicked again.
+    function _detachInactivePanes(activePane) {
         const ws = _getWorkspace();
-        if (!ws) return;
+        if (!ws || !window.jQuery) return;
         ws.querySelectorAll(':scope > .ticket-pane').forEach(p => {
-            p.classList.add('tf-pane-hidden');
+            if (p !== activePane) {
+                // Keep the cache entry — only remove from DOM. The reference
+                // in _paneCache.$pane is still valid; appendChild re-mounts it.
+                window.jQuery(p).detach();
+            }
         });
     }
 
     function _showPane(paneEl) {
-        _hideAllPanes();
+        const ws = _getWorkspace();
+        if (!ws) return;
+        // First, detach any other panes so we never have duplicate IDs live.
+        _detachInactivePanes(paneEl);
+        const wasDetached = !ws.contains(paneEl);
+        // Re-attach paneEl if it was detached on a previous switch.
+        if (wasDetached) {
+            ws.appendChild(paneEl);
+        }
+        // Make sure no leftover hidden-class lingers from older versions of this code.
         paneEl.classList.remove('tf-pane-hidden');
+        // Select2 widget DOM survives jQuery.detach() but its internal state
+        // does not always render correctly after re-attach. Force a destroy +
+        // re-init so the widget repaints from scratch. Cheap (~5ms) and
+        // guaranteed-correct.
+        if (wasDetached && typeof window.tfApplyPaneSelect2 === 'function') {
+            try { window.tfApplyPaneSelect2(paneEl, { force: true }); }
+            catch (e) { console.error('[tabs] Select2 re-init failed on re-attach', e); }
+        }
     }
 
     function _getOrCreatePaneSpinner() {
@@ -203,7 +233,10 @@
 
         const spinner = _getOrCreatePaneSpinner();
         if (spinner) spinner.style.display = 'flex';
-        _hideAllPanes();
+        // Detach (preserve in JS, remove from DOM) any panes currently mounted —
+        // we want exactly ONE pane in the DOM at any time to avoid duplicate-ID
+        // collisions on Select2/Quill widgets.
+        _detachInactivePanes(null);
 
         try {
             const sep = rawUrl.includes('?') ? '&' : '?';
@@ -267,7 +300,10 @@
         // Switching to a ticket: hide #app-content, show #workspace
         _showWorkspace();
         const cached = _paneCache.get(normUrl);
-        if (cached && document.body.contains(cached.$pane)) {
+        // Cache HIT covers both "still mounted" and "detached but JS-retained".
+        // _showPane will re-append a detached pane to the workspace. Select2/Quill
+        // state survives detach() because jQuery preserves attached data.
+        if (cached && cached.$pane) {
             cached.lastUsed = Date.now();
             _showPane(cached.$pane);
             return cached.$pane;
@@ -979,13 +1015,41 @@
             if (_panesEnabled()) {
                 const initialPane = document.querySelector('#workspace > .ticket-pane');
                 if (initialPane) {
+                    const rawTid = initialPane.getAttribute('data-ticket-id');
+                    const ticketId = rawTid && rawTid !== 'null' && rawTid !== ''
+                        ? (parseInt(rawTid, 10) || rawTid)
+                        : null;
                     _paneCache.set(normalizeUrl(_realPageUrl), {
                         $pane: initialPane,
-                        ticketId: initialPane.getAttribute('data-ticket-id') || null,
+                        ticketId,
                         lastUsed: Date.now(),
                     });
                     // Deep-link page load on a ticket: show workspace, hide app-content
                     _showWorkspace();
+                    // Bootstrap the server-rendered pane HERE (single source of truth).
+                    // Previously this was done by a separate DCL handler in
+                    // create_ticket.js, but that path was racy: on F5 with tabs
+                    // restored from localStorage, Select2/Quill sometimes never
+                    // initialized and the form fell back to raw HTML widgets.
+                    if (initialPane.dataset.tfInitialized !== '1') {
+                        initialPane.dataset.tfInitialized = '1';
+                        if (typeof window.initTicketPane === 'function') {
+                            try {
+                                console.debug('[tabs] bootstrapping server-rendered pane', { ticketId });
+                                window.initTicketPane(window.jQuery ? window.jQuery(initialPane) : initialPane, {
+                                    ticketId,
+                                    currentUserId: window.currentUserId,
+                                    addCommentUrl: ticketId ? ('/tickets/' + ticketId + '/add_comment/') : null,
+                                    mergeTicketUrl: ticketId ? ('/tickets/' + ticketId + '/merge/') : null,
+                                    searchUrl: '/search/',
+                                });
+                            } catch (e) {
+                                console.error('[tabs] initTicketPane THREW on server-rendered pane', e);
+                            }
+                        } else {
+                            console.error('[tabs] initTicketPane not defined — server-rendered pane will be unstyled');
+                        }
+                    }
                 } else {
                     // Sidebar page load (home/list/etc.): show app-content, hide workspace
                     _showAppContent();
@@ -1003,7 +1067,9 @@
                     if (!_getWorkspace()) return;
                     _showWorkspace();
                     const cached = _paneCache.get(norm);
-                    if (cached && document.body.contains(cached.$pane)) {
+                    // Detached panes (only one in DOM at a time) still count as
+                    // a cache hit — _showPane re-attaches them.
+                    if (cached && cached.$pane) {
                         _showPane(cached.$pane);
                         const container = getContainer();
                         if (container) {

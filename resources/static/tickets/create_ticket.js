@@ -1,6 +1,4 @@
 ﻿// app/static/tickets/create_ticket.js
-
-// app/static/tickets/create_ticket.js
 //
 // Pane-scoped initializer: invoked once per ticket pane (either deep-link page
 // load or fragment fetch via tabs.js). Replaces the global DOMContentLoaded
@@ -12,6 +10,76 @@
 //   - `ctx`   is { ticketId, currentUserId, addCommentUrl, mergeTicketUrl, searchUrl }
 // All DOM queries for elements inside the pane are scoped to $root / rootEl.
 // References to window.ticketId have been replaced with ctx.ticketId.
+
+// Shared Select2 config. Used by initTicketPane (first mount) and by
+// tfApplyPaneSelect2 (defensive re-init after a pane was detached and
+// re-attached by tabs.js — Select2 widget state doesn't survive that round-trip
+// reliably, so we destroy + re-init).
+const _tfUserAjaxConfig = {
+    url: '/api/users/search/',
+    dataType: 'json',
+    delay: 200,
+    data: params => ({ q: params.term || '', page: params.page || 1 }),
+    processResults: data => data,
+    cache: true,
+};
+
+window.tfApplyPaneSelect2 = function (paneEl, opts) {
+    if (!paneEl || !window.jQuery) return;
+    const force = !!(opts && opts.force);
+    const $root = window.jQuery(paneEl);
+    const $selects = $root.find('select.select2');
+    let inited = 0;
+    let skipped = 0;
+    $selects.each(function () {
+        try {
+            const isAjaxUser = window.jQuery(this).data('select2Type') === 'ajax-user';
+            if (window.jQuery(this).hasClass('select2-hidden-accessible')) {
+                if (force) {
+                    try { window.jQuery(this).select2('destroy'); } catch (_) { /* ignore */ }
+                } else {
+                    skipped++;
+                    return;
+                }
+            }
+            if (isAjaxUser) {
+                window.jQuery(this).select2({
+                    width: '100%',
+                    placeholder: '-',
+                    allowClear: true,
+                    minimumInputLength: 0,
+                    ajax: _tfUserAjaxConfig,
+                });
+            } else if (this.id === 'tags') {
+                window.jQuery(this).select2({
+                    width: '100%',
+                    tags: true,
+                    tokenSeparators: [','],
+                    placeholder: 'Selecciona o añade etiquetas',
+                    minimumInputLength: 1,
+                    ajax: {
+                        url: '/api/tags/',
+                        dataType: 'json',
+                        delay: 250,
+                        data: params => ({ q: params.term || '' }),
+                        processResults: data => ({ results: (data.results || data || []).map(t => ({ id: t.id || t.name || t, text: t.name || t })) }),
+                        cache: true,
+                    },
+                });
+            } else {
+                window.jQuery(this).select2({
+                    width: '100%',
+                    placeholder: window.jQuery(this).attr('placeholder') || 'Selecciona una opción',
+                    allowClear: false,
+                });
+            }
+            inited++;
+        } catch (e) {
+            console.error('[tfApplyPaneSelect2] Select2 failed on', this.id || this.name, e);
+        }
+    });
+    console.debug('[tfApplyPaneSelect2]', { paneTicketId: paneEl.getAttribute('data-ticket-id'), total: $selects.length, inited, skipped, force });
+};
 
 window.initTicketPane = function (root, ctx) {
     const rootEl = (root && root.jquery) ? root[0] : root;
@@ -37,53 +105,12 @@ window.initTicketPane = function (root, ctx) {
         }
         return cookieValue;
     }
-    // Inicialización de Select2
-    // Los selects de usuario (solicitante, ccs) usan AJAX para evitar renderizar
-    // 6.892 <option> en el HTML — eso costaba ~4-5s de JS init por cada carga de pestaña.
-    const _userAjaxConfig = {
-        url: '/api/users/search/',
-        dataType: 'json',
-        delay: 200,
-        data: params => ({ q: params.term || '', page: params.page || 1 }),
-        processResults: data => data,
-        cache: true,
-    };
+    // Alias for the AJAX config used by the legacy #tags re-init block below.
+    const _userAjaxConfig = _tfUserAjaxConfig;
 
-    const initializeSelect2 = () => {
-        const selects = $root.find('select.select2');
-        console.debug('[initTicketPane] initializing Select2 on', selects.length, 'selects for ticket', ctx.ticketId);
-        if (!selects.length) {
-            console.warn('[initTicketPane] no select.select2 found in pane — pane structure may be broken');
-            return;
-        }
-        selects.each(function () {
-            try {
-                const isAjaxUser = $(this).data('select2Type') === 'ajax-user';
-                // Skip re-initialization if already initialized (e.g. user clicked
-                // tab very fast and we triggered init twice).
-                if ($(this).hasClass('select2-hidden-accessible')) return;
-                if (isAjaxUser) {
-                    $(this).select2({
-                        width: '100%',
-                        placeholder: '-',
-                        allowClear: true,
-                        minimumInputLength: 0,
-                        ajax: _userAjaxConfig,
-                    });
-                } else {
-                    $(this).select2({
-                        width: '100%',
-                        placeholder: $(this).attr('placeholder') || 'Selecciona una opción',
-                        allowClear: false,
-                    });
-                }
-            } catch (e) {
-                console.error('[initTicketPane] Select2 failed on', this.id || this.name, e);
-            }
-        });
-    };
-
-    initializeSelect2();
+    // Initial Select2 application — delegated to the module-level
+    // tfApplyPaneSelect2 so tabs.js can re-run the same logic after detach/re-attach.
+    window.tfApplyPaneSelect2(rootEl);
     function middleEllipsis(filename, max = 26, filler = '…') {
         if (!filename) return '';
         // separa extensión
@@ -662,32 +689,10 @@ window.initTicketPane = function (root, ctx) {
     // Inicializar Dropdown de Estado
     manageStatusDropdown();
 
-    // Manejo de Creación de Etiquetas en Select2
-    $root.find('#tags').select2({
-        width: '100%',
-        tags: true,
-        tokenSeparators: [','],
-        placeholder: "Selecciona o añade etiquetas",
-        allowClear: true,
-        minimumInputLength: 1,
-        ajax: {
-            url: '/api/tags/',
-            dataType: 'json',
-            delay: 250,
-            data: function (params) {
-                return { q: params.term };
-            },
-            processResults: function (data) {
-                return { results: data.results };
-            },
-            cache: true
-        },
-        createTag: function (params) {
-            var term = $.trim(params.term);
-            if (term === '') return null;
-            return { id: term, text: term, newTag: true };
-        }
-    }).on('select2:select', function (e) {
+    // #tags Select2 already initialized by tfApplyPaneSelect2 (with tags:true,
+    // ajax, placeholder, etc.). Here we only need to bind the select2:select
+    // handler for creating new tags. Re-initializing here would double-init.
+    $root.find('#tags').on('select2:select', function (e) {
         const data = e.params.data;
         if (data.newTag) {
             const newTag = data.text;
@@ -1341,17 +1346,19 @@ window.initTicketPane = function (root, ctx) {
 
 };
 
-// Auto-bootstrap for the deep-link page load (legacy path).
-// When the user navigates to /tickets/create/?id=N directly, Django renders
-// create_ticket.html which includes _ticket_pane.html inside #workspace. We
-// detect that single pre-rendered pane on DOMContentLoaded and init it.
+// Fallback bootstrap for the deep-link page load.
+// Primary bootstrap now lives in tabs.js initOnce (single source of truth so
+// the server-rendered and fragment-fetched paths share the same code). This
+// handler stays as a safety net in case tabs.js fails to load or fails to
+// bootstrap. The tfInitialized guard prevents double init.
 document.addEventListener('DOMContentLoaded', () => {
     const pane = document.querySelector('#workspace > .ticket-pane');
     if (!pane) return;
     if (pane.dataset.tfInitialized === '1') return;
+    console.warn('[create_ticket] tabs.js did not bootstrap pane — running fallback');
     pane.dataset.tfInitialized = '1';
     const tid = pane.getAttribute('data-ticket-id');
-    const parsedTid = tid && tid !== 'null' ? (parseInt(tid, 10) || tid) : null;
+    const parsedTid = tid && tid !== 'null' && tid !== '' ? (parseInt(tid, 10) || tid) : null;
     window.initTicketPane(window.jQuery ? window.jQuery(pane) : pane, {
         ticketId: parsedTid,
         currentUserId: window.currentUserId,
