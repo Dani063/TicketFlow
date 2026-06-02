@@ -421,6 +421,157 @@
         });
     }
 
+    // ── Tab overflow ("···") ────────────────────────────────────────────────
+    function _getOverflowBtn() {
+        const container = getContainer();
+        return container ? container.querySelector('.tabs-overflow-btn') : null;
+    }
+
+    function _getOverflowPopup() {
+        return document.getElementById('tabsOverflowPopup');
+    }
+
+    // Recompute which tabs fit in .navbar-left vs which go to the "···" menu.
+    // Called after add/close/load/ensureCurrent, on window resize, and when a
+    // tab becomes active (so the active one is never hidden in overflow).
+    function _layoutTabs() {
+        const container = getContainer();
+        const overflowBtn = _getOverflowBtn();
+        const addBtn = container ? container.querySelector('.add-tab') : null;
+        if (!container || !overflowBtn || !addBtn) return;
+
+        const tabs = [...container.querySelectorAll('.tab')];
+        tabs.forEach(t => t.classList.remove('tf-overflowed'));
+        if (!tabs.length) {
+            overflowBtn.hidden = true;
+            _renderOverflowList([]);
+            return;
+        }
+
+        // Show the overflow button briefly so its width counts in measurements.
+        overflowBtn.hidden = false;
+        const badgeEl = overflowBtn.querySelector('.badge');
+        if (badgeEl) badgeEl.textContent = '0';
+
+        const avail = container.clientWidth - addBtn.offsetWidth - overflowBtn.offsetWidth - 8;
+
+        // First pass: do they all fit?
+        const total = tabs.reduce((s, t) => s + t.offsetWidth + 10, 0);
+        if (total <= avail) {
+            overflowBtn.hidden = true;
+            _renderOverflowList([]);
+            return;
+        }
+
+        // Overflow needed. Priority: active > most recent (DOM order reverse).
+        const active = container.querySelector('.tab.active');
+        const ordered = [...tabs].sort((a, b) => {
+            if (a === active) return -1;
+            if (b === active) return 1;
+            return tabs.indexOf(b) - tabs.indexOf(a);
+        });
+
+        let used = 0;
+        const keep = new Set();
+        for (const t of ordered) {
+            const w = t.offsetWidth + 10;
+            if (used + w > avail) break;
+            keep.add(t);
+            used += w;
+        }
+
+        const overflowed = tabs.filter(t => !keep.has(t));
+        overflowed.forEach(t => t.classList.add('tf-overflowed'));
+        overflowBtn.hidden = overflowed.length === 0;
+        if (badgeEl) badgeEl.textContent = String(overflowed.length);
+        _renderOverflowList(overflowed);
+    }
+
+    function _renderOverflowList(overflowed) {
+        const popup = _getOverflowPopup();
+        if (!popup) return;
+        popup.innerHTML = '';
+        overflowed.forEach(tab => {
+            const item = document.createElement('div');
+            item.className = 'tabs-overflow-item';
+            if (tab.classList.contains('active')) item.classList.add('active');
+            item.setAttribute('role', 'menuitem');
+
+            const icon = document.createElement('img');
+            icon.className = 'item-icon';
+            icon.alt = '';
+            icon.src = (window.static_urls && window.static_urls.logo) || '';
+
+            const text = document.createElement('span');
+            text.className = 'item-text';
+            const txt = tab.querySelector('.tab-text')?.textContent || '';
+            text.textContent = txt;
+            text.title = txt;
+
+            const closeBtn = document.createElement('button');
+            closeBtn.type = 'button';
+            closeBtn.className = 'item-close';
+            closeBtn.title = 'Cerrar';
+            closeBtn.setAttribute('aria-label', 'Cerrar pestaña');
+            closeBtn.textContent = '×';
+
+            item.appendChild(icon);
+            item.appendChild(text);
+            item.appendChild(closeBtn);
+
+            item.addEventListener('click', (e) => {
+                if (e.target.closest('.item-close')) return;
+                // Promote: move tab to end of bar (just before the overflow btn).
+                const overflowBtn = _getOverflowBtn();
+                const container = getContainer();
+                if (overflowBtn && container) {
+                    container.insertBefore(tab, overflowBtn);
+                }
+                _hideOverflowPopup();
+                tab.click();          // delegate to the real tab click handler
+                _layoutTabs();
+                saveTabs();
+            });
+
+            closeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Reuse the close handler already wired in addTab()
+                tab.querySelector('.close-tab')?.click();
+                _layoutTabs();
+            });
+
+            popup.appendChild(item);
+        });
+    }
+
+    function _positionOverflowPopup() {
+        const btn = _getOverflowBtn();
+        const popup = _getOverflowPopup();
+        if (!btn || !popup) return;
+        const rect = btn.getBoundingClientRect();
+        const top = rect.bottom + 6;
+        const left = Math.max(8, Math.min(window.innerWidth - 288, rect.right - 280));
+        popup.style.top = top + 'px';
+        popup.style.left = left + 'px';
+    }
+
+    function _showOverflowPopup() {
+        const btn = _getOverflowBtn();
+        const popup = _getOverflowPopup();
+        if (!btn || !popup) return;
+        _positionOverflowPopup();
+        popup.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+    }
+
+    function _hideOverflowPopup() {
+        const btn = _getOverflowBtn();
+        const popup = _getOverflowPopup();
+        if (popup) popup.hidden = true;
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     function saveTabs() {
         const container = getContainer();
         if (!container) return;
@@ -436,7 +587,12 @@
 
     function setActive(tabEl) {
         document.querySelectorAll('.navbar-left .tab').forEach(t => t.classList.remove('active'));
-        if (tabEl) tabEl.classList.add('active');
+        if (tabEl) {
+            tabEl.classList.add('active');
+            // If the newly-active tab was hidden in overflow, recompute layout
+            // so it becomes visible (active is always prioritized in _layoutTabs).
+            if (tabEl.classList.contains('tf-overflowed')) _layoutTabs();
+        }
     }
 
     function addTab(text, url, select = true) {
@@ -502,6 +658,7 @@
 
             tab.remove();
             saveTabs();
+            _layoutTabs();
 
             // Clean up cached pane for this tab: destroy widgets before removing
             // the DOM so Select2 / Quill release their event listeners and memory.
@@ -539,6 +696,10 @@
         tab.appendChild(tabText);
         tab.appendChild(closeButton);
 
+        // Note: tab click + close handlers are added below; the actual DOM
+        // insertion happens via `container.insertBefore(tab, overflowBtn)`
+        // a few lines down so the "···" button always stays at the end.
+
         tab.addEventListener('click', () => {
             const targetNorm = normalizeUrl(tab.dataset.url);
             const currentNorm = normalizeUrl(qs());
@@ -564,9 +725,15 @@
             window.location.href = tab.dataset.url;
         });
 
-        container.appendChild(tab);
+        const overflowBtn = _getOverflowBtn();
+        if (overflowBtn && overflowBtn.parentNode === container) {
+            container.insertBefore(tab, overflowBtn);
+        } else {
+            container.appendChild(tab);
+        }
         dedupeDomTabs();   // asegurar 1 sola por URL
         saveTabs();
+        _layoutTabs();
 
         // Seleccionar (pero sin duplicar navegación)
         if (select) {
@@ -636,6 +803,7 @@
         });
 
         saveTabs();
+        _layoutTabs();
     }
     function ensureCurrentTab() {
         const currNorm = normalizeUrl(qs());
@@ -661,6 +829,7 @@
         addTab(text, currNorm, false);
         setActive(findTabByNorm(currNorm));
         saveTabs();
+        _layoutTabs();
     }
 
     function highlightActiveTab() {
@@ -1009,6 +1178,36 @@
             updateBadge();
             refreshUpdates();
             setInterval(updateBadge, 30000);
+
+            // Tab overflow ("···") popup: open/close + close on outside click.
+            document.addEventListener('click', (e) => {
+                const btn = e.target.closest('.tabs-overflow-btn');
+                const popup = _getOverflowPopup();
+                if (btn) {
+                    e.preventDefault();
+                    if (popup && !popup.hidden) _hideOverflowPopup();
+                    else _showOverflowPopup();
+                    return;
+                }
+                if (popup && !popup.hidden && !popup.contains(e.target)) {
+                    _hideOverflowPopup();
+                }
+            });
+
+            // Re-layout tabs on window resize (debounced) so visible/overflow
+            // partitioning matches the new available width.
+            let _layoutT = null;
+            window.addEventListener('resize', () => {
+                clearTimeout(_layoutT);
+                _layoutT = setTimeout(() => {
+                    _layoutTabs();
+                    const p = _getOverflowPopup();
+                    if (p && !p.hidden) _positionOverflowPopup();
+                }, 80);
+            });
+
+            // First layout pass after loadTabs/ensureCurrentTab populated the bar.
+            _layoutTabs();
 
             // Seed the pane cache with the .ticket-pane that was server-rendered
             // into #workspace, so clicking back on its tab is instant (no fetch).

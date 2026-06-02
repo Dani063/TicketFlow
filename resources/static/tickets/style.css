@@ -233,6 +233,12 @@
 :root[data-theme="dark"] .tab .tab-text, :root[data-theme="dark"] .tab .close-tab { color: var(--color-text); }
 :root[data-theme="dark"] .add-tab { color: var(--color-text); }
 :root[data-theme="dark"] .add-tab:hover { background-color: var(--color-tab-hover); }
+:root[data-theme="dark"] .tabs-overflow-btn { color: var(--color-text); }
+:root[data-theme="dark"] .tabs-overflow-btn:hover { background-color: var(--color-tab-hover); }
+:root[data-theme="dark"] .tabs-overflow-popup { background: var(--color-popover); border-color: var(--color-popover-border); }
+:root[data-theme="dark"] .tabs-overflow-item { color: var(--color-text); }
+:root[data-theme="dark"] .tabs-overflow-item:hover { background-color: var(--color-row-hover); }
+:root[data-theme="dark"] .tabs-overflow-item.active { background-color: var(--color-tab-active-bg); }
 :root[data-theme="dark"] .search-results { background: var(--color-popover); border-color: var(--color-popover-border); }
 :root[data-theme="dark"] .search-results li { color: var(--color-text); border-bottom-color: var(--color-divider); }
 :root[data-theme="dark"] .search-results li:hover { background: var(--color-row-hover); }
@@ -329,6 +335,9 @@ body {
 .navbar-left {
     display: flex;
     align-items: center;
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .add-tab {
@@ -346,7 +355,7 @@ body {
     }
 
 .navbar-center {
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     display: flex;
     justify-content: center;
     position: relative; /* necesario para posicionar el dropdown relativo a la barra */
@@ -420,7 +429,11 @@ body {
     margin-right: 10px;
     display: flex;
     align-items: center;
+    flex: 0 1 200px;
+    min-width: 120px;
+    box-sizing: border-box;
 }
+.tab.tf-overflowed { display: none; }
 
     .tab:hover {
         background-color: #eeeeee;
@@ -439,10 +452,10 @@ body {
     }
 
     .tab .tab-text {
-        flex-grow: 1;
+        flex: 1 1 auto;
         color: #000000;
         margin-right: 5px;
-        max-width: 160px;
+        max-width: none;
         overflow: hidden;
         white-space: nowrap;
         text-overflow: ellipsis;
@@ -478,6 +491,88 @@ body {
         .tab span:hover {
             color: #ff0000;
         }
+
+/* ── Tab overflow ("···") button + popup ─────────────────────────────────── */
+.tabs-overflow-btn {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    padding: 8px 10px;
+    margin-right: 10px;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    color: #555;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.tabs-overflow-btn:hover { background-color: #eeeeee; }
+.tabs-overflow-btn[hidden] { display: none; }
+.tabs-overflow-btn .badge {
+    background-color: #007BFF;
+    color: #fff;
+    border-radius: 10px;
+    padding: 1px 6px;
+    font-size: 11px;
+    min-width: 18px;
+    text-align: center;
+    line-height: 1.4;
+}
+
+.tabs-overflow-popup {
+    position: fixed;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 2000;
+    width: 280px;
+    max-height: 360px;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+.tabs-overflow-popup[hidden] { display: none; }
+
+.tabs-overflow-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    cursor: pointer;
+    gap: 8px;
+    color: #111;
+}
+.tabs-overflow-item:hover { background-color: #f5f5f5; }
+.tabs-overflow-item.active {
+    background-color: #eaf3ff;
+    font-weight: 600;
+}
+.tabs-overflow-item .item-icon {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+}
+.tabs-overflow-item .item-text {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+}
+.tabs-overflow-item .item-close {
+    background: none;
+    border: none;
+    opacity: .55;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 6px;
+    line-height: 1;
+}
+.tabs-overflow-item .item-close:hover {
+    opacity: 1;
+    color: #ff5630;
+}
 
 .notifications-popup .popup-header {
     display: flex;
