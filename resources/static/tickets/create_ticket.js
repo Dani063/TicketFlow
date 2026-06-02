@@ -1038,6 +1038,10 @@ window.initTicketPane = function (root, ctx) {
     function fitLayout() {
         const layout = rootEl.querySelector('#ticketLayout');
         if (!layout) return;
+        // Skip if pane is detached (tab inactive) or not laid out yet —
+        // getBoundingClientRect returns zeros and we'd cache a wrong height
+        // that pushes the compose box below the fixed footer on re-attach.
+        if (!layout.isConnected || layout.offsetParent === null) return;
         const top     = layout.getBoundingClientRect().top;
         const footer  = rootEl.querySelector('.footer-bar');
         const footerH = footer ? footer.offsetHeight : 44;
@@ -1046,6 +1050,10 @@ window.initTicketPane = function (root, ctx) {
     }
     fitLayout();
     window.addEventListener('resize', fitLayout);
+    // Expose so tabs.js can re-fit on tab re-activation (the inline height
+    // cached at first mount can drift if the viewport changed while this
+    // pane was detached).
+    rootEl.__tfFitLayout = fitLayout;
 
     // ===== Panel collapse + resize =====
     (function initPanels() {
