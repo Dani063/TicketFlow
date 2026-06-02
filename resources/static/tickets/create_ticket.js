@@ -1272,17 +1272,17 @@ window.initTicketPane = function (root, ctx) {
         let searchTimer = null;
 
         function openMergeModal() {
-            mergeModal.style.display = 'flex';
+            mergeModal.classList.add('open');
             mergeSearchInput.value = '';
             mergeSearchResults.innerHTML = '';
             mergeSelected.style.display = 'none';
             mergeTargetId.value = '';
             mergeConfirmBtn.disabled = true;
-            mergeSearchInput.focus();
+            setTimeout(() => mergeSearchInput.focus(), 30);
         }
 
         function closeMergeModal() {
-            mergeModal.style.display = 'none';
+            mergeModal.classList.remove('open');
         }
 
         mergeBtn.addEventListener('click', openMergeModal);
@@ -1295,28 +1295,34 @@ window.initTicketPane = function (root, ctx) {
             const q = mergeSearchInput.value.trim();
             if (q.length < 2) { mergeSearchResults.innerHTML = ''; return; }
             searchTimer = setTimeout(async () => {
-                const res = await fetch(`${window.urls.search}?q=${encodeURIComponent(q)}`);
-                const data = await res.json();
-                mergeSearchResults.innerHTML = '';
-                const tickets = (data.tickets || []).filter(t => t.id !== ctx.ticketId);
-                if (!tickets.length) {
-                    mergeSearchResults.innerHTML = '<li class="merge-result-empty">Sin resultados</li>';
-                    return;
-                }
-                tickets.forEach(t => {
-                    const li = document.createElement('li');
-                    li.className = 'merge-result-item';
-                    li.dataset.id = t.id;
-                    li.innerHTML = `<span class="merge-result-id">#${t.id}</span> <span class="merge-result-subject">${t.subject}</span> <span class="merge-result-status status-${t.status}">${t.status}</span>`;
-                    li.addEventListener('click', () => {
-                        mergeTargetId.value = t.id;
-                        mergeSelectedLabel.textContent = `#${t.id} — ${t.subject}`;
-                        mergeSelected.style.display = 'block';
-                        mergeConfirmBtn.disabled = false;
-                        mergeSearchResults.innerHTML = '';
+                const searchUrl = (ctx && ctx.searchUrl) || (window.urls && window.urls.search) || '/search/';
+                try {
+                    const res = await fetch(`${searchUrl}?q=${encodeURIComponent(q)}`);
+                    const data = await res.json();
+                    mergeSearchResults.innerHTML = '';
+                    const tickets = (data.tickets || []).filter(t => t.id !== ctx.ticketId);
+                    if (!tickets.length) {
+                        mergeSearchResults.innerHTML = '<li class="merge-result-empty">Sin resultados</li>';
+                        return;
+                    }
+                    tickets.forEach(t => {
+                        const li = document.createElement('li');
+                        li.className = 'merge-result-item';
+                        li.dataset.id = t.id;
+                        li.innerHTML = `<span class="merge-result-id">#${t.id}</span> <span class="merge-result-subject">${t.subject}</span> <span class="merge-result-status status-${t.status}">${t.status}</span>`;
+                        li.addEventListener('click', () => {
+                            mergeTargetId.value = t.id;
+                            mergeSelectedLabel.textContent = `#${t.id} — ${t.subject}`;
+                            mergeSelected.style.display = 'block';
+                            mergeConfirmBtn.disabled = false;
+                            mergeSearchResults.innerHTML = '';
+                        });
+                        mergeSearchResults.appendChild(li);
                     });
-                    mergeSearchResults.appendChild(li);
-                });
+                } catch (e) {
+                    console.error('[merge] search failed', e);
+                    mergeSearchResults.innerHTML = '<li class="merge-result-empty" style="color:var(--color-danger);">Error al buscar</li>';
+                }
             }, 300);
         });
 

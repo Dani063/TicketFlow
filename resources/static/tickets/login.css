@@ -6,7 +6,7 @@
 
 body {
     margin: 0;
-    font-family: Roboto, -apple-system, 'Helvetica Neue', 'Segoe UI', Arial, sans-serif;
+    font-family: var(--font-sans);
     background: #2d1855;
 }
 

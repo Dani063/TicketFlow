@@ -1,0 +1,165 @@
+/* ============================================================
+   Admin panel — view-specific layout that complements ui.css.
+   All shared concerns (buttons, inputs, toolbar, fields, pills,
+   modal styling) live in ui.css and dialog.css. Only the
+   admin-specific shell (header, tabs panels, bulk bar, table area
+   with sticky header + custom scrollbar) lives here.
+   ============================================================ */
+
+.tf-admin-wrap {
+    margin-left: 59px;                     /* sidebar width */
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 50px);             /* 50px = navbar height */
+    overflow: hidden;
+}
+
+.tf-admin-header {
+    padding: var(--space-5) var(--space-6) var(--space-3);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+}
+.tf-admin-header-icon {
+    width: 44px; height: 44px;
+    border-radius: var(--radius-lg);
+    display: inline-flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #8b5cf6 0%, var(--color-primary-hover) 100%);
+    color: #fff;
+    font-size: 18px;
+    box-shadow: 0 6px 16px rgba(124, 58, 237, .28), inset 0 1px 0 rgba(255,255,255,.18);
+    flex-shrink: 0;
+}
+:root[data-theme="dark"] .tf-admin-header-icon {
+    background: linear-gradient(135deg, #a78bfa 0%, var(--color-primary) 100%);
+    box-shadow: 0 6px 16px rgba(124, 58, 237, .45), inset 0 1px 0 rgba(255,255,255,.22);
+}
+.tf-admin-header-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tf-admin-header h1 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    color: var(--color-text);
+}
+.tf-admin-header p {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+    line-height: 1.4;
+}
+
+/* In-page tabs (Users / Roles / Groups) — extends .tf-tabs with padding */
+.tf-admin-tabs {
+    padding: var(--space-2) var(--space-6) 0;
+    flex-shrink: 0;
+}
+
+/* Panel container per tab */
+.tf-admin-panel { display: none; flex: 1 1 0; min-height: 0; flex-direction: column; }
+.tf-admin-panel.is-active { display: flex; }
+
+/* Toolbar padding tuned for admin shell */
+.tf-admin-panel .tf-toolbar {
+    padding: var(--space-3) var(--space-6);
+    flex-shrink: 0;
+    flex-wrap: nowrap;
+}
+.tf-admin-panel .tf-toolbar .tf-input { flex: 2 1 0; min-width: 200px; max-width: 480px; }
+.tf-admin-panel .tf-toolbar .tf-select { flex: 1 1 0; min-width: 140px; max-width: 220px; }
+.tf-admin-panel .tf-toolbar .tf-toolbar-grow { flex: 0 0 0; width: 0; }
+.tf-admin-panel .tf-toolbar .tf-btn { flex: 0 0 auto; margin-left: auto; }
+
+/* Bulk-actions bar */
+.tf-admin-bulk-bar {
+    display: none;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-6);
+    background: var(--color-primary);
+    color: #fff;
+    flex-shrink: 0;
+    font-size: var(--font-size-sm);
+}
+.tf-admin-bulk-bar.is-visible { display: flex; }
+.tf-admin-bulk-bar strong { font-size: var(--font-size-base); }
+.tf-admin-bulk-bar .tf-admin-bulk-grow { flex: 1; }
+.tf-admin-bulk-bar button {
+    background: rgba(255,255,255,.18);
+    border: 1px solid rgba(255,255,255,.35);
+    color: #fff;
+    border-radius: var(--radius-sm);
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--font-size-xs);
+    cursor: pointer;
+    font-family: var(--font-sans);
+}
+.tf-admin-bulk-bar button:hover { background: rgba(255,255,255,.28); }
+.tf-admin-bulk-bar button.is-danger { background: rgba(220,38,38,.55); }
+:root[data-theme="dark"] .tf-admin-bulk-bar { background: #5b21b6; }
+
+/* Scrollable table area with sticky header */
+.tf-admin-table-area {
+    flex: 1 1 0; min-height: 0;
+    overflow-y: auto; overflow-x: auto;
+    padding: 0 var(--space-6);
+    scrollbar-gutter: stable;
+}
+.tf-admin-table-area::-webkit-scrollbar { width: 8px; height: 8px; }
+.tf-admin-table-area::-webkit-scrollbar-track { background: transparent; }
+.tf-admin-table-area::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: var(--radius-sm); }
+.tf-admin-table-area::-webkit-scrollbar-button { display: none; }
+.tf-admin-table-area::-webkit-scrollbar-corner { background: transparent; }
+
+/* Compact data table for admin views */
+.tf-admin-table { width: 100%; border-collapse: collapse; min-width: 600px; color: var(--color-text); }
+.tf-admin-table th,
+.tf-admin-table td {
+    padding: var(--space-2) var(--space-3);
+    text-align: left;
+    font-size: var(--font-size-sm);
+    white-space: nowrap;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--color-divider);
+}
+.tf-admin-table thead th {
+    background: var(--color-surface);
+    font-weight: 600;
+    color: var(--color-text-muted);
+    border-bottom: 2px solid var(--color-divider);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.tf-admin-table tbody tr:hover { background: var(--color-row-hover); }
+.tf-admin-table tbody tr.is-selected,
+.tf-admin-table tbody tr.row-selected { background: var(--color-primary-soft); }
+
+.tf-admin-table .col-cb  { width: 36px; text-align: center; }
+.tf-admin-table .col-id  { width: 56px; }
+.tf-admin-table .col-name  { min-width: 140px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.tf-admin-table .col-email { min-width: 180px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.tf-admin-table .col-role,
+.tf-admin-table .col-group { width: 110px; }
+.tf-admin-table .col-status  { width: 80px; }
+.tf-admin-table .col-actions { width: 100px; text-align: right; }
+
+.tf-admin-table-actions { display: inline-flex; gap: var(--space-1); justify-content: flex-end; }
+
+/* Pagination padding reused from home.css .pagination-bar */
+.tf-admin-pag { flex-shrink: 0; padding: 0 var(--space-6); }
+
+/* ----- Alert (inline error banner inside admin modals) ----- */
+.tf-admin-alert {
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    font-size: var(--font-size-sm);
+    margin-bottom: var(--space-2);
+}
+.tf-admin-alert--error {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    border: 1px solid var(--color-danger);
+}

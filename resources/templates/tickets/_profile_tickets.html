@@ -4,20 +4,21 @@ Context: tickets, pagination, filters, page_sizes.
 Optional: extra_param + extra_value (carried in every link, e.g. customer id).
 {% endcomment %}
 
-<form method="get" class="profile-tickets-toolbar" id="profileTicketsToolbar" action="#tickets">
+<form method="get" class="tf-toolbar" id="profileTicketsToolbar" action="#tickets">
     {% if extra_param %}<input type="hidden" name="{{ extra_param }}" value="{{ extra_value }}">{% endif %}
-    <div class="profile-status-pills" role="tablist" aria-label="Filtro por estado">
+    <div class="tf-status-pills" role="tablist" aria-label="Filtro por estado">
         {% with current=filters.status %}
-        <button type="button" class="status-pill {% if current == 'all' %}active{% endif %}"     data-status="all">Todos</button>
-        <button type="button" class="status-pill {% if current == 'open' %}active{% endif %}"    data-status="open">Abiertos</button>
-        <button type="button" class="status-pill {% if current == 'pending' %}active{% endif %}" data-status="pending">Pendientes</button>
-        <button type="button" class="status-pill {% if current == 'solved' %}active{% endif %}"  data-status="solved">Resueltos</button>
+        <button type="button" class="tf-status-pill {% if current == 'all' %}is-active{% endif %}"     data-status="all">Todos</button>
+        <button type="button" class="tf-status-pill {% if current == 'open' %}is-active{% endif %}"    data-status="open">Abiertos</button>
+        <button type="button" class="tf-status-pill {% if current == 'pending' %}is-active{% endif %}" data-status="pending">Pendientes</button>
+        <button type="button" class="tf-status-pill {% if current == 'solved' %}is-active{% endif %}"  data-status="solved">Resueltos</button>
         <input type="hidden" name="status" value="{{ current }}" id="profileTicketsStatus">
         {% endwith %}
     </div>
-    <div class="profile-search">
-        <input type="search" name="q" value="{{ filters.q }}" placeholder="Buscar por asunto o #ID…" autocomplete="off">
-        <button type="submit" class="profile-search-btn" aria-label="Buscar"><i class="fas fa-search"></i></button>
+    <div class="tf-toolbar-grow"></div>
+    <div class="tf-profile-search">
+        <input class="tf-input tf-input--search" type="search" name="q" value="{{ filters.q }}" placeholder="Buscar por asunto o #ID…" autocomplete="off">
+        <button type="submit" class="tf-btn tf-btn--icon tf-btn--ghost" aria-label="Buscar"><i class="fas fa-search"></i></button>
     </div>
     <input type="hidden" name="page_size" value="{{ pagination.page_size }}" id="profileTicketsPageSize">
 </form>
@@ -87,62 +88,28 @@ Optional: extra_param + extra_value (carried in every link, e.g. customer id).
 {% endif %}
 
 <style>
-.profile-tickets-toolbar {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3, 12px);
-    flex-wrap: wrap;
-    margin: 0 0 var(--space-3, 12px) 0;
-    padding: var(--space-2, 8px) 0;
-}
-.profile-status-pills { display: flex; gap: 6px; flex-wrap: wrap; }
-.status-pill {
-    border: 1px solid var(--color-border, #e2e8f0);
-    background: #fff;
-    color: var(--color-text-muted, #475569);
-    border-radius: 999px;
+.tf-status-pills { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+.tf-status-pill {
+    border: 1px solid var(--color-border);
+    background: var(--color-surface);
+    color: var(--color-text-muted);
+    border-radius: var(--radius-pill);
     padding: 6px 14px;
-    font-size: 13px;
+    font-size: var(--font-size-sm);
     font-weight: 500;
     cursor: pointer;
-    font-family: inherit;
-    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+    font-family: var(--font-sans);
+    transition: var(--btn-transition);
 }
-.status-pill:hover { background: #f5f6f8; }
-.status-pill.active {
-    background: var(--color-primary, #7c3aed);
+.tf-status-pill:hover { background: var(--color-surface-2); }
+.tf-status-pill.is-active {
+    background: var(--color-primary);
     color: #fff;
-    border-color: var(--color-primary, #7c3aed);
+    border-color: var(--color-primary);
 }
-.profile-search {
-    display: flex;
-    align-items: center;
-    background: #fff;
-    border: 1px solid var(--color-border, #e2e8f0);
-    border-radius: var(--radius-md, 8px);
-    padding: 2px 4px 2px 10px;
-    margin-left: auto;
-    min-width: 240px;
-}
-.profile-search input {
-    border: none;
-    outline: none;
-    font-size: 13px;
-    font-family: inherit;
-    flex: 1;
-    background: transparent;
-    padding: 6px 4px;
-}
-.profile-search-btn {
-    border: none;
-    background: transparent;
-    color: var(--color-text-muted, #475569);
-    cursor: pointer;
-    padding: 6px 8px;
-    font-size: 13px;
-}
-.profile-search-btn:hover { color: var(--color-primary, #7c3aed); }
-.profile-pagination { border-top: 1px solid #e8e8e8; margin-top: 6px; }
+.tf-profile-search { display: flex; align-items: center; gap: var(--space-1); min-width: 240px; }
+.tf-profile-search .tf-input { flex: 1; }
+.profile-pagination { border-top: 1px solid var(--color-divider-strong); margin-top: var(--space-1); }
 </style>
 
 <script>
@@ -173,7 +140,7 @@ Optional: extra_param + extra_value (carried in every link, e.g. customer id).
     }
 
     // Status pills → set status, reset page, submit (keeping #tickets hash)
-    form.querySelectorAll('.status-pill').forEach(pill => {
+    form.querySelectorAll('.tf-status-pill').forEach(pill => {
         pill.addEventListener('click', () => {
             statusInput.value = pill.dataset.status;
             form.submit();

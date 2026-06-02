@@ -107,6 +107,37 @@
     --color-tab-active-bg:  #f0f0f0;
     --shadow-card:          0 2px 4px rgba(0, 0, 0, 0.1);
     --shadow-popover-dark:  0 4px 12px rgba(0, 0, 0, 0.15);
+
+    /* Neutral gray scale (added for ui.css component library) */
+    --color-gray-50:  #f9fafb;
+    --color-gray-100: #f3f4f6;
+    --color-gray-200: #e5e7eb;
+    --color-gray-300: #d1d5db;
+    --color-gray-400: #9ca3af;
+    --color-gray-500: #6b7280;
+    --color-gray-600: #4b5563;
+    --color-gray-700: #374151;
+    --color-gray-800: #1f2937;
+    --color-gray-900: #111827;
+
+    /* Button system tokens */
+    --btn-radius:          var(--radius-md);
+    --btn-padding-y:       8px;
+    --btn-padding-x:       14px;
+    --btn-padding-y-sm:    4px;
+    --btn-padding-x-sm:    10px;
+    --btn-padding-y-lg:    10px;
+    --btn-padding-x-lg:    18px;
+    --btn-font-weight:     600;
+    --btn-transition:      background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+
+    /* Extra shadows */
+    --shadow-xs:           0 1px 1px rgba(15, 23, 42, 0.04);
+    --shadow-button:       0 1px 2px rgba(15, 23, 42, 0.08);
+
+    /* Focus ring (a11y) */
+    --focus-ring:          0 0 0 3px rgba(124, 58, 237, 0.25);
+    --focus-ring-danger:   0 0 0 3px rgba(220, 38, 38, 0.25);
 }
 
 /* ============================================================
@@ -172,6 +203,27 @@
 
     --shadow-card:          0 2px 4px rgba(0, 0, 0, 0.4);
     --shadow-popover-dark:  0 4px 16px rgba(0, 0, 0, 0.55);
+
+    /* Neutral gray scale inverted for dark theme */
+    --color-gray-50:  #111827;
+    --color-gray-100: #1f2937;
+    --color-gray-200: #374151;
+    --color-gray-300: #4b5563;
+    --color-gray-400: #6b7280;
+    --color-gray-500: #9ca3af;
+    --color-gray-600: #d1d5db;
+    --color-gray-700: #e5e7eb;
+    --color-gray-800: #f3f4f6;
+    --color-gray-900: #f9fafb;
+
+    /* Extra shadows: deeper in dark */
+    --shadow-xs:           0 1px 1px rgba(0, 0, 0, 0.35);
+    --shadow-button:       0 1px 2px rgba(0, 0, 0, 0.5);
+
+    /* Focus ring keeps the primary hue but lower opacity */
+    --focus-ring:          0 0 0 3px rgba(124, 58, 237, 0.4);
+    --focus-ring-danger:   0 0 0 3px rgba(220, 38, 38, 0.4);
+
     color-scheme: dark;
 }
 
@@ -1320,15 +1372,17 @@ body, html {
 /* ===== Resultados de búsqueda ===== */
 .search-results {
     position: absolute;
-    top: 100%; /* justo debajo de la barra */
-    left: 19.3%;
-    width: 61.5%; /* ancho dinámico de la barra */
-    background: #fff;
-    border: 1px solid #ddd;
-    border-radius: 6px;
+    top: 100%;          /* justo debajo de la barra */
+    right: 0;           /* anclado al borde derecho de la search bar */
+    left: auto;
+    width: 640px;       /* lo bastante ancho para leer asuntos completos */
+    max-width: calc(100vw - 80px);
+    background: var(--color-popover);
+    border: 1px solid var(--color-popover-border);
+    border-radius: var(--radius-md);
     margin-top: 4px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    max-height: 350px;
+    box-shadow: var(--shadow-md);
+    max-height: 420px;
     overflow-y: auto;
     z-index: 2000;
     display: none;
@@ -1343,23 +1397,23 @@ body, html {
     .search-results li {
         padding: 10px 14px;
         font-size: 14px;
-        color: #333;
-        border-bottom: 1px solid #f1f1f1;
+        color: var(--color-text);
+        border-bottom: 1px solid var(--color-divider);
         cursor: pointer;
-        transition: background 0.2s;
+        transition: background var(--transition-fast);
     }
 
         .search-results li:hover {
-            background: #e9f1f8;
+            background: var(--color-row-hover);
         }
 
     .search-results .result-header {
         font-weight: bold;
         font-size: 12px;
-        color: #666;
+        color: var(--color-text-muted);
         text-transform: uppercase;
-        background: #f4f5f7;
-        border-bottom: 1px solid #e0e0e0;
+        background: var(--color-card-soft);
+        border-bottom: 1px solid var(--color-divider-strong);
         cursor: default;
     }
 

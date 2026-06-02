@@ -1,0 +1,408 @@
+/* ============================================================
+   TicketFlow UI library — .tf-* components
+   All rules consume design tokens from style.css (light + dark).
+   No hardcoded colors, radii, shadows or spacing in this file.
+   ============================================================ */
+
+/* ----- Page layout shell ----- */
+.tf-page-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-5) var(--space-6);
+    width: 100%;
+    box-sizing: border-box;
+    color: var(--color-text);
+}
+.tf-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+}
+.tf-page-header h1,
+.tf-page-header h2 {
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+    color: var(--color-text);
+    margin: 0;
+}
+.tf-page-header .tf-page-subtitle {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+}
+
+/* ----- Tabs (in-page, not the top tab bar) ----- */
+.tf-tabs {
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-1);
+    border-bottom: 1px solid var(--color-border);
+}
+.tf-tab {
+    padding: var(--space-2) var(--space-4);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--color-text-muted);
+    font-size: var(--font-size-base);
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--btn-transition);
+}
+.tf-tab:hover { color: var(--color-text); }
+.tf-tab.is-active {
+    color: var(--color-primary);
+    border-bottom-color: var(--color-primary);
+    font-weight: 600;
+}
+
+/* ----- Toolbar (search + filters row) ----- */
+.tf-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: nowrap;
+    padding: var(--space-3) 0;
+    min-width: 0;
+}
+.tf-toolbar > .tf-input,
+.tf-toolbar > .tf-select { min-width: 0; }
+.tf-toolbar > .tf-input  { flex: 2 1 0; max-width: 480px; }
+.tf-toolbar > .tf-select { flex: 1 1 0; max-width: 220px; }
+.tf-toolbar .tf-toolbar-grow { flex: 1 1 auto; min-width: 0; }
+.tf-toolbar--compact { padding: var(--space-1) 0; gap: var(--space-1); }
+.tf-toolbar--wrap { flex-wrap: wrap; }
+
+/* ----- Inputs ----- */
+.tf-input,
+.tf-select,
+.tf-textarea {
+    height: 36px;
+    padding: 0 var(--space-3);
+    border: 1px solid var(--color-input-border);
+    border-radius: var(--radius-md);
+    background: var(--color-input-bg);
+    color: var(--color-input-text);
+    font-family: var(--font-sans);
+    font-size: var(--font-size-base);
+    line-height: 1;
+    box-sizing: border-box;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.tf-textarea {
+    height: auto;
+    min-height: 96px;
+    padding: var(--space-2) var(--space-3);
+    line-height: 1.4;
+    resize: vertical;
+}
+.tf-input:focus,
+.tf-select:focus,
+.tf-textarea:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: var(--focus-ring);
+}
+.tf-input::placeholder,
+.tf-textarea::placeholder { color: var(--color-text-disabled); }
+.tf-input--sm,
+.tf-select--sm { height: 30px; padding: 0 var(--space-2); font-size: var(--font-size-sm); }
+.tf-input[disabled],
+.tf-select[disabled],
+.tf-textarea[disabled] {
+    background: var(--color-surface-2);
+    color: var(--color-text-disabled);
+    cursor: not-allowed;
+}
+
+/* Search input grows by default in toolbars */
+.tf-toolbar .tf-input[type="search"],
+.tf-toolbar .tf-input.tf-input--search { flex: 1 1 240px; min-width: 200px; max-width: 360px; }
+
+/* ----- Field (label + control) ----- */
+.tf-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+.tf-field > label {
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    color: var(--color-text-muted);
+}
+.tf-field--inline {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-3);
+}
+.tf-field--inline > label { min-width: 120px; }
+.tf-field--error .tf-input,
+.tf-field--error .tf-select,
+.tf-field--error .tf-textarea {
+    border-color: var(--color-danger);
+}
+.tf-field--error .tf-field-error {
+    color: var(--color-danger);
+    font-size: var(--font-size-xs);
+}
+
+/* ----- Buttons ----- */
+.tf-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--btn-padding-y) var(--btn-padding-x);
+    height: 36px;
+    border-radius: var(--btn-radius);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: var(--font-size-base);
+    font-weight: var(--btn-font-weight);
+    line-height: 1;
+    cursor: pointer;
+    text-decoration: none;
+    box-sizing: border-box;
+    transition: var(--btn-transition);
+    user-select: none;
+}
+.tf-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+.tf-btn:disabled,
+.tf-btn[disabled] {
+    opacity: .55;
+    cursor: not-allowed;
+}
+.tf-btn--sm { height: 28px; padding: var(--btn-padding-y-sm) var(--btn-padding-x-sm); font-size: var(--font-size-sm); }
+.tf-btn--lg { height: 44px; padding: var(--btn-padding-y-lg) var(--btn-padding-x-lg); font-size: var(--font-size-lg); }
+
+.tf-btn--primary {
+    background: var(--color-primary);
+    color: #fff;
+    border-color: var(--color-primary);
+    box-shadow: var(--shadow-button);
+}
+.tf-btn--primary:hover:not(:disabled) { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
+
+.tf-btn--secondary {
+    background: var(--color-surface);
+    color: var(--color-text);
+    border-color: var(--color-border-strong);
+}
+.tf-btn--secondary:hover:not(:disabled) { background: var(--color-surface-2); }
+
+.tf-btn--ghost {
+    background: transparent;
+    color: var(--color-text-muted);
+    border-color: transparent;
+}
+.tf-btn--ghost:hover:not(:disabled) { background: var(--color-surface-2); color: var(--color-text); }
+
+.tf-btn--danger {
+    background: var(--color-danger);
+    color: #fff;
+    border-color: var(--color-danger);
+    box-shadow: var(--shadow-button);
+}
+.tf-btn--danger:hover:not(:disabled) { background: #b91c1c; border-color: #b91c1c; }
+.tf-btn--danger:focus-visible { box-shadow: var(--focus-ring-danger); }
+
+.tf-btn--icon {
+    width: 36px;
+    padding: 0;
+    color: var(--color-text-muted);
+}
+.tf-btn--icon.tf-btn--sm { width: 28px; }
+.tf-btn--icon:hover:not(:disabled) { background: var(--color-surface-2); color: var(--color-text); }
+
+/* ----- Card ----- */
+.tf-card {
+    background: var(--color-card-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: var(--space-5);
+    color: var(--color-text);
+}
+.tf-card--flush  { padding: 0; }
+.tf-card--padded { padding: var(--space-6); }
+.tf-card--interactive { cursor: pointer; transition: box-shadow var(--transition-fast), transform var(--transition-fast); }
+.tf-card--interactive:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+
+/* ----- Pills / badges ----- */
+.tf-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-pill);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    line-height: 1.6;
+    background: var(--color-surface-2);
+    color: var(--color-text-muted);
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+.tf-pill--success { background: var(--color-success-bg); color: var(--color-success); }
+.tf-pill--warning { background: var(--color-warning-bg); color: var(--color-warning); }
+.tf-pill--danger  { background: var(--color-danger-bg);  color: var(--color-danger); }
+.tf-pill--info    { background: var(--color-info-bg);    color: var(--color-info); }
+.tf-pill--neutral { background: var(--color-surface-2);  color: var(--color-text-muted); }
+.tf-pill--primary { background: var(--color-primary-soft); color: var(--color-primary); }
+
+/* Ticket-status helpers (parity with --status-* tokens) */
+.tf-pill--status-open      { background: var(--status-open-bg);     color: var(--status-open-fg); }
+.tf-pill--status-pending   { background: var(--status-pending-bg);  color: var(--status-pending-fg); }
+.tf-pill--status-resolved  { background: var(--status-resolved-bg); color: var(--status-resolved-fg); }
+.tf-pill--status-closed    { background: var(--status-closed-bg);   color: var(--status-closed-fg); }
+
+/* ----- Tables (extends .tabla with .tf-table for new views) ----- */
+.tf-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--color-table-bg);
+    color: var(--color-text);
+    font-size: var(--font-size-base);
+}
+.tf-table th,
+.tf-table td {
+    padding: var(--space-3) var(--space-3);
+    text-align: left;
+    border-bottom: 1px solid var(--color-table-border);
+}
+.tf-table thead th {
+    background: var(--color-table-head);
+    color: var(--color-text-muted);
+    font-size: var(--font-size-sm);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.tf-table tbody tr { transition: background-color var(--transition-fast); }
+.tf-table tbody tr:hover { background: var(--color-row-hover); }
+.tf-table tbody tr.is-selected,
+.tf-table tbody tr.row-selected { background: var(--color-row-selected); }
+.tf-table .tf-table-actions {
+    display: flex;
+    gap: var(--space-1);
+    justify-content: flex-end;
+}
+
+/* ----- Empty state ----- */
+.tf-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-8) var(--space-4);
+    text-align: center;
+    color: var(--color-text-muted);
+}
+.tf-empty .tf-empty-icon {
+    font-size: 32px;
+    color: var(--color-text-disabled);
+    margin-bottom: var(--space-1);
+}
+.tf-empty .tf-empty-title {
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--color-text);
+}
+.tf-empty .tf-empty-message { font-size: var(--font-size-sm); }
+.tf-empty--compact { padding: var(--space-4) var(--space-2); }
+
+/* ----- Spinner ----- */
+.tf-spinner {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--color-border);
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    animation: tf-spin .8s linear infinite;
+}
+/* Block variant — centered horizontally, occupies its row.
+   Use this when the spinner is a *flow* element, not when it sits next
+   to other flex children that should retain their normal sizing. */
+.tf-spinner--block {
+    display: block;
+    margin: var(--space-5) auto;
+    width: 28px;
+    height: 28px;
+    border: 3px solid var(--color-border);
+    border-top-color: var(--color-primary);
+    animation: tf-spin .8s linear infinite;
+}
+/* Overlay variant — covers its positioned parent. Use inside .tabla
+   (flex container) so the table keeps its size while loading. */
+.tf-spinner--overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.55);
+    z-index: 10;
+    pointer-events: none;
+    width: auto;
+    height: auto;
+    border: none;
+    border-radius: 0;
+    animation: none;
+}
+:root[data-theme="dark"] .tf-spinner--overlay { background: rgba(15, 23, 42, 0.45); }
+.tf-spinner--overlay::after {
+    content: "";
+    display: inline-block;
+    width: 28px;
+    height: 28px;
+    border: 3px solid var(--color-border);
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    animation: tf-spin .8s linear infinite;
+}
+@keyframes tf-spin { to { transform: rotate(360deg); } }
+
+/* ----- Skeleton ----- */
+.tf-skeleton {
+    display: block;
+    background: linear-gradient(90deg, var(--color-surface-2) 0%, var(--color-border) 50%, var(--color-surface-2) 100%);
+    background-size: 200% 100%;
+    border-radius: var(--radius-sm);
+    animation: tf-skel 1.4s ease-in-out infinite;
+    height: 14px;
+    width: 100%;
+}
+.tf-skeleton--circle { border-radius: 50%; width: 28px; height: 28px; }
+.tf-skeleton--row { height: 18px; margin-bottom: var(--space-2); }
+@keyframes tf-skel {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* ----- Divider ----- */
+.tf-divider {
+    border: none;
+    border-top: 1px solid var(--color-divider);
+    margin: var(--space-4) 0;
+}
+.tf-divider--strong { border-top-color: var(--color-divider-strong); }
+.tf-divider--vertical {
+    border-top: none;
+    border-left: 1px solid var(--color-divider);
+    width: 0;
+    height: auto;
+    align-self: stretch;
+    margin: 0 var(--space-2);
+}

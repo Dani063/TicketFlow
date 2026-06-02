@@ -456,25 +456,27 @@
 </form>
 
 {% if ticket and can_use_internal and not ticket.merged_into %}
-<div id="merge-modal" class="merge-modal-overlay" style="display:none">
-    <div class="merge-modal">
-        <div class="merge-modal-header">
-            <h3><i class="fas fa-code-branch"></i> Fusionar ticket</h3>
-            <button type="button" id="merge-modal-close" class="merge-modal-close">&times;</button>
+<div id="merge-modal" class="dialog-backdrop tf-dialog-merge">
+    <div class="dialog dialog--lg dialog--form" role="dialog" aria-modal="true">
+        <div class="dialog__header">
+            <h3 class="dialog__title"><i class="fas fa-code-branch"></i> Fusionar ticket</h3>
+            <button type="button" id="merge-modal-close" class="dialog__close" aria-label="Cerrar">&times;</button>
         </div>
-        <div class="merge-modal-body">
+        <div class="dialog__body">
             <p>El ticket actual (<strong>#{{ ticket.zendesk_id|default:ticket.id }}</strong>) se cerrará y sus comentarios pasarán al ticket destino.</p>
-            <label for="merge-search-input">Buscar ticket destino por ID o asunto:</label>
-            <input type="text" id="merge-search-input" class="merge-search-input" placeholder="Escribe para buscar…" autocomplete="off">
+            <div class="tf-field">
+                <label for="merge-search-input">Buscar ticket destino por ID o asunto:</label>
+                <input type="text" id="merge-search-input" class="tf-input merge-search-input" placeholder="Escribe para buscar…" autocomplete="off">
+            </div>
             <ul id="merge-search-results" class="merge-search-results"></ul>
             <div id="merge-selected" class="merge-selected" style="display:none">
                 Destino seleccionado: <strong id="merge-selected-label"></strong>
                 <input type="hidden" id="merge-target-id">
             </div>
         </div>
-        <div class="merge-modal-footer">
-            <button type="button" id="merge-confirm-btn" class="main-btn" disabled>Confirmar fusión</button>
-            <button type="button" id="merge-cancel-btn" class="cancel-btn">Cancelar</button>
+        <div class="dialog__footer">
+            <button type="button" id="merge-cancel-btn" class="tf-btn tf-btn--secondary">Cancelar</button>
+            <button type="button" id="merge-confirm-btn" class="tf-btn tf-btn--primary" disabled>Confirmar fusión</button>
         </div>
     </div>
 </div>

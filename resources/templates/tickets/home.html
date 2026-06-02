@@ -7,36 +7,11 @@
 {% endblock %}
 
 {% block content %}
-<!-- Bulk merge modal (solo para agentes) -->
-{% if user.role and user.role.role_name|lower not in 'end user,end-user,cliente,customer' %}
-<div id="homeBulkMergeOverlay" class="bulk-merge-overlay">
-    <div class="bulk-merge-modal">
-        <div class="bmm-header">
-            <h3><i class="fas fa-code-branch"></i> Fusionar tickets en...</h3>
-            <button class="bmm-close" id="homeBmmClose">&times;</button>
-        </div>
-        <div class="bmm-body">
-            <input type="text" class="bmm-search" id="homeBmmSearch" placeholder="Buscar ticket destino por asunto o ID...">
-            <ul class="bmm-results" id="homeBmmResults">
-                <li style="color:#94a3b8; cursor:default;">Escribe para buscar</li>
-            </ul>
-            <div class="bmm-selected-target" id="homeBmmSelectedTarget"></div>
-        </div>
-        <div class="bmm-footer">
-            <button class="bmm-btn" id="homeBmmCancel">Cancelar</button>
-            <button class="bmm-btn bmm-btn-confirm" id="homeBmmConfirm" disabled>Fusionar</button>
-        </div>
-    </div>
-</div>
-{% endif %}
 <!-- Bulk action bar (solo para agentes) -->
 {% if user.role and user.role.role_name|lower not in 'end user,end-user,cliente,customer' %}
 <div id="homeTicketActionBar" class="ticket-action-bar">
     <span class="tab-action-count"><strong id="homeTabActionCount">0</strong> tickets seleccionados</span>
     <div class="tab-action-buttons">
-        <button class="tab-action-btn" id="homeActionMerge" title="Fusionar seleccionados">
-            <i class="fas fa-code-branch"></i> Fusionar
-        </button>
         <button class="tab-action-btn tab-action-btn--danger" id="homeActionDelete" title="Eliminar seleccionados">
             <i class="fas fa-trash"></i> Eliminar
         </button>
@@ -303,7 +278,6 @@
         const bar       = document.getElementById("homeTicketActionBar");
         const countEl   = document.getElementById("homeTabActionCount");
         const selectAll = document.getElementById("homeSelectAll");
-        const overlay   = document.getElementById("homeBulkMergeOverlay");
 
         function _getCookie(name) {
             for (const c of document.cookie.split(";")) {
@@ -386,78 +360,6 @@
             }).catch(() => window.toast.error("Error de red"));
         });
 
-        // Merge modal open/close
-        const mergeBtn = document.getElementById("homeActionMerge");
-        if (mergeBtn) mergeBtn.addEventListener("click", function() {
-            if (_sel.size < 2) { window.toast.warning("Selecciona al menos 2 tickets para fusionar."); return; }
-            document.getElementById("homeBmmSearch").value = "";
-            document.getElementById("homeBmmResults").innerHTML = "<li style='color:#94a3b8;cursor:default;'>Escribe para buscar</li>";
-            const tgt = document.getElementById("homeBmmSelectedTarget");
-            tgt.textContent = ""; tgt.className = "bmm-selected-target";
-            document.getElementById("homeBmmConfirm").disabled = true;
-            document.getElementById("homeBmmConfirm").dataset.targetId = "";
-            overlay.classList.add("open");
-        });
-
-        ["homeBmmClose", "homeBmmCancel"].forEach(function(id) {
-            const el = document.getElementById(id);
-            if (el) el.addEventListener("click", () => overlay.classList.remove("open"));
-        });
-
-        // Merge search
-        const bmmSearch = document.getElementById("homeBmmSearch");
-        if (bmmSearch) bmmSearch.addEventListener("input", function() {
-            const q = this.value.trim();
-            const ul = document.getElementById("homeBmmResults");
-            if (!q) { ul.innerHTML = "<li style='color:#94a3b8;cursor:default;'>Escribe para buscar</li>"; return; }
-            fetch("/search/?q=" + encodeURIComponent(q))
-                .then(r => r.json())
-                .then(d => {
-                    ul.innerHTML = "";
-                    if (!d.tickets || !d.tickets.length) {
-                        ul.innerHTML = "<li style='color:#94a3b8;cursor:default;'>Sin resultados</li>"; return;
-                    }
-                    d.tickets.forEach(function(t) {
-                        const li = document.createElement("li");
-                        li.innerHTML = "<span class='bmm-id'>#" + t.id + "</span><span class='bmm-subject'>" + t.subject + "</span>";
-                        li.addEventListener("click", function() {
-                            ul.querySelectorAll("li").forEach(x => x.classList.remove("selected"));
-                            li.classList.add("selected");
-                            const confirm = document.getElementById("homeBmmConfirm");
-                            confirm.disabled = false;
-                            confirm.dataset.targetId = t.id;
-                            const tgt = document.getElementById("homeBmmSelectedTarget");
-                            tgt.textContent = "Destino: #" + t.id + " – " + t.subject;
-                            tgt.className = "bmm-selected-target show";
-                        });
-                        ul.appendChild(li);
-                    });
-                });
-        });
-
-        // Merge confirm
-        const bmmConfirm = document.getElementById("homeBmmConfirm");
-        if (bmmConfirm) bmmConfirm.addEventListener("click", function() {
-            const targetId = parseInt(this.dataset.targetId);
-            if (!targetId) return;
-            fetch("{% url 'bulk_merge' %}", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-CSRFToken": _getCookie("csrftoken") },
-                body: JSON.stringify({ ids: [..._sel], target_id: targetId })
-            }).then(r => r.json()).then(d => {
-                if (d.ok) {
-                    [..._sel].filter(id => id !== targetId).forEach(id => {
-                        const cb = document.querySelector(".home-ticket-cb[data-ticket-id='" + id + "']");
-                        if (cb) cb.closest("tr").remove();
-                    });
-                    window.toast.success(`${d.merged || 0} ticket(s) fusionado(s)`);
-                    _clearSel();
-                    overlay.classList.remove("open");
-                } else {
-                    window.toast.error(d.error || "Error al fusionar");
-                }
-            }).catch(() => window.toast.error("Error de red"));
-        });
     })();
 
     function filterTable(filter) {

@@ -15,10 +15,18 @@
     justify-content: center;
     padding: var(--space-4, 16px);
     opacity: 0;
-    transition: opacity 180ms ease;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 180ms ease, visibility 0s linear 180ms;
 }
 
-.dialog-backdrop.open   { opacity: 1; }
+.dialog-backdrop.open,
+.dialog-backdrop.closing {
+    visibility: visible;
+    pointer-events: auto;
+    transition: opacity 180ms ease;
+}
+.dialog-backdrop.open    { opacity: 1; }
 .dialog-backdrop.closing { opacity: 0; }
 
 .dialog {
@@ -162,9 +170,48 @@
     outline-color: var(--color-danger, #dc2626);
 }
 
+/* ---- Size variants ---- */
+.dialog--lg  { max-width: 720px; }
+.dialog--xl  { max-width: 960px; }
+
+/* ---- Form layout variant (header without icon, scrollable body) ---- */
+.dialog--form .dialog__header {
+    padding: var(--space-4) var(--space-5);
+    border-bottom: 1px solid var(--color-border);
+}
+.dialog--form .dialog__body {
+    padding: var(--space-4) var(--space-5);
+    color: var(--color-text);
+    max-height: calc(100vh - 240px);
+    overflow-y: auto;
+}
+.dialog--form .dialog__body > .tf-field + .tf-field { margin-top: var(--space-3); }
+.dialog--form .dialog__footer { padding: var(--space-3) var(--space-5); }
+
+/* Standardize buttons inside any dialog: prefer .tf-btn variants */
+.dialog__footer .tf-btn { min-width: 96px; }
+
+/* Close (×) button — used by .dialog--form */
+.dialog__close {
+    background: transparent;
+    border: none;
+    color: var(--color-text-muted);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    transition: var(--btn-transition);
+}
+.dialog__close:hover {
+    background: var(--color-surface-2);
+    color: var(--color-text);
+}
+
 @media (max-width: 480px) {
     .dialog__footer { flex-direction: column-reverse; }
     .dialog__btn { width: 100%; padding: 12px; }
+    .dialog--lg, .dialog--xl { max-width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
