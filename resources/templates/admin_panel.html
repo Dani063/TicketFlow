@@ -13,9 +13,42 @@
     height: calc(100vh - 50px);   /* 50px = navbar height */
     overflow: hidden;
 }
-.ap-header { padding: 14px 24px 0; flex-shrink: 0; }
-.ap-header h1 { margin: 0 0 2px 0; font-size: 20px; font-weight: 700; }
-.ap-header p  { margin: 0; color: var(--color-text-muted, #64748b); font-size: 13px; }
+.ap-header {
+    padding: 20px 28px 14px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+.ap-header-icon {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);
+    color: #fff;
+    font-size: 18px;
+    box-shadow: 0 6px 16px rgba(124, 58, 237, .28), inset 0 1px 0 rgba(255,255,255,.18);
+    flex-shrink: 0;
+}
+.ap-header-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ap-header h1 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    color: var(--color-text, #0f172a);
+}
+.ap-header p {
+    margin: 0;
+    color: var(--color-text-muted, #64748b);
+    font-size: 13px;
+    line-height: 1.4;
+}
+:root[data-theme="dark"] .ap-header-icon {
+    background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%);
+    box-shadow: 0 6px 16px rgba(124, 58, 237, .45), inset 0 1px 0 rgba(255,255,255,.22);
+}
 
 /* tabs */
 .ap-tabs { display: flex; gap: 4px; padding: 10px 24px 0; border-bottom: 1px solid var(--color-divider, #e5e7eb); flex-shrink: 0; }
@@ -29,12 +62,33 @@
 .ap-panel.active { display: flex; }
 
 /* toolbar */
-.ap-toolbar { display: flex; gap: 8px; align-items: center; padding: 10px 24px; flex-shrink: 0; flex-wrap: wrap; }
+.ap-toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 10px 28px;
+    flex-shrink: 0;
+    flex-wrap: nowrap;
+}
 .ap-toolbar input[type="text"], .ap-toolbar select {
-    padding: 7px 10px; border: 1px solid var(--color-input-border, #d1d5db); border-radius: 6px;
-    background: var(--color-input-bg, #fff); color: var(--color-input-text, #111827); font-size: 13px; }
-.ap-toolbar input[type="text"] { min-width: 220px; }
-.ap-toolbar .ap-grow { flex: 1; min-width: 0; }
+    padding: 8px 12px;
+    border: 1px solid var(--color-input-border, #d1d5db);
+    border-radius: 8px;
+    background: var(--color-input-bg, #fff);
+    color: var(--color-input-text, #111827);
+    font-size: 13px;
+    min-width: 0;
+    box-sizing: border-box;
+}
+.ap-toolbar input[type="text"]:focus, .ap-toolbar select:focus {
+    outline: none;
+    border-color: #7c3aed;
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, .15);
+}
+.ap-toolbar input[type="text"] { flex: 2 1 0; min-width: 200px; max-width: 480px; }
+.ap-toolbar select { flex: 1 1 0; min-width: 140px; max-width: 220px; }
+.ap-toolbar .ap-grow { flex: 0 0 0; width: 0; }
+.ap-toolbar #btnNewUser, .ap-toolbar #btnNewRole, .ap-toolbar #btnNewGroup { flex: 0 0 auto; margin-left: auto; }
 
 /* buttons */
 .ap-btn { padding: 7px 13px; border-radius: 6px; border: 1px solid transparent; font-size: 13px; cursor: pointer; white-space: nowrap; }
@@ -128,8 +182,11 @@
 {% block content %}
 <div class="ap-wrap">
     <div class="ap-header">
-        <h1><i class="fas fa-shield-alt"></i> Administración</h1>
-        <p>Gestiona usuarios, roles y grupos. Solo visible para administradores.</p>
+        <span class="ap-header-icon"><i class="fas fa-shield-alt"></i></span>
+        <div class="ap-header-text">
+            <h1>Administración</h1>
+            <p>Gestiona usuarios, roles y grupos. Solo visible para administradores.</p>
+        </div>
     </div>
 
     <div class="ap-tabs">

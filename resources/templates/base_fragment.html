@@ -1,2 +1,6 @@
-{% comment %}Headless base for ?fragment=1 requests — only the content block.{% endcomment %}
+{% comment %}Headless base for ?fragment=1 requests — content + extra_css/extra_js
+so per-page inline <style> and <script> blocks are included. tabs.js extracts
+the <script>s and re-executes them; <style>s work in-place via innerHTML.{% endcomment %}
+{% block extra_css %}{% endblock %}
 {% block content %}{% endblock %}
+{% block extra_js %}{% endblock %}
