@@ -87,6 +87,8 @@ PROJECT_ROOT = find_project_root(__file__)
 env_path = PROJECT_ROOT / ".env"
 if env_path.exists():
     load_dotenv(env_path, override=True)
+if os.getenv("DISABLE_AWS_SSM", "").lower() in ("1", "true", "yes", "on"):
+    os.environ["AWS_SSM_PREFIX"] = ""
 
 # BASE_DIR is now resolved by Path.
 
@@ -242,19 +244,27 @@ else:
     _db_password = os.getenv("DB_PASSWORD", "")
     _db_host     = os.getenv("DB_HOST",     "127.0.0.1")
 
-DATABASES = {
-    "default": {
-        "ENGINE":   os.getenv("DB_ENGINE", "django.db.backends.mysql"),
-        "NAME":     os.getenv("DB_NAME",   "ticketflow"),
-        "USER":     _db_user,
-        "PASSWORD": _db_password,
-        "HOST":     _db_host,
-        "PORT":     os.getenv("DB_PORT",   "3306"),
-        "OPTIONS": {
-            "init_command": "SET sql_mode='STRICT_TRANS_TABLES'"
-        },
+if os.getenv("USE_SQLITE", "").lower() in ("1", "true", "yes", "on"):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE":   os.getenv("DB_ENGINE", "django.db.backends.mysql"),
+            "NAME":     os.getenv("DB_NAME",   "ticketflow"),
+            "USER":     _db_user,
+            "PASSWORD": _db_password,
+            "HOST":     _db_host,
+            "PORT":     os.getenv("DB_PORT",   "3306"),
+            "OPTIONS": {
+                "init_command": "SET sql_mode='STRICT_TRANS_TABLES'"
+            },
+        }
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/2.1/ref/settings/#auth-password-validators
@@ -349,6 +359,10 @@ CELERY_BEAT_SCHEDULE = {
     'auto-assign-unassigned-tickets': {
         'task': 'app.tasks.auto_assign_unassigned_tickets',
         'schedule': 300.0,  # Cada 5 minutos
+    },
+    'mark-sla-breaches': {
+        'task': 'app.tasks.mark_sla_breaches',
+        'schedule': 300.0,
     },
 }
 

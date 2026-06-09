@@ -1,5 +1,10 @@
 # Arquitectura del sistema
 
+> Para la lógica de negocio (capa de servicios, modelos operativos, SLA,
+> asignación, automatizaciones, ingesta de email) ver
+> [backend-architecture.md](backend-architecture.md). Este documento cubre la
+> infraestructura (Celery/SQS/SSM/IAM) y el flujo a alto nivel.
+
 ## Actores
 
 | Actor | Tecnología | Rol |
@@ -30,18 +35,23 @@ Worker (polling continuo)
   ├─► Graph API: GET /users/{mailbox}/mailFolders/Inbox/messages
   │             ?$filter=isRead eq false &$top=50
   │
-  │   Por cada mensaje no leído:
+  │   Por cada mensaje no leído → EmailIngestionService.process_message:
+  │   ├─► MySQL: registra InboundEmailLog (auditoría + dedup por brand+message_id)
   │   ├─► MySQL: ¿existe Comment/Ticket con ese email_message_id? → dedup
   │   │
-  │   ├─► [Si asunto contiene "[Ticket #N]"]
-  │   │     └─► MySQL: añade Comment al ticket existente
-  │   │               si ticket estaba pending/resolved → reabre a open
+  │   ├─► Threading en 3 niveles (find_ticket_for_message):
+  │   │     1) conversationId de Graph
+  │   │     2) patrón "[Ticket #N]" en el asunto
+  │   │     3) asunto normalizado + mismo requester + ticket abierto <7 días
   │   │
-  │   └─► [Si asunto nuevo]
-  │         └─► MySQL: crea Ticket + Comment inicial
+  │   ├─► [Si encuentra ticket] añade Comment; si pending/resolved → reabre a open
+  │   └─► [Si no] crea Ticket + Comment inicial (auto-asignado por reglas)
   │
   └─► Graph API: PATCH /messages/{id} → isRead: true
 ```
+
+> El procesado vive en `EmailIngestionService` (ver
+> [backend-architecture.md](backend-architecture.md)); `tasks.py` solo orquesta el poll.
 
 ---
 
@@ -74,18 +84,25 @@ Cada email tiene un `id` único de Graph API guardado como `email_message_id` en
 
 Esto permite que el worker procese el mismo email en múltiples ejecuciones del poll sin crear duplicados.
 
+Además, cada mensaje queda auditado en `InboundEmailLog` con `unique(brand, message_id)`:
+un segundo intento sobre el mismo mensaje se marca `duplicate` y se omite, y los fallos
+quedan registrados con su error para diagnóstico.
+
 ---
 
 ## Gestión de hilos de conversación
 
-El worker determina si un email es una **respuesta a un ticket existente** o un **ticket nuevo** buscando el patrón `[Ticket #N]` en el asunto.
+`EmailIngestionService.find_ticket_for_message` decide si un email es **respuesta a un
+ticket existente** o un **ticket nuevo** mediante tres niveles de coincidencia, en orden:
 
-| Caso | Resultado |
-|---|---|
-| Asunto contiene `[Ticket #N]` y ticket existe | Nuevo `Comment` en ese ticket |
-| Ticket estaba `pending` o `resolved` | Se reabre a `open` |
-| Asunto sin referencia | Nuevo `Ticket` + `Comment` inicial |
-| Email sin remitente | Descartado |
+| Nivel | Criterio | Resultado |
+|---|---|---|
+| 1 | `conversationId` de Graph coincide con `email_conversation_id` | `Comment` en ese ticket |
+| 2 | Asunto contiene `[Ticket #N]` (id o zendesk_id) y existe | `Comment` en ese ticket |
+| 3 | Asunto normalizado + mismo requester + ticket abierto/pendiente < 7 días | `Comment` en ese ticket |
+| — | Si el ticket estaba `pending`/`resolved` | Se reabre a `open` |
+| — | Sin coincidencia | Nuevo `Ticket` + `Comment` inicial (auto-asignado por reglas) |
+| — | Email sin remitente | Descartado (`skip_no_sender`) |
 
 ---
 

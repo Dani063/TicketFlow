@@ -15,6 +15,8 @@
     let _sortBy      = '';
     let _sortDir     = 'asc';
     let _selectedIds = new Set();
+    let _lastRenderedCount = 0;
+    let _totalRequestSeq = 0;
 
     function getUrlParam(name) {
         return new URLSearchParams(window.location.search).get(name);
@@ -27,9 +29,13 @@
         return [1, '...', current-1, current, current+1, '...', total];
     }
 
-    function renderPageNumbers(current, total) {
+    function renderPageNumbers(current, total, options) {
         const container = document.getElementById("pageNumbers");
         container.innerHTML = "";
+        const exact = !options || options.exact !== false;
+        const hasNext = options && Object.prototype.hasOwnProperty.call(options, 'hasNext')
+            ? options.hasNext
+            : current < total;
 
         if (current > 1) {
             const prev = document.createElement("button");
@@ -38,6 +44,35 @@
             prev.title = "Página anterior";
             prev.onclick = () => loadTickets(_currentView, current - 1);
             container.appendChild(prev);
+        }
+
+        if (!exact) {
+            if (current > 2) {
+                const first = document.createElement("button");
+                first.className = "page-num-btn";
+                first.textContent = "1";
+                first.onclick = () => loadTickets(_currentView, 1);
+                container.appendChild(first);
+
+                const span = document.createElement("span");
+                span.className = "page-ellipsis";
+                span.textContent = "...";
+                container.appendChild(span);
+            }
+
+            const currentBtn = document.createElement("button");
+            currentBtn.className = "page-num-btn active";
+            currentBtn.textContent = current;
+            container.appendChild(currentBtn);
+
+            const next = document.createElement("button");
+            next.className = "page-num-btn page-arrow";
+            next.innerHTML = "&#8250;";
+            next.title = "Página siguiente";
+            next.disabled = !hasNext;
+            next.onclick = () => { if (hasNext) loadTickets(_currentView, current + 1); };
+            container.appendChild(next);
+            return;
         }
 
         getPageRange(current, total).forEach(p => {
@@ -65,21 +100,78 @@
     }
 
     function updatePagination(p) {
-        _totalPages  = p.total_pages;
+        const exact = p.exact !== false && Number.isFinite(p.total);
+        const returned = Number.isFinite(p.returned) ? p.returned : _lastRenderedCount;
+        _totalPages  = p.total_pages || p.page || 1;
         _currentPage = p.page;
         _pageSize    = p.page_size;
 
-        renderPageNumbers(p.page, p.total_pages);
+        renderPageNumbers(p.page, _totalPages, { exact, hasNext: !!p.has_next });
 
-        const from    = (p.page - 1) * p.page_size + 1;
-        const to      = Math.min(p.page * p.page_size, p.total);
-        document.getElementById("registrosInfo").textContent =
-            `registros (mostrando ${from}–${to} de ${p.total})`;
+        const info = document.getElementById("registrosInfo");
+        if (returned <= 0 && exact && p.total === 0) {
+            info.textContent = "registros (0)";
+        } else {
+            const from = returned > 0 ? (p.page - 1) * p.page_size + 1 : 0;
+            const to = returned > 0 ? from + returned - 1 : 0;
+            info.textContent = exact
+                ? `registros (mostrando ${from}–${to} de ${p.total})`
+                : `registros (mostrando ${from}–${to}; hay más)`;
+        }
 
         const sel = document.getElementById("pageSizeSelect");
         if (sel) sel.value = p.page_size;
 
         document.getElementById("paginationBar").style.display = "flex";
+    }
+
+    function applyExactTotalFromCounts(filtros) {
+        if (!_currentView || !filtros) return;
+        const total = Number(filtros[_currentView]);
+        if (!Number.isFinite(total)) return;
+
+        const lowerBound = (_currentPage - 1) * _pageSize + _lastRenderedCount;
+        if (total < lowerBound) return;
+
+        const totalPages = Math.max(1, Math.ceil(total / _pageSize));
+        if (_currentPage > totalPages) return;
+
+        updatePagination({
+            total,
+            page: _currentPage,
+            total_pages: totalPages,
+            page_size: _pageSize,
+            has_next: _currentPage < totalPages,
+            exact: true,
+            returned: _lastRenderedCount,
+        });
+    }
+
+    async function refreshCurrentTotal(view, page, pageSize) {
+        const seq = ++_totalRequestSeq;
+        try {
+            const response = await fetch(
+                `/tickets/filter/?view=${encodeURIComponent(view)}&total_only=1&page_size=${pageSize}`
+            );
+            const json = await response.json();
+            const total = Number(json.pagination && json.pagination.total);
+            if (seq !== _totalRequestSeq || view !== _currentView || page !== _currentPage || pageSize !== _pageSize) {
+                return;
+            }
+            if (!Number.isFinite(total)) return;
+
+            updatePagination({
+                total,
+                page,
+                total_pages: Math.max(1, Math.ceil(total / pageSize)),
+                page_size: pageSize,
+                has_next: page < Math.max(1, Math.ceil(total / pageSize)),
+                exact: true,
+                returned: _lastRenderedCount,
+            });
+        } catch (err) {
+            console.error("Error cargando total de tickets:", err);
+        }
     }
 
     function changePageSize(size) {
@@ -113,17 +205,19 @@
         });
     }
 
-    async function refreshFilterCounts() {
+    async function refreshFilterCounts(force) {
         const refreshIcon = document.getElementById("refreshIcon");
         try {
             refreshIcon.classList.add("spin-once");
-            const response = await fetch(`/tickets/filter/?view=recently_updated&counts=1&page=1&page_size=${_pageSize}`);
+            const forceParam = force === true ? '&force_counts=1' : '';
+            const response = await fetch(`/tickets/filter/?counts=1&counts_only=1&page_size=${_pageSize}${forceParam}`);
             const json = await response.json();
             if (json.filtros) {
                 for (const [key, value] of Object.entries(json.filtros)) {
                     const span = document.querySelector(`#filters li[data-view="${key}"] .filter-count`);
                     if (span) span.textContent = value;
                 }
+                applyExactTotalFromCounts(json.filtros);
             }
         } catch (err) {
             console.error("Error refrescando filtros:", err);
@@ -143,6 +237,7 @@
 
         _currentView = view;
         _currentPage = page;
+        _totalRequestSeq++;
 
         const spinner = document.getElementById("loadingSpinner");
         const tbody   = document.getElementById("ticketsTableBody");
@@ -152,10 +247,11 @@
             tbody.innerHTML = "";
             clearSelection();
 
-            let url = `/tickets/filter/?view=${encodeURIComponent(view)}&page=${page}&page_size=${_pageSize}`;
+            let url = `/tickets/filter/?view=${encodeURIComponent(view)}&page=${page}&page_size=${_pageSize}&fast=1`;
             if (_sortBy) url += `&sort_by=${_sortBy}&sort_dir=${_sortDir}`;
             const response = await fetch(url);
             const json = await response.json();
+            _lastRenderedCount = Array.isArray(json.tickets) ? json.tickets.length : 0;
 
             if (!json.tickets || json.tickets.length === 0) {
                 tbody.innerHTML = emptyRow(7, 'No hay tickets.');
@@ -238,6 +334,9 @@
             }
 
             if (json.pagination) updatePagination(json.pagination);
+            if (json.pagination && json.pagination.exact === false) {
+                refreshCurrentTotal(view, page, _pageSize);
+            }
             if (json.sort) updateSortHeaders(json.sort.sort_by, json.sort.sort_dir);
 
             if (updateUrl) {
@@ -259,7 +358,7 @@
     window.loadTickets = loadTickets;
 
     function init() {
-        document.getElementById("refreshFilters").addEventListener("click", refreshFilterCounts);
+        document.getElementById("refreshFilters").addEventListener("click", () => refreshFilterCounts(true));
 
         const filters = document.querySelectorAll("#filters li");
         let activeView = getUrlParam("view");
@@ -287,7 +386,7 @@
 
         if (activeView) loadTickets(activeView, activePage, false);
 
-        refreshFilterCounts();
+        setTimeout(() => refreshFilterCounts(), 600);
 
         document.getElementById('selectAllCheckbox').addEventListener('change', function() {
             const checkAll = this.checked;
@@ -323,6 +422,7 @@
                     window.toast.success(`${json.deleted || 0} ticket(s) eliminado(s)`);
                     clearSelection();
                     loadTickets(_currentView, _currentPage);
+                    refreshFilterCounts(true);
                 } else {
                     window.toast.error(json.error || 'Error al eliminar');
                 }
@@ -367,6 +467,7 @@
                     closeBulkMergeModal();
                     clearSelection();
                     loadTickets(_currentView, _currentPage);
+                    refreshFilterCounts(true);
                 } else {
                     window.toast.error(json.error || 'Error al fusionar');
                 }

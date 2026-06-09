@@ -146,6 +146,10 @@ class Ticket(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     closed_at = models.DateTimeField(null=True, blank=True)
     due_at = models.DateTimeField(null=True, blank=True)
+    first_response_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    first_responded_at = models.DateTimeField(null=True, blank=True)
+    resolution_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    sla_breached_at = models.DateTimeField(null=True, blank=True, db_index=True)
     category = models.CharField(max_length=255, null=True)
     security_related = models.BooleanField(null=True, blank=True)
     monitoring = models.BooleanField(null=True, blank=True)
@@ -159,6 +163,22 @@ class Ticket(models.Model):
     email_message_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     email_conversation_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['is_deleted', 'updated_at'], name='app_ticket_deleted_updated_idx'),
+            models.Index(fields=['is_deleted', 'status'], name='app_ticket_deleted_status_idx'),
+            models.Index(fields=['is_deleted', 'channel'], name='app_ticket_deleted_channel_idx'),
+            models.Index(fields=['is_deleted', 'service'], name='app_ticket_deleted_service_idx'),
+            models.Index(fields=['is_deleted', 'merged_into', 'updated_at'], name='app_ticket_live_updated_idx'),
+            models.Index(fields=['is_deleted', 'merged_into', 'status', 'updated_at'], name='app_ticket_live_status_upd'),
+            models.Index(fields=['is_deleted', 'merged_into', 'assignee', 'updated_at'], name='app_ticket_live_assignee_idx'),
+            models.Index(fields=['is_deleted', 'merged_into', 'requester', 'updated_at'], name='app_ticket_live_requester_idx'),
+            models.Index(fields=['is_deleted', 'merged_into', 'type', 'updated_at'], name='app_ticket_live_type_upd'),
+            models.Index(fields=['is_deleted', 'merged_into', 'channel', 'updated_at'], name='app_ticket_live_channel'),
+            models.Index(fields=['is_deleted', 'merged_into', 'service', 'status', 'updated_at'], name='app_ticket_live_service'),
+            models.Index(fields=['is_deleted', 'merged_into', 'created_at', 'updated_at'], name='app_ticket_live_created'),
+        ]
 
 
 class ZendeskFieldMap(models.Model):
@@ -189,6 +209,12 @@ class Comment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     is_public = models.BooleanField(default=True)
     email_message_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['ticket', 'created_at'], name='app_comment_ticket_created_idx'),
+            models.Index(fields=['ticket', 'id'], name='app_comment_ticket_id_idx'),
+        ]
 
 class TicketTag(models.Model):
     name = models.CharField(max_length=255, unique=True, null=False, help_text='Label for categorizing tickets')
@@ -266,3 +292,121 @@ class SatisfactionRating(models.Model):
 
     def __str__(self):
         return f"Rating #{self.zendesk_id}: {self.score}"
+
+
+class AssignmentRule(models.Model):
+    name = models.CharField(max_length=255)
+    active = models.BooleanField(default=True, db_index=True)
+    group = models.ForeignKey('Group', on_delete=models.SET_NULL, null=True, blank=True, related_name='assignment_rules')
+    service = models.CharField(max_length=255, null=True, blank=True)
+    channel = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class AssignmentRuleMember(models.Model):
+    rule = models.ForeignKey(AssignmentRule, on_delete=models.CASCADE, related_name='members')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='assignment_rule_memberships')
+    weight = models.PositiveIntegerField(default=1)
+    capacity = models.PositiveIntegerField(null=True, blank=True)
+    active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        unique_together = [('rule', 'user')]
+
+    def __str__(self):
+        return f"{self.rule} -> {self.user}"
+
+
+class SLAPolicy(models.Model):
+    name = models.CharField(max_length=255)
+    active = models.BooleanField(default=True, db_index=True)
+    priority = models.CharField(max_length=255, null=True, blank=True)
+    service = models.CharField(max_length=255, null=True, blank=True)
+    assigned_group = models.ForeignKey('Group', on_delete=models.SET_NULL, null=True, blank=True, related_name='sla_policies')
+    first_response_minutes = models.PositiveIntegerField(default=0)
+    resolution_minutes = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class AutomationRule(models.Model):
+    name = models.CharField(max_length=255)
+    active = models.BooleanField(default=True, db_index=True)
+    priority = models.PositiveIntegerField(default=100)
+    conditions = models.JSONField(default=dict, blank=True)
+    actions = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['priority', 'name']
+
+    def __str__(self):
+        return self.name
+
+
+class AutomationExecution(models.Model):
+    rule = models.ForeignKey(AutomationRule, on_delete=models.CASCADE, related_name='executions')
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='automation_executions')
+    event_key = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [('rule', 'ticket', 'event_key')]
+
+
+class InboundEmailLog(models.Model):
+    STATUS_RECEIVED = 'received'
+    STATUS_PROCESSED = 'processed'
+    STATUS_DUPLICATE = 'duplicate'
+    STATUS_FAILED = 'failed'
+    STATUS_CHOICES = [
+        (STATUS_RECEIVED, 'Received'),
+        (STATUS_PROCESSED, 'Processed'),
+        (STATUS_DUPLICATE, 'Duplicate'),
+        (STATUS_FAILED, 'Failed'),
+    ]
+
+    brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True, related_name='inbound_email_logs')
+    ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='inbound_email_logs')
+    message_id = models.CharField(max_length=255, db_index=True)
+    conversation_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_RECEIVED, db_index=True)
+    result = models.CharField(max_length=64, null=True, blank=True)
+    error = models.TextField(null=True, blank=True)
+    payload = models.JSONField(default=dict, blank=True)
+    received_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = [('brand', 'message_id')]
+        ordering = ['-received_at']
+
+    def __str__(self):
+        return f"{self.message_id} ({self.status})"
+
+
+class OperationalMetric(models.Model):
+    name = models.CharField(max_length=100, db_index=True)
+    value = models.IntegerField(default=1)
+    labels = models.JSONField(default=dict, blank=True)
+    recorded_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-recorded_at']
+
+    def __str__(self):
+        return f"{self.name}={self.value}"

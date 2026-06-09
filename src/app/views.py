@@ -2,6 +2,7 @@
 Definition of views.
 """
 # -*- coding: utf-8 -*-
+from django.db import transaction
 from django.db.models import Q, OuterRef, Subquery, Count, Max, Case, When, IntegerField
 from django.utils.dateparse import parse_datetime
 from datetime import datetime, timedelta
@@ -9,13 +10,13 @@ from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import Brand, Organization, Ticket, Comment, User, TicketTag, Attachment, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating
+from .models import Brand, Organization, Ticket, Comment, User, TicketTag, Attachment, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating, AssignmentRule, AssignmentRuleMember, SLAPolicy, AutomationRule
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import authenticate, login as auth_login
 from django.contrib.auth import logout
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import ensure_csrf_cookie
 import json
 import logging
 import random
@@ -29,6 +30,15 @@ from django.conf import settings as DJANGO_SETTINGS
 from django.utils import timezone
 from django.views import View
 from django.views.decorators.http import require_GET
+from django.core.cache import cache
+from .api import APIValidationError, api_login_required, json_error, json_ok, parse_json_body
+from .permissions import can_manage_users, can_update_ticket, can_view_ticket, is_admin as permission_is_admin, is_agent as permission_is_agent
+from .sanitizers import sanitize_email_html
+from .services.assignment import AssignmentService
+from .services.comments import CommentService
+from .services.merge import MergeService
+from .services.notifications import NotificationService
+from .services.tickets import TicketService
 
 logger = logging.getLogger('app.views')
 
@@ -55,6 +65,7 @@ def _cached_all_users():
 
 _DEFAULT_PAGE_SIZE = 50
 _ALLOWED_PAGE_SIZES = {10, 20, 50, 100, 150}
+_TICKET_FILTER_COUNTS_TTL = 15
 
 _TICKET_SORT_FIELDS = {
     'id':         'id',
@@ -212,28 +223,7 @@ def _sanitize_email_html(html):
     Allow-list approach: keeps formatting and email-friendly tables, strips
     scripts / event handlers / unknown protocols.
     """
-    if not html:
-        return ''
-    # Safety net: if the input arrives entity-encoded (e.g. some clients
-    # over-escape) decode once so bleach sees real tags rather than text.
-    import html as _htmllib
-    if '<' not in html and '&lt;' in html:
-        html = _htmllib.unescape(html)
-    if not _HAS_BLEACH:
-        return _htmllib.escape(html)
-    cleaned = bleach.clean(
-        html,
-        tags=_ALLOWED_HTML_TAGS,
-        attributes=_ALLOWED_HTML_ATTRS,
-        protocols=_ALLOWED_HTML_PROTOCOLS,
-        strip=True,
-    )
-    # Safety net: remove Quill-specific helper spans/elements that may persist
-    # (e.g. <span class="ql-ui">, <span class="ql-cursor">) and any empty spans
-    import re
-    cleaned = re.sub(r'<span\s+class="ql-[^"]*"\s*(?:data-[^\s]*="[^"]*"\s*)*(?:contenteditable="[^"]*"\s*)*>\s*</span>', '', cleaned)
-    cleaned = re.sub(r'<span\s*>\s*</span>', '', cleaned)
-    return cleaned
+    return sanitize_email_html(html)
 
 
 def _attach_last_comments(ticket_list):
@@ -266,6 +256,93 @@ def _parse_page_size(raw):
         return size if size in _ALLOWED_PAGE_SIZES else _DEFAULT_PAGE_SIZE
     except (ValueError, TypeError):
         return _DEFAULT_PAGE_SIZE
+
+
+def _ticket_filter_counts_cache_key(user):
+    role_name = (getattr(getattr(user, 'role', None), 'role_name', '') or '').lower()
+    return (
+        f"tickets:filter-counts:v2:user:{user.id}:"
+        f"role:{role_name}:group:{user.group_id or 0}"
+    )
+
+
+def _base_tickets_queryset(user):
+    qs = Ticket.objects.filter(merged_into__isnull=True, is_deleted=False)
+    if _is_agent(user):
+        return qs.order_by('-updated_at')
+    return qs.filter(Q(requester=user) | Q(ccs=user)).distinct().order_by('-updated_at')
+
+
+def _tickets_for_view(base_qs, view, user):
+    now = timezone.now()
+    if view == "mis_tickets":
+        return base_qs
+    if view == "telefonica_mes":
+        return base_qs.filter(
+            requester__organization__name="Telefonica",
+            created_at__gte=now - timedelta(days=30),
+        )
+    if view == "unsolved_no_tareas":
+        return base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea"))
+    if view == "unassigned":
+        return base_qs.filter(assignee__isnull=True)
+    if view == "all_unsolved_no_tareas":
+        return base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea"))
+    if view == "recently_updated":
+        return base_qs.filter(updated_at__gte=now - timedelta(hours=24))
+    if view == "recently_solved":
+        return base_qs.filter(status="resolved")
+    if view == "pendientes":
+        return base_qs.filter(status="pending")
+    if view == "tareas":
+        return base_qs.filter(type="tarea")
+    if view == "unsolved_groups":
+        return base_qs.filter(~Q(status__in=["closed", "resolved"]), assignee__group=user.group)
+    if view == "rated_last7":
+        since = now - timedelta(days=7)
+        rated_ids = SatisfactionRating.objects.filter(
+            created_at__gte=since, score__in=['good', 'bad']
+        ).values_list('ticket_id', flat=True)
+        return base_qs.filter(id__in=rated_ids)
+    if view == "internos_comuny":
+        return base_qs.filter(service="Comunycarse", status="open")
+    if view == "abiertos_ecomfax":
+        return base_qs.filter(service="ecomfax", status="open")
+    if view == "recordia_sgsd":
+        return base_qs.filter(service="Recordia SGSD", status="open")
+    if view == "closed":
+        return base_qs.filter(status="closed")
+    if view == "sus_pendientes":
+        return base_qs.filter(requester=user, status="pending")
+    if view == "espera":
+        return base_qs.filter(status="espera") if hasattr(Ticket, "espera") else base_qs.none()
+    if view == "abiertos":
+        return base_qs.filter(status="open")
+    if view == "sus_no_cerrados":
+        if _is_agent(user):
+            return base_qs.filter(requester=user).exclude(status="closed")
+        return base_qs.exclude(status="closed")
+    if view == "ultimos_cerrados":
+        return base_qs.filter(status="closed")
+    if view == "no_resueltos":
+        return base_qs.exclude(status="resolved")
+    if view == "twitter":
+        return base_qs.filter(channel="twitter")
+    if view == "twitter_dm":
+        return base_qs.filter(channel="twitter_dm")
+    if view == "twitter_like":
+        return base_qs.filter(channel="twitter_like")
+    if view == "sus_tareas":
+        return base_qs.filter(requester=user, type="tarea")
+    if view == "resueltos":
+        return base_qs.filter(status="resolved")
+    if view == "new_in_groups":
+        return base_qs.filter(assignee__group=user.group, created_at__gte=now - timedelta(days=7))
+    if view == "open":
+        return base_qs.filter(status="open")
+    if view == "no_update_48h":
+        return base_qs.filter(updated_at__lte=now - timedelta(hours=48))
+    return base_qs
 
 
 @login_required
@@ -348,7 +425,7 @@ def tickets_list(request):
     # Los filtros se cargan de forma asíncrona desde filter_tickets?counts=1
     return render(request, "tickets/tickets_list.html", {})
 
-@login_required
+@api_login_required
 def filter_tickets(request):
     """
     Devuelve tickets paginados en JSON según el 'view' seleccionado.
@@ -356,6 +433,10 @@ def filter_tickets(request):
     """
     view = request.GET.get("view")
     compute_counts = request.GET.get("counts", "0") == "1"
+    counts_only = request.GET.get("counts_only", "0") == "1"
+    force_counts = request.GET.get("force_counts", "0") == "1"
+    fast_pagination = request.GET.get("fast", "0") == "1"
+    total_only = request.GET.get("total_only", "0") == "1"
     sort_by  = request.GET.get("sort_by", "")
     sort_dir = request.GET.get("sort_dir", "asc") if request.GET.get("sort_dir") in ("asc", "desc") else "asc"
     try:
@@ -364,18 +445,33 @@ def filter_tickets(request):
         page = 1
     page_size = _parse_page_size(request.GET.get("page_size"))
 
-    if _is_agent(request.user):
-        base_qs = Ticket.objects.filter(merged_into__isnull=True, is_deleted=False).order_by('-updated_at')
-    else:
-        base_qs = Ticket.objects.filter(
-            merged_into__isnull=True, is_deleted=False
-        ).filter(
-            Q(requester=request.user) | Q(ccs=request.user)
-        ).distinct().order_by('-updated_at')
+    base_qs = _base_tickets_queryset(request.user)
+
+    if total_only:
+        total = _tickets_for_view(base_qs, view, request.user).count()
+        return JsonResponse({
+            "pagination": {
+                "total": total,
+                "total_pages": max(1, (total + page_size - 1) // page_size),
+                "page_size": page_size,
+            },
+            "filtros": {view: total} if view else {},
+        })
 
     # Los contadores son costosos. Solo se calculan cuando counts=1.
     # Consolidamos ~25 COUNTs separados en 5 queries para reducir round-trips.
     filtros = {}
+    _counts_cache_key = None
+    _counts_loaded_from_cache = False
+    if compute_counts:
+        _counts_cache_key = _ticket_filter_counts_cache_key(request.user)
+        if not force_counts:
+            cached_filtros = cache.get(_counts_cache_key)
+            if cached_filtros is not None:
+                filtros = cached_filtros
+                compute_counts = False
+                _counts_loaded_from_cache = True
+
     if compute_counts:
         _now = timezone.now()
 
@@ -472,77 +568,13 @@ def filter_tickets(request):
             "no_update_48h":      _time_agg['no_update_48h'],
         }
 
-    if view == "mis_tickets":
-        # Vista de end user: TODOS sus tickets (requester o cc), incluidos cerrados/resueltos.
-        # base_qs ya está filtrado por requester/cc para end users; agentes ven todo.
-        tickets = base_qs
-    elif view == "telefonica_mes":
-        tickets = base_qs.filter(requester__organization__name="Telefonica", created_at__gte=timezone.now()-timedelta(days=30))
-    elif view == "unsolved_no_tareas":
-        tickets = base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea"))
-    elif view == "unassigned":
-        tickets = base_qs.filter(assignee__isnull=True)
-    elif view == "all_unsolved_no_tareas":
-        tickets = base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea"))
-    elif view == "recently_updated":
-        tickets = base_qs.filter(updated_at__gte=timezone.now()-timedelta(hours=24))
-    elif view == "recently_solved":
-        tickets = base_qs.filter(status="resolved")
-    elif view == "pendientes":
-        tickets = base_qs.filter(status="pending")
-    elif view == "tareas":
-        tickets = base_qs.filter(type="tarea")
-    elif view == "unsolved_groups":
-        tickets = base_qs.filter(~Q(status__in=["closed", "resolved"]), assignee__group=request.user.group)
-    elif view == "rated_last7":
-        since = timezone.now() - timedelta(days=7)
-        rated_ids = SatisfactionRating.objects.filter(
-            created_at__gte=since, score__in=['good', 'bad']
-        ).values_list('ticket_id', flat=True)
-        tickets = base_qs.filter(id__in=rated_ids)
-    elif view == "internos_comuny":
-        tickets = base_qs.filter(service="Comunycarse", status="open")
-    elif view == "abiertos_ecomfax":
-        tickets = base_qs.filter(service="ecomfax", status="open")
-    elif view == "recordia_sgsd":
-        tickets = base_qs.filter(service="Recordia SGSD", status="open")
-    elif view == "closed":
-        tickets = base_qs.filter(status="closed")
-    elif view == "sus_pendientes":
-        tickets = base_qs.filter(requester=request.user, status="pending")
-    elif view == "espera":
-        tickets = base_qs.filter(status="espera") if hasattr(Ticket, "espera") else base_qs.none()
-    elif view == "abiertos":
-        tickets = base_qs.filter(status="open")
-    elif view == "sus_no_cerrados":
-        # Para end users: todos sus tickets (requester o ccs) sin cerrados
-        # Para agentes: solo tickets donde son requester, sin cerrados
-        if _is_agent(request.user):
-            tickets = base_qs.filter(requester=request.user).exclude(status="closed")
-        else:
-            tickets = base_qs.exclude(status="closed")
-    elif view == "ultimos_cerrados":
-        tickets = base_qs.filter(status="closed")
-    elif view == "no_resueltos":
-        tickets = base_qs.exclude(status="resolved")
-    elif view == "twitter":
-        tickets = base_qs.filter(channel="twitter")
-    elif view == "twitter_dm":
-        tickets = base_qs.filter(channel="twitter_dm")
-    elif view == "twitter_like":
-        tickets = base_qs.filter(channel="twitter_like")
-    elif view == "sus_tareas":
-        tickets = base_qs.filter(requester=request.user, type="tarea")
-    elif view == "resueltos":
-        tickets = base_qs.filter(status="resolved")
-    elif view == "new_in_groups":
-        tickets = base_qs.filter(assignee__group=request.user.group, created_at__gte=timezone.now()-timedelta(days=7))
-    elif view == "open":
-        tickets = base_qs.filter(status="open")
-    elif view == "no_update_48h":
-        tickets = base_qs.filter(updated_at__lte=timezone.now()-timedelta(hours=48))
-    else:
-        tickets = base_qs
+    if _counts_cache_key and filtros and not _counts_loaded_from_cache:
+        cache.set(_counts_cache_key, filtros, _TICKET_FILTER_COUNTS_TTL)
+
+    if counts_only:
+        return JsonResponse({"filtros": filtros})
+
+    tickets = _tickets_for_view(base_qs, view, request.user)
 
     db_sort = _TICKET_SORT_FIELDS.get(sort_by)
     db_sort_signed = (f'-{db_sort}' if sort_dir == 'desc' else db_sort) if db_sort else None
@@ -552,6 +584,10 @@ def filter_tickets(request):
     if db_sort_signed:
         group_by = None
         group_sort = None
+    elif fast_pagination:
+        group_by = None
+        group_sort = None
+        tickets = tickets.order_by('-updated_at')
     else:
         group_by = _TICKET_GROUP_BY.get(view)
         group_sort = _GROUP_DB_SORT.get(group_by) if group_by else None
@@ -561,12 +597,41 @@ def filter_tickets(request):
     elif db_sort_signed:
         tickets = tickets.order_by(db_sort_signed)
 
-    total = tickets.count()
-    total_pages = max(1, (total + page_size - 1) // page_size)
-    page = min(page, total_pages)
     offset = (page - 1) * page_size
+    page_qs = tickets.select_related('requester', 'assignee', 'assigned_group')
+    exact_total = True
+    has_next = False
 
-    tickets_page = list(tickets.select_related('requester', 'assignee', 'assigned_group')[offset:offset + page_size])
+    if fast_pagination:
+        tickets_page = list(page_qs[offset:offset + page_size + 1])
+
+        # If the URL points past the end, fall back to one exact COUNT so the UI
+        # can clamp to the real last page. The common first-page path stays
+        # count-free and returns after fetching at most page_size + 1 rows.
+        if page > 1 and not tickets_page:
+            total = tickets.count()
+            total_pages = max(1, (total + page_size - 1) // page_size)
+            page = min(page, total_pages)
+            offset = (page - 1) * page_size
+            tickets_page = list(page_qs[offset:offset + page_size])
+            has_next = page < total_pages
+        elif len(tickets_page) > page_size:
+            tickets_page = tickets_page[:page_size]
+            total = None
+            total_pages = page + 1
+            has_next = True
+            exact_total = False
+        else:
+            total = offset + len(tickets_page)
+            total_pages = max(1, page)
+            has_next = False
+    else:
+        total = tickets.count()
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = min(page, total_pages)
+        offset = (page - 1) * page_size
+        tickets_page = list(page_qs[offset:offset + page_size])
+        has_next = page < total_pages
 
     last_comments = {}
     if tickets_page:
@@ -622,12 +687,16 @@ def filter_tickets(request):
             "page": page,
             "total_pages": total_pages,
             "page_size": page_size,
+            "has_prev": page > 1,
+            "has_next": has_next,
+            "exact": exact_total,
+            "returned": len(data),
         },
         "sort": {"sort_by": sort_by if db_sort else "", "sort_dir": sort_dir},
         "group_by": group_by,
     })
 
-@login_required
+@api_login_required
 def filter_customers(request):
     if not _is_agent(request.user) and not _is_admin(request.user):
          return JsonResponse({"error": "No permission"}, status=403)
@@ -716,7 +785,7 @@ def customer_profile(request):
     ctx["customer"] = customer
     return render(request, "tickets/customer_profile.html", ctx)
 
-@login_required
+@api_login_required
 def tags_api(request):
     q = request.GET.get('q', '')
     tags = TicketTag.objects.filter(name__icontains=q) if q else TicketTag.objects.all()
@@ -773,6 +842,7 @@ def profile(request):
     ctx["user"] = user
     return render(request, "tickets/profile.html", ctx)
 
+@ensure_csrf_cookie
 def login_redirect(request):
     """Redirige al login corporativo SSO."""
     sso_url = getattr(DJANGO_SETTINGS, 'SSO_LOGIN_UI_URL', 'https://login.recordia.net/')
@@ -803,13 +873,13 @@ def dev_login(request):
         'users': list(users),
     })
 
+@ensure_csrf_cookie
 def sso_callback(request):
     """Vista que carga el frontend para procesar el token SSO."""
     return render(request, "tickets/sso_callback.html", {
         "SSO_LOGIN_API_URL": getattr(DJANGO_SETTINGS, 'SSO_LOGIN_API_URL', 'https://login-api.agentia365.com')
     })
 
-@csrf_exempt
 @require_POST
 def sso_complete(request):
     """
@@ -817,13 +887,13 @@ def sso_complete(request):
     Verifica o crea el usuario local y genera la sesión de Django.
     """
     try:
-        data = json.loads(request.body)
+        data = parse_json_body(request)
         email = data.get('email')
         name = data.get('name', 'Usuario SSO')
         # claims = data.get('claims', []) # Aquí puedes leer claims si los envías
 
         if not email:
-            return JsonResponse({'error': 'Email es requerido para completar el SSO'}, status=400)
+            return json_error('email_required', 'Email es requerido para completar el SSO', status=400)
 
         # Buscar o crear el usuario localmente
         user, created = User.objects.get_or_create(email=email)
@@ -839,30 +909,35 @@ def sso_complete(request):
         user.backend = 'app.backends.EmailBackend' 
         auth_login(request, user)
 
-        return JsonResponse({'status': 'ok', 'message': 'Sesión completada exitosamente'})
+        return JsonResponse({'ok': True, 'data': {'status': 'ok'}, 'status': 'ok', 'message': 'Sesión completada exitosamente'})
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
     except Exception as e:
         logger.error(f"Error en sso_complete: {str(e)}")
-        return JsonResponse({'error': str(e)}, status=500)
+        return json_error('sso_complete_failed', str(e), status=500)
 
-@csrf_exempt
 def register(request):
     if request.method == 'POST':
-        data = json.loads(request.body)
+        try:
+            data = parse_json_body(request)
+        except APIValidationError as exc:
+            return json_error(exc.code, exc.message, status=exc.status)
         email = data.get('email')
         name = data.get('name')
         password = data.get('password')
+        if not email or not name or not password:
+            return json_error('missing_fields', 'Email, nombre y password son obligatorios', status=400)
         if User.objects.filter(email=email).exists():
-            return JsonResponse({'error': 'El usuario ya existe'}, status=400)
+            return json_error('user_exists', 'El usuario ya existe', status=400)
         user = User(email=email, name=name)
         user.set_password(password)  # Hashear la contrase�a
         user.save()
-        return JsonResponse({'message': 'Usuario registrado correctamente'})
+        return json_ok(message='Usuario registrado correctamente')
 
-@csrf_exempt
 def user_login(request):
     if request.method == 'POST':
         try:
-            data = json.loads(request.body)
+            data = parse_json_body(request)
             email = data.get('email')
             password = data.get('password')
 
@@ -871,12 +946,14 @@ def user_login(request):
 
             if user is not None:
                 auth_login(request, user, backend='app.backends.EmailBackend')  # Forzar el backend correcto
-                return JsonResponse({'message': 'Inicio de sesión exitoso'})
+                return json_ok(message='Inicio de sesión exitoso')
             else:
-                return JsonResponse({'error': 'Credenciales inválidas'}, status=400)
+                return json_error('invalid_credentials', 'Credenciales inválidas', status=400)
+        except APIValidationError as exc:
+            return json_error(exc.code, exc.message, status=exc.status)
         except Exception as e:
-            return JsonResponse({'error': str(e)}, status=500)
-    return JsonResponse({'detail': 'Method not allowed'}, status=405)
+            return json_error('login_failed', str(e), status=500)
+    return json_error('method_not_allowed', 'Method not allowed', status=405)
 
 def user_logout(request):
     logout(request)  # Cierra la sesión del usuario
@@ -887,19 +964,14 @@ def ticket_detail(request, pk):
     return render(request, 'tickets/ticket_detail.html', {'ticket': ticket})
 
 
+@api_login_required
 def ticket_detail_api(request, ticket_id):
     ticket = get_object_or_404(
         Ticket.objects.select_related('brand', 'requester', 'assignee'),
         id=ticket_id,
     )
-    if not _is_agent(request.user):
-        is_involved = (
-            ticket.requester_id == request.user.id or
-            ticket.created_by_id == request.user.id or
-            ticket.ccs.filter(id=request.user.id).exists()
-        )
-        if not is_involved:
-            return JsonResponse({"error": "No tienes acceso a este ticket."}, status=403)
+    if not can_view_ticket(request.user, ticket):
+        return json_error("forbidden", "No tienes acceso a este ticket.", status=403)
 
     # Marcar como leídas las notificaciones del usuario para este ticket
     Notification.objects.filter(user=request.user, ticket=ticket, read=False).update(read=True)
@@ -925,13 +997,16 @@ def ticket_detail_api(request, ticket_id):
         'approval_status': ticket.approval_status,
         'resolution_type': ticket.resolution_type,
         'required_tasks': ticket.required_tasks,
+        'first_response_due_at': ticket.first_response_due_at.isoformat() if ticket.first_response_due_at else None,
+        'resolution_due_at': ticket.resolution_due_at.isoformat() if ticket.resolution_due_at else None,
+        'sla_breached_at': ticket.sla_breached_at.isoformat() if ticket.sla_breached_at else None,
         'subject': ticket.subject,
         'content': ticket.description,
     }
     return JsonResponse(data)
 
 
-@login_required
+@api_login_required
 @require_GET
 def users_search_api(request):
     """
@@ -946,6 +1021,8 @@ def users_search_api(request):
     page_size = 30
 
     qs = User.objects.filter(is_active=True).only('id', 'name', 'email').order_by('name')
+    if not _is_agent(request.user) and not _is_admin(request.user):
+        qs = qs.filter(id=request.user.id)
     if q:
         qs = qs.filter(Q(name__icontains=q) | Q(email__icontains=q))
 
@@ -960,176 +1037,23 @@ def users_search_api(request):
 
 
 def _is_agent(user):
-    role_name = (getattr(getattr(user, 'role', None), 'role_name', '') or '').lower()
-    # tratamos "End user" como cliente; todo lo demás se considera agente/staff
-    return role_name not in ('end user', 'end-user', 'cliente', 'customer')
+    return permission_is_agent(user)
 
 def _is_admin(user):
-    role_name = (getattr(getattr(user, 'role', None), 'role_name', '') or '').lower()
-    return role_name in ('admin', 'administrator', 'administrador')
+    return permission_is_admin(user)
 
 @login_required
 def create_ticket(request):
     id_param = request.GET.get('id', None)
 
     if request.method == 'POST':
-        # --- Leer y sanear inputs (evita NULL en campos obligatorios) ---
-        subject = (request.POST.get('subject') or '').strip()
-        content = ((request.POST.get('content') or request.POST.get('message')) or '').strip()
-        status  = (request.POST.get('status')  or 'open').strip().lower()
-        priority = (request.POST.get('prioridad') or '').strip().lower()
-
-        # Mapear placeholders o valores no válidos a defaults
-        if status not in ('open', 'pending', 'closed', 'resolved'):
-            status = 'open'
-        if priority not in ('low', 'normal', 'high', 'urgent'):
-            priority = None
-        if not subject:
-            subject = '(sin asunto)'          # nunca NULL en DB
-        # description en modelo es not null: mínimo cadena vacía
-        description = content or ''
-
-        empresa_name = (request.POST.get('empresa') or '').strip() or None
-        brand_obj    = Brand.objects.get_or_create(name=empresa_name)[0] if empresa_name else None
-        language  = request.POST.get('idioma') or None
-        category  = request.POST.get('categoria') or None
-        channel   = request.POST.get('canal') or None
-        service   = request.POST.get('servicio') or None
-        tipo      = request.POST.get('tipo') or None
-
-        solicitante_id = request.POST.get('solicitante') or request.user.id
-        asignado_id    = request.POST.get('asignado')
-        grupo_id       = request.POST.get('grupo') or None
-
-        due_at_raw = (request.POST.get('due_at') or '').strip()
-        due_at = parse_datetime(due_at_raw.replace('T', ' ')) if due_at_raw else None
-
-        security_related = request.POST.get('security_related') in ('1', 'true', 'on')
-        monitoring       = request.POST.get('monitoring')       in ('1', 'true', 'on')
-        approval_status  = (request.POST.get('approval_status') or '').strip() or None
-        resolution_type  = (request.POST.get('resolution_type') or '').strip() or None
-        required_tasks   = (request.POST.get('required_tasks')  or '').strip() or None
-        if not asignado_id:
-            agentes = User.objects.filter(group_id='2')
-            asignado_id = random.choice(list(agentes)).id if agentes.exists() else None
-
-        ccs_ids = request.POST.getlist('ccs')
-        tags_in = request.POST.getlist('tags')
-
-        def _set_m2m(ticket):
-            if ccs_ids:
-                ticket.ccs.set(ccs_ids)
-            ticket.tags.clear()
-            for tag in tags_in:
-                if tag.isdigit():
-                    try:
-                        ticket.tags.add(TicketTag.objects.get(id=tag))
-                    except TicketTag.DoesNotExist:
-                        pass
-                else:
-                    tag_obj, _ = TicketTag.objects.get_or_create(name=tag)
-                    ticket.tags.add(tag_obj)
-
-        # --- Actualizar ticket existente (id numérico) ---
-        if id_param and id_param.isdigit():
-            ticket = get_object_or_404(Ticket, id=int(id_param))
-
-            # Capture original values for change tracking
-            _orig_status     = ticket.status
-            _orig_priority   = ticket.priority
-            _orig_subject    = ticket.subject
-            _orig_assignee   = ticket.assignee_id
-            _orig_group      = ticket.assigned_group_id
-
-            ticket.subject     = subject
-            ticket.description = description
-            ticket.assignee_id = asignado_id
-            ticket.brand       = brand_obj
-            ticket.type        = tipo
-            ticket.channel     = channel
-            ticket.service     = service
-            ticket.language    = language
-            ticket.category    = category
-            ticket.priority    = priority
-            ticket.status      = status
-            ticket.assigned_group_id = grupo_id if grupo_id else None
-            ticket.due_at = due_at
-            ticket.security_related = security_related
-            ticket.monitoring = monitoring
-            ticket.approval_status = approval_status
-            ticket.resolution_type = resolution_type
-            ticket.required_tasks = required_tasks
-            ticket.save()
-            _set_m2m(ticket)
-
-            # Record field changes as TicketEvents
-            _now = timezone.now()
-            _str = lambda v: str(v) if v is not None else None
-            for _fname, _old, _new in [
-                ('status',      _orig_status,          ticket.status),
-                ('priority',    _orig_priority,         ticket.priority),
-                ('subject',     _orig_subject,          ticket.subject),
-                ('assignee_id', _str(_orig_assignee),   _str(ticket.assignee_id)),
-                ('group_id',    _str(_orig_group),      _str(ticket.assigned_group_id)),
-            ]:
-                if _old != _new:
-                    TicketEvent.objects.create(
-                        ticket=ticket, actor=request.user,
-                        field_name=_fname, old_value=_old, new_value=_new,
-                        created_at=_now,
-                    )
-
-            _notify_users(ticket, f"Ticket #{ticket.id} actualizado", actor=request.user)
-            if content:
-                requested_public = str((request.POST.get('is_public') or 'true')).lower() in ('true','1','yes','on')
-                final_is_public = requested_public if _is_agent(request.user) else True
-
-                Comment.objects.create(
-                    ticket_id=ticket.id,
-                    user_id=request.user.id,
-                    content=content,
-                    created_at=timezone.now(),
-                    is_public=final_is_public,
-                )
-            return redirect(f'{request.path}?id={ticket.id}')
-
-        # --- Crear ticket nuevo (id temporal o sin id) ---
-        ticket = Ticket.objects.create(
-            subject=subject,
-            description=description,
-            status=status,
-            priority=priority,
-            requester_id=solicitante_id,
-            assignee_id=asignado_id,
-            assigned_group_id=grupo_id if grupo_id else None,
-            created_by_id=request.user.id,
-            brand=brand_obj,
-            type=tipo,
-            channel=channel,
-            service=service,
-            language=language,
-            created_at=timezone.now(),
-            category=category,
-            due_at=due_at,
-            security_related=security_related,
-            monitoring=monitoring,
-            approval_status=approval_status,
-            resolution_type=resolution_type,
-            required_tasks=required_tasks,
-        )
-        _set_m2m(ticket)
-        _notify_users(ticket, f"Nuevo ticket #{ticket.id}: {ticket.subject}", actor=request.user)
-        if content:
-            requested_public = str((request.POST.get('is_public') or 'true')).lower() in ('true','1','yes','on')
-            final_is_public = requested_public if _is_agent(request.user) else True
-
-            Comment.objects.create(
-                ticket_id=ticket.id,
-                user_id=request.user.id,
-                content=content,
-                created_at=timezone.now(),
-                is_public=final_is_public,
-            )
+        try:
+            ticket_id = int(id_param) if id_param and id_param.isdigit() else None
+            ticket = TicketService.create_or_update_from_post(request.user, request.POST, ticket_id=ticket_id)
+        except APIValidationError as exc:
+            return json_error(exc.code, exc.message, status=exc.status)
+        except Ticket.DoesNotExist:
+            return json_error('ticket_not_found', 'Ticket no encontrado', status=404)
         return redirect(f'{request.path}?id={ticket.id}')
 
     # GET .
@@ -1138,31 +1062,17 @@ def create_ticket(request):
     # 403 and form fields stay empty — which the user perceives as "ticket viewing error".
     if id_param and id_param.isdigit():
         _ticket_check = get_object_or_404(Ticket, id=int(id_param))
-        if not _is_agent(request.user):
-            _involved = (
-                _ticket_check.requester_id == request.user.id or
-                _ticket_check.created_by_id == request.user.id or
-                _ticket_check.ccs.filter(id=request.user.id).exists()
-            )
-            if not _involved:
-                return render(request, "tickets/403.html",
-                              {"error": "No tienes acceso a este ticket."}, status=403)
+        if not can_view_ticket(request.user, _ticket_check):
+            return render(request, "tickets/403.html",
+                          {"error": "No tienes acceso a este ticket."}, status=403)
 
     usuarios = _cached_all_users()
-    agentes = User.objects.filter(group=2).only('id', 'name', 'email').order_by('name')
+    agentes = AssignmentService.agent_queryset().only('id', 'name', 'email').order_by('name')
     tags = TicketTag.objects.only('id', 'name').all()
     todos = usuarios  # same list — avoids a duplicate 663ms query
     grupos = Group.objects.all().order_by('group_name')
 
-    # Marcas: combinamos las hardcoded con las que ya existen en BD (p.ej. importadas de Zendesk)
-    hardcoded_brands = [
-        "Audio Simple Notification Service",
-        "Comunycarse Helpdesk",
-        "EcomFax",
-        "Recordia",
-    ]
-    db_brands = list(Brand.objects.values_list('name', flat=True))
-    empresas = sorted(set(hardcoded_brands + db_brands))
+    empresas = list(Brand.objects.order_by('name').values_list('name', flat=True))
 
     ticket_obj = get_object_or_404(Ticket, id=int(id_param)) if id_param and id_param.isdigit() else None
 
@@ -1301,82 +1211,49 @@ def reopen_ticket(request, pk):
     ticket.save()
     return redirect('ticket_detail', pk=pk)
 
-@login_required
+@api_login_required
 @require_POST
 def take_ticket(request, ticket_id):
     ticket = get_object_or_404(Ticket, id=ticket_id)
+    if not can_update_ticket(request.user, ticket):
+        return json_error('forbidden', 'Permiso denegado', status=403, success=False)
     if ticket.assignee_id == request.user.id:
-        return JsonResponse({'success': False, 'error': 'already_assigned'})
-    prev = str(ticket.assignee_id) if ticket.assignee_id else None
-    ticket.assignee = request.user
-    ticket.save(update_fields=['assignee'])
-    TicketEvent.objects.create(
-        ticket=ticket, actor=request.user,
-        field_name='assignee_id',
-        old_value=prev,
-        new_value=str(request.user.id),
-    )
-    _notify_users(ticket, f"Ticket #{ticket.id} asignado a {request.user.name}", actor=request.user)
-    return JsonResponse({'success': True, 'assignee_id': request.user.id, 'assignee_name': request.user.name})
+        return JsonResponse({'ok': False, 'success': False, 'error': 'already_assigned'})
+    with transaction.atomic():
+        ticket = Ticket.objects.select_for_update().get(id=ticket_id)
+        prev = str(ticket.assignee_id) if ticket.assignee_id else None
+        ticket.assignee = request.user
+        ticket.save(update_fields=['assignee'])
+        TicketEvent.objects.create(
+            ticket=ticket, actor=request.user,
+            field_name='assignee_id',
+            old_value=prev,
+            new_value=str(request.user.id),
+            created_at=timezone.now(),
+        )
+        NotificationService.notify_ticket_users(ticket, f"Ticket #{ticket.id} asignado a {request.user.name}", actor=request.user)
+    return JsonResponse({'ok': True, 'success': True, 'data': {'assignee_id': request.user.id, 'assignee_name': request.user.name}, 'assignee_id': request.user.id, 'assignee_name': request.user.name})
 
 
 # Funcionalidades de Comentarios
 
-@login_required
+@api_login_required
 @require_POST
 def add_comment(request, ticket_id):
-    data = json.loads(request.body)
-    content = (data.get('content') or '').strip()
-    if not content:
-        return JsonResponse({'error': 'El contenido no puede estar vacío.'}, status=400)
-
-    ticket = get_object_or_404(Ticket, id=ticket_id)
-
-    requested_public = bool(data.get('is_public', True))
-    final_is_public = requested_public if _is_agent(request.user) else True  # clientes → siempre público
-
-    html_body = (data.get('html_body') or '').strip()
-    if html_body:
-        html_body = _sanitize_email_html(html_body)
-
-    comment = Comment.objects.create(
-        ticket=ticket,
-        user=request.user,
-        content=content,
-        html_body=html_body or None,
-        created_at=timezone.now(),
-        is_public=final_is_public,
-    )
-
-    # --- NUEVO: cambio de estado inline ---
-    new_status = (data.get('new_status') or '').lower()
-    allowed = {'open', 'pending', 'resolved', 'closed'}
-    applied_status = ticket.status
-    if new_status in allowed and new_status != ticket.status:
-        prev = ticket.status
-        ticket.status = new_status
-        if new_status == 'closed':
-            ticket.closed_at = timezone.now()
-        ticket.updated_at = timezone.now()
-        ticket.save(update_fields=['status', 'updated_at', 'closed_at'])
-        TicketEvent.objects.create(
+    try:
+        data = parse_json_body(request)
+        ticket = get_object_or_404(Ticket, id=ticket_id)
+        comment, applied_status = CommentService.add_comment(
             ticket=ticket,
             actor=request.user,
-            field_name='status',
-            old_value=prev,
-            new_value=new_status,
-            created_at=timezone.now(),
+            content=data.get('content') or '',
+            is_public=data.get('is_public', True),
+            html_body=data.get('html_body') or '',
+            new_status=data.get('new_status') or '',
+            attachment_ids=data.get('attachment_ids') or [],
         )
-        applied_status = new_status
-
-    # Vincular adjuntos pendientes al comentario
-    attachment_ids = data.get('attachment_ids') or []
-    if attachment_ids:
-        Attachment.objects.filter(
-            id__in=attachment_ids,
-            ticket=ticket,
-            comment__isnull=True
-        ).update(comment=comment)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
 
     # adjuntos del comentario para el frontend
     atts = Attachment.objects.filter(comment=comment).values('id', 'file_url', 'file_type')
@@ -1394,8 +1271,7 @@ def add_comment(request, ticket_id):
         'attachments': list(atts),
         'new_status': applied_status,
     })
-@login_required
-@login_required
+@api_login_required
 def update_user_notes(request, user_id):
     if request.method != 'POST':
         return JsonResponse({'error': 'Method not allowed'}, status=405)
@@ -1412,8 +1288,9 @@ def update_user_notes(request, user_id):
     return JsonResponse({'ok': True})
 
 
+@api_login_required
 def notifications_api(request):
-    notifs = Notification.objects.filter(user=request.user, read=False).order_by("-created_at")[:20]
+    notifs = NotificationService.unread_for_user(request.user)
     data = [
         {
             "id": n.id,
@@ -1425,7 +1302,7 @@ def notifications_api(request):
     ]
     return JsonResponse({"notifications": data})
 
-@login_required
+@api_login_required
 def recent_activity_api(request):
     # Solo actualizaciones de los últimos 30 días — sin este corte los tickets
     # importados de Zendesk muestran updated_at de hace años en el dashboard.
@@ -1466,21 +1343,9 @@ def recent_activity_api(request):
     return JsonResponse({"activity": data})
 
 def _notify_users(ticket, message, actor=None):
-    seen = set()
-    targets = []
-    for u in [ticket.requester, ticket.assignee]:
-        if u and u != actor and u.id not in seen:
-            seen.add(u.id)
-            targets.append(u)
+    return NotificationService.notify_ticket_users(ticket, message, actor=actor)
 
-    for u in targets:
-        Notification.objects.create(
-            user=u,
-            ticket=ticket,
-            message=message
-        )
-
-@login_required
+@api_login_required
 @require_POST
 def mark_notification_read(request, notif_id):
     notif = get_object_or_404(Notification, id=notif_id, user=request.user)
@@ -1488,10 +1353,12 @@ def mark_notification_read(request, notif_id):
     notif.save()
     return JsonResponse({"ok": True})
 
-@login_required
+@api_login_required
 @require_POST
 def upload_attachment(request, ticket_id):
     ticket = get_object_or_404(Ticket, id=ticket_id)
+    if not can_view_ticket(request.user, ticket):
+        return json_error('forbidden', 'No tienes acceso a este ticket.', status=403)
     f = request.FILES.get('file')
     if not f:
         return JsonResponse({'error': 'No se recibió ningún archivo.'}, status=400)
@@ -1523,7 +1390,7 @@ def upload_attachment(request, ticket_id):
         'size': getattr(f, 'size', 0),
     })
 
-@login_required
+@api_login_required
 @require_GET
 def macros_api(request):
     if not _is_agent(request.user):
@@ -1532,7 +1399,7 @@ def macros_api(request):
     return JsonResponse({'macros': list(macros)})
 
 
-@login_required
+@api_login_required
 @require_GET
 def global_search(request):
     q = (request.GET.get("q") or "").strip()
@@ -1543,7 +1410,7 @@ def global_search(request):
         Ticket.objects.filter(merged_into__isnull=True, is_deleted=False)
         if _is_agent(request.user) else
         Ticket.objects.filter(merged_into__isnull=True, is_deleted=False)
-        .filter(Q(requester=request.user) | Q(ccs=request.user))
+        .filter(Q(requester=request.user) | Q(ccs=request.user) | Q(created_by=request.user))
         .distinct()
     )
 
@@ -1613,51 +1480,22 @@ def global_search(request):
     return JsonResponse({"tickets": tickets_data, "users": users_data})
 
 
-@login_required
+@api_login_required
 @require_POST
 def merge_ticket(request, ticket_id):
-    if not _is_agent(request.user):
-        return JsonResponse({'error': 'Permiso denegado'}, status=403)
-
-    ticket = get_object_or_404(Ticket, pk=ticket_id)
-
-    if ticket.merged_into_id:
-        return JsonResponse({'error': 'Este ticket ya está fusionado'}, status=400)
-
     try:
         target_id = int(request.POST.get('target_ticket_id', ''))
-        target = Ticket.objects.get(pk=target_id)
-    except (ValueError, TypeError, Ticket.DoesNotExist):
-        return JsonResponse({'error': 'Ticket destino no encontrado'}, status=404)
-
-    if target.id == ticket.id:
-        return JsonResponse({'error': 'No puedes fusionar un ticket consigo mismo'}, status=400)
-
-    if target.merged_into_id:
-        return JsonResponse({'error': 'El ticket destino también está fusionado'}, status=400)
-
-    Comment.objects.filter(ticket=ticket).update(ticket=target)
-    TicketEvent.objects.filter(ticket=ticket).update(ticket=target)
-
-    ticket.merged_into = target
-    ticket.status = 'closed'
-    ticket.save()
-
-    TicketEvent.objects.create(
-        ticket=target,
-        actor=request.user,
-        field_name='merge',
-        old_value=None,
-        new_value=f'#{ticket.zendesk_id or ticket.id}',
-        created_at=timezone.now(),
-    )
-
-    _notify_users(target, f'Ticket #{ticket.zendesk_id or ticket.id} fusionado aquí', actor=request.user)
-
-    return JsonResponse({'ok': True, 'target_id': target.id})
+        target = MergeService.merge_ticket(ticket_id, target_id, request.user)
+    except (ValueError, TypeError):
+        return json_error('invalid_target', 'Ticket destino no encontrado', status=404)
+    except Ticket.DoesNotExist:
+        return json_error('ticket_not_found', 'Ticket no encontrado', status=404)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+    return JsonResponse({'ok': True, 'data': {'target_id': target.id}, 'target_id': target.id})
 
 
-@login_required
+@api_login_required
 @require_POST
 def bulk_delete(request):
     if not _is_agent(request.user):
@@ -1674,48 +1512,27 @@ def bulk_delete(request):
     return JsonResponse({'ok': True, 'deleted': updated})
 
 
-@login_required
+@api_login_required
 @require_POST
 def bulk_merge(request):
-    if not _is_agent(request.user):
-        return JsonResponse({'error': 'Permiso denegado'}, status=403)
     try:
-        data = json.loads(request.body)
+        data = parse_json_body(request)
         ids = data.get('ids', [])
         target_id = int(data.get('target_id', 0))
-    except (json.JSONDecodeError, AttributeError, ValueError, TypeError):
-        return JsonResponse({'error': 'Payload inválido'}, status=400)
+    except (APIValidationError, AttributeError, ValueError, TypeError) as exc:
+        if isinstance(exc, APIValidationError):
+            return json_error(exc.code, exc.message, status=exc.status)
+        return json_error('invalid_payload', 'Payload inválido', status=400)
     if not ids or not target_id:
-        return JsonResponse({'error': 'ids y target_id requeridos'}, status=400)
+        return json_error('missing_fields', 'ids y target_id requeridos', status=400)
 
     try:
-        target = Ticket.objects.get(pk=target_id, merged_into__isnull=True, is_deleted=False)
+        target, merged_count = MergeService.bulk_merge(ids, target_id, request.user)
     except Ticket.DoesNotExist:
-        return JsonResponse({'error': 'Ticket destino no encontrado'}, status=404)
-
-    tickets_to_merge = Ticket.objects.filter(
-        id__in=ids, merged_into__isnull=True, is_deleted=False
-    ).exclude(id=target_id)
-
-    merged_count = 0
-    for ticket in tickets_to_merge:
-        Comment.objects.filter(ticket=ticket).update(ticket=target)
-        TicketEvent.objects.filter(ticket=ticket).update(ticket=target)
-        ticket.merged_into = target
-        ticket.status = 'closed'
-        ticket.save()
-        TicketEvent.objects.create(
-            ticket=target,
-            actor=request.user,
-            field_name='merge',
-            old_value=None,
-            new_value=f'#{ticket.zendesk_id or ticket.id}',
-            created_at=timezone.now(),
-        )
-        merged_count += 1
-
-    _notify_users(target, f'{merged_count} ticket(s) fusionados aquí', actor=request.user)
-
+        return json_error('target_not_found', 'Ticket destino no encontrado', status=404)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+    return JsonResponse({'ok': True, 'data': {'target_id': target.id, 'merged': merged_count}, 'target_id': target.id, 'merged': merged_count})
 
 @login_required
 def documentation(request):
@@ -1732,17 +1549,19 @@ _EMAIL_RE = _re_admin.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 
 def _admin_required(view_func):
-    """Decorator: 403 si no es admin; redirige a login si no autenticado."""
+    """Decorator: 401/403 JSON para APIs; HTML conserva redirect/403."""
     from functools import wraps
 
     @wraps(view_func)
     def _wrapped(request, *args, **kwargs):
         if not request.user.is_authenticated:
+            if request.path.startswith('/api/'):
+                return json_error('not_authenticated', 'Authentication required', status=401)
             return redirect('login')
-        if not _is_admin(request.user):
+        if not can_manage_users(request.user):
             # Para vistas API devolver JSON; para vistas HTML, renderizar 403
             if request.path.startswith('/api/'):
-                return JsonResponse({'error': 'Forbidden'}, status=403)
+                return json_error('forbidden', 'Forbidden', status=403)
             return render(request, "tickets/403.html",
                           {"error": "Solo los administradores pueden acceder a esta sección."},
                           status=403)
@@ -1783,7 +1602,6 @@ def _admin_serialize_user(u):
 
 
 @_admin_required
-@csrf_exempt
 def admin_users_api(request):
     """CRUD de usuarios para administradores.
 
@@ -1951,7 +1769,6 @@ def admin_users_api(request):
 
 
 @_admin_required
-@csrf_exempt
 def admin_groups_api(request):
     """CRUD de grupos (solo admin)."""
     if request.method == 'GET':
@@ -2016,7 +1833,6 @@ def admin_groups_api(request):
 
 
 @_admin_required
-@csrf_exempt
 def admin_roles_api(request):
     """CRUD de roles (solo admin)."""
     _PROTECTED_ROLES = {'admin', 'administrator', 'administrador', 'end user', 'end-user'}
@@ -2089,7 +1905,6 @@ def admin_roles_api(request):
 
 
 @_admin_required
-@csrf_exempt
 @require_POST
 def admin_reset_password_api(request, user_id):
     """Permite al admin establecer una contraseña nueva o invalidarla."""
@@ -2107,3 +1922,186 @@ def admin_reset_password_api(request, user_id):
         user.set_unusable_password()
     user.save()
     return JsonResponse({'ok': True})
+
+
+def _as_int_or_none(value):
+    try:
+        return int(value) if value not in (None, '') else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _serialize_assignment_rule(rule):
+    return {
+        'id': rule.id,
+        'name': rule.name,
+        'active': rule.active,
+        'group_id': rule.group_id,
+        'service': rule.service or '',
+        'channel': rule.channel or '',
+        'members': [
+            {
+                'id': member.id,
+                'user_id': member.user_id,
+                'user_name': member.user.name if member.user else '',
+                'weight': member.weight,
+                'capacity': member.capacity,
+                'active': member.active,
+            }
+            for member in rule.members.select_related('user').order_by('user__name')
+        ],
+    }
+
+
+@_admin_required
+def admin_assignment_rules_api(request):
+    if request.method == 'GET':
+        rules = AssignmentRule.objects.prefetch_related('members__user').order_by('name')
+        return JsonResponse({'ok': True, 'rules': [_serialize_assignment_rule(rule) for rule in rules]})
+
+    try:
+        data = parse_json_body(request)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+
+    if request.method in ('POST', 'PUT'):
+        rule = AssignmentRule.objects.filter(id=data.get('id')).first() if request.method == 'PUT' else AssignmentRule()
+        if request.method == 'PUT' and not rule:
+            return json_error('assignment_rule_not_found', 'Regla de asignacion no encontrada', status=404)
+        name = (data.get('name') or '').strip()
+        if not name:
+            return json_error('name_required', 'name requerido', status=400)
+        rule.name = name
+        rule.active = bool(data.get('active', True))
+        rule.group_id = _as_int_or_none(data.get('group_id'))
+        rule.service = (data.get('service') or '').strip() or None
+        rule.channel = (data.get('channel') or '').strip() or None
+        rule.save()
+
+        if 'members' in data:
+            rule.members.all().delete()
+            for item in data.get('members') or []:
+                user_id = _as_int_or_none(item.get('user_id'))
+                if not user_id:
+                    continue
+                AssignmentRuleMember.objects.create(
+                    rule=rule,
+                    user_id=user_id,
+                    weight=max(_as_int_or_none(item.get('weight')) or 1, 1),
+                    capacity=_as_int_or_none(item.get('capacity')),
+                    active=bool(item.get('active', True)),
+                )
+        return JsonResponse({'ok': True, 'rule': _serialize_assignment_rule(rule)})
+
+    if request.method == 'DELETE':
+        rule_id = _as_int_or_none(request.GET.get('id'))
+        rule = AssignmentRule.objects.filter(id=rule_id).first()
+        if not rule:
+            return json_error('assignment_rule_not_found', 'Regla de asignacion no encontrada', status=404)
+        rule.active = False
+        rule.save(update_fields=['active'])
+        return JsonResponse({'ok': True, 'deactivated': True})
+
+    return json_error('method_not_allowed', 'Metodo no permitido', status=405)
+
+
+def _serialize_sla_policy(policy):
+    return {
+        'id': policy.id,
+        'name': policy.name,
+        'active': policy.active,
+        'priority': policy.priority or '',
+        'service': policy.service or '',
+        'assigned_group_id': policy.assigned_group_id,
+        'first_response_minutes': policy.first_response_minutes,
+        'resolution_minutes': policy.resolution_minutes,
+    }
+
+
+@_admin_required
+def admin_sla_policies_api(request):
+    if request.method == 'GET':
+        policies = SLAPolicy.objects.select_related('assigned_group').order_by('name')
+        return JsonResponse({'ok': True, 'policies': [_serialize_sla_policy(policy) for policy in policies]})
+
+    try:
+        data = parse_json_body(request)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+
+    if request.method in ('POST', 'PUT'):
+        policy = SLAPolicy.objects.filter(id=data.get('id')).first() if request.method == 'PUT' else SLAPolicy()
+        if request.method == 'PUT' and not policy:
+            return json_error('sla_policy_not_found', 'Politica SLA no encontrada', status=404)
+        name = (data.get('name') or '').strip()
+        if not name:
+            return json_error('name_required', 'name requerido', status=400)
+        policy.name = name
+        policy.active = bool(data.get('active', True))
+        policy.priority = (data.get('priority') or '').strip() or None
+        policy.service = (data.get('service') or '').strip() or None
+        policy.assigned_group_id = _as_int_or_none(data.get('assigned_group_id'))
+        policy.first_response_minutes = max(_as_int_or_none(data.get('first_response_minutes')) or 0, 0)
+        policy.resolution_minutes = max(_as_int_or_none(data.get('resolution_minutes')) or 0, 0)
+        policy.save()
+        return JsonResponse({'ok': True, 'policy': _serialize_sla_policy(policy)})
+
+    if request.method == 'DELETE':
+        policy_id = _as_int_or_none(request.GET.get('id'))
+        policy = SLAPolicy.objects.filter(id=policy_id).first()
+        if not policy:
+            return json_error('sla_policy_not_found', 'Politica SLA no encontrada', status=404)
+        policy.active = False
+        policy.save(update_fields=['active'])
+        return JsonResponse({'ok': True, 'deactivated': True})
+
+    return json_error('method_not_allowed', 'Metodo no permitido', status=405)
+
+
+def _serialize_automation_rule(rule):
+    return {
+        'id': rule.id,
+        'name': rule.name,
+        'active': rule.active,
+        'priority': rule.priority,
+        'conditions': rule.conditions,
+        'actions': rule.actions,
+    }
+
+
+@_admin_required
+def admin_automation_rules_api(request):
+    if request.method == 'GET':
+        rules = AutomationRule.objects.order_by('priority', 'name')
+        return JsonResponse({'ok': True, 'rules': [_serialize_automation_rule(rule) for rule in rules]})
+
+    try:
+        data = parse_json_body(request)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+
+    if request.method in ('POST', 'PUT'):
+        rule = AutomationRule.objects.filter(id=data.get('id')).first() if request.method == 'PUT' else AutomationRule()
+        if request.method == 'PUT' and not rule:
+            return json_error('automation_rule_not_found', 'Automatizacion no encontrada', status=404)
+        name = (data.get('name') or '').strip()
+        if not name:
+            return json_error('name_required', 'name requerido', status=400)
+        rule.name = name
+        rule.active = bool(data.get('active', True))
+        rule.priority = max(_as_int_or_none(data.get('priority')) or 100, 0)
+        rule.conditions = data.get('conditions') or {}
+        rule.actions = data.get('actions') or {}
+        rule.save()
+        return JsonResponse({'ok': True, 'rule': _serialize_automation_rule(rule)})
+
+    if request.method == 'DELETE':
+        rule_id = _as_int_or_none(request.GET.get('id'))
+        rule = AutomationRule.objects.filter(id=rule_id).first()
+        if not rule:
+            return json_error('automation_rule_not_found', 'Automatizacion no encontrada', status=404)
+        rule.active = False
+        rule.save(update_fields=['active'])
+        return JsonResponse({'ok': True, 'deactivated': True})
+
+    return json_error('method_not_allowed', 'Metodo no permitido', status=405)
