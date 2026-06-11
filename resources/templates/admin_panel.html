@@ -4,23 +4,20 @@
 {% block title %}Administración – TicketFlow{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'tickets/admin_panel.css' %}?v=s4.7">
+<link rel="stylesheet" href="{% static 'tickets/admin_panel.css' %}?v=s5.1">
 {% endblock %}
 
 {% block content %}
-<div class="tf-admin-wrap">
-    <div class="tf-admin-header">
-        <span class="tf-admin-header-icon"><i class="fas fa-shield-alt"></i></span>
-        <div class="tf-admin-header-text">
-            <h1>Administración</h1>
-            <p>Gestiona usuarios, roles y grupos. Solo visible para administradores.</p>
-        </div>
-    </div>
+<div class="title-bar">
+    <h1>Administración</h1>
+</div>
 
+<div class="tf-admin-wrap">
     <div class="tf-tabs tf-admin-tabs">
         <button class="tf-tab is-active" data-tab="users">Usuarios</button>
         <button class="tf-tab" data-tab="roles">Roles</button>
         <button class="tf-tab" data-tab="groups">Grupos</button>
+        <button class="tf-tab" data-tab="templates">Plantillas</button>
     </div>
 
     <!-- ======== USERS ======== -->
@@ -123,6 +120,30 @@
             </table>
         </div>
     </div>
+
+    <!-- ======== RESPONSE TEMPLATES ======== -->
+    <div id="tab-templates" class="tf-admin-panel">
+        <div class="tf-toolbar">
+            <div class="tf-toolbar-grow"></div>
+            <button class="tf-btn tf-btn--primary" id="btnNewTemplate"><i class="fas fa-plus"></i> Nueva plantilla</button>
+        </div>
+        <div class="tf-admin-table-area">
+            <table class="tf-admin-table">
+                <thead>
+                    <tr>
+                        <th class="col-id">ID</th>
+                        <th>Clave</th>
+                        <th>Marca</th>
+                        <th style="width:80px">Idioma</th>
+                        <th>Asunto</th>
+                        <th class="col-status">Estado</th>
+                        <th class="col-actions">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="templatesTbody"><tr><td colspan="7"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message">Cargando…</span></div></td></tr></tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <!-- ======== USER MODAL ======== -->
@@ -187,6 +208,65 @@
     </div>
 </div>
 
+<!-- ======== RESPONSE TEMPLATE MODAL ======== -->
+<div class="dialog-backdrop" id="templateModal">
+    <div class="dialog dialog--lg dialog--form" role="dialog" aria-modal="true">
+        <div class="dialog__header">
+            <h3 class="dialog__title" id="templateModalTitle">Nueva plantilla</h3>
+            <button type="button" class="dialog__close" data-close="templateModal" aria-label="Cerrar">×</button>
+        </div>
+        <div class="dialog__body">
+            <div id="templateModalError" class="tf-admin-alert tf-admin-alert--error" style="display:none;"></div>
+            <input type="hidden" id="templateModalId">
+            <div class="tf-field">
+                <label>Clave</label>
+                <input type="text" class="tf-input" id="templateModalKey" placeholder="ticket_created">
+            </div>
+            <div class="tf-field">
+                <label>Marca</label>
+                <select class="tf-select" id="templateModalBrand">
+                    <option value="">— Global (todas las marcas) —</option>
+                    {% for b in brands %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="tf-field">
+                <label>Idioma</label>
+                <select class="tf-select" id="templateModalLanguage">
+                    <option value="es">Español</option>
+                    <option value="en">English</option>
+                </select>
+            </div>
+            <div class="tf-field">
+                <label>Asunto</label>
+                <input type="text" class="tf-input" id="templateModalSubject"
+                       placeholder="[Ticket #{% templatetag openvariable %}ticket_id{% templatetag closevariable %}] …">
+            </div>
+            <div class="tf-field">
+                <label>Cuerpo (HTML) — variables: {% templatetag openvariable %}ticket_id{% templatetag closevariable %}, {% templatetag openvariable %}subject{% templatetag closevariable %}, {% templatetag openvariable %}requester_name{% templatetag closevariable %}, {% templatetag openvariable %}brand_name{% templatetag closevariable %}, {% templatetag openvariable %}ticket_url{% templatetag closevariable %}</label>
+                <div id="templateModalBodyEditor" style="min-height:160px; background: var(--color-surface-1, #fff);"></div>
+            </div>
+            <div class="tf-field">
+                <label>Cuerpo (texto plano, opcional — derivado del HTML si se deja vacío)</label>
+                <textarea class="tf-textarea" id="templateModalBodyText" rows="4"></textarea>
+            </div>
+            <div class="tf-field">
+                <label>Estado</label>
+                <select class="tf-select" id="templateModalActive"><option value="true">Activa</option><option value="false">Inactiva</option></select>
+            </div>
+            <div class="tf-field" id="templatePreviewArea" style="display:none;">
+                <label>Vista previa (datos de ejemplo)</label>
+                <div class="tf-admin-alert" id="templatePreviewSubject" style="font-weight:600;"></div>
+                <div id="templatePreviewBody" style="border:1px solid var(--color-border,#ccc); border-radius:4px; padding:10px;"></div>
+            </div>
+        </div>
+        <div class="dialog__footer">
+            <button class="tf-btn tf-btn--secondary" id="btnPreviewTemplate"><i class="fas fa-eye"></i> Vista previa</button>
+            <button class="tf-btn tf-btn--secondary" data-close="templateModal">Cancelar</button>
+            <button class="tf-btn tf-btn--primary" id="btnSaveTemplate">Guardar</button>
+        </div>
+    </div>
+</div>
+
 <!-- ======== GROUP MODAL ======== -->
 <div class="dialog-backdrop" id="groupModal">
     <div class="dialog dialog--form" role="dialog" aria-modal="true">
@@ -212,5 +292,5 @@
 <script>
 window.__adminPanelData = { currentUserId: {{ request.user.id }} };
 </script>
-<script src="{% static 'tickets/admin_panel.js' %}?v=s4.7"></script>
+<script src="{% static 'tickets/admin_panel.js' %}?v=s4.8"></script>
 {% endblock %}

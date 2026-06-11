@@ -1,0 +1,239 @@
+/* Reporting por entidad — layout de KPIs y gráficas (tokens de admin_panel/home) */
+
+/* El .title-bar va a sangre como en Tickets/Clientes/Dashboard (hijo directo
+   del contenido). El cuerpo se desplaza 59px para esquivar el sidebar flotante
+   y scrollea por dentro, ocupando el resto del viewport. */
+.tf-report-wrap {
+    margin-left: 59px;
+    padding: var(--space-4, 16px);
+    position: relative;
+    height: calc(100vh - 50px - 49px);   /* navbar (50) + title-bar (~49) */
+    overflow-y: auto;
+}
+
+/* Barra de filtros (tarjeta) */
+.tf-report-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--space-3, 14px);
+    background: var(--color-surface-1, #fff);
+    border: 1px solid var(--color-border, #e6e6e9);
+    border-radius: var(--radius-md, 10px);
+    padding: var(--space-3, 12px) var(--space-4, 16px);
+}
+.tf-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+.tf-filter-label {
+    font-size: .7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--color-text-secondary, #999);
+}
+.tf-filter-label i { margin-right: 4px; opacity: .8; }
+.tf-report-toolbar .tf-select { min-width: 170px; height: 36px; }
+
+/* Segmented control de presets */
+.tf-segment {
+    display: inline-flex;
+    border: 1px solid var(--color-border, #d8d8de);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--color-surface-2, #f4f5f8);
+    height: 36px;
+}
+.tf-segment button {
+    border: none;
+    background: transparent;
+    padding: 0 14px;
+    font-size: .82rem;
+    font-weight: 600;
+    color: var(--color-text-secondary, #777);
+    cursor: pointer;
+    border-left: 1px solid var(--color-border, #e2e2e8);
+    transition: background .12s ease, color .12s ease;
+}
+.tf-segment button:first-child { border-left: none; }
+.tf-segment button:hover { background: rgba(91, 103, 202, .08); color: var(--color-primary, #5b67ca); }
+.tf-segment button.is-active {
+    background: var(--color-primary, #5b67ca);
+    color: #fff;
+}
+
+/* Rango personalizado */
+.tf-daterange {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.tf-daterange-sep { color: var(--color-text-secondary, #aaa); }
+.tf-report-date { max-width: 150px; height: 36px; }
+
+.tf-report-kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--space-3, 12px);
+    margin: var(--space-4, 16px) 0;
+}
+.tf-kpi-card {
+    background: var(--color-surface-1, #fff);
+    border: 1px solid var(--color-border, #e2e2e2);
+    border-radius: var(--radius-md, 8px);
+    padding: var(--space-3, 12px) var(--space-4, 16px);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    position: relative;
+    overflow: hidden;
+    transition: box-shadow .15s ease, transform .15s ease;
+}
+.tf-kpi-card:hover {
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .08);
+    transform: translateY(-1px);
+}
+/* Banda de acento a la izquierda según tipo de KPI */
+.tf-kpi-card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--color-border, #e2e2e2);
+}
+.tf-kpi--primary::before { background: #5b67ca; }
+.tf-kpi--success::before { background: #2eb872; }
+.tf-kpi--warn::before    { background: #d19a66; }
+.tf-kpi--danger::before  { background: #dc3545; }
+
+.tf-kpi-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 22px;
+}
+.tf-kpi-ico {
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: .9rem;
+    background: var(--color-surface-2, #f1f2f7);
+    color: var(--color-text-secondary, #777);
+}
+.tf-kpi--primary .tf-kpi-ico { background: rgba(91,103,202,.12);  color: #5b67ca; }
+.tf-kpi--success .tf-kpi-ico { background: rgba(46,184,114,.14);  color: #2eb872; }
+.tf-kpi--warn .tf-kpi-ico    { background: rgba(209,154,102,.16); color: #c8862f; }
+.tf-kpi--danger .tf-kpi-ico  { background: rgba(220,53,69,.12);   color: #dc3545; }
+
+.tf-kpi-delta {
+    font-size: .72rem;
+    font-weight: 600;
+    color: var(--color-text-secondary, #888);
+    white-space: nowrap;
+}
+.tf-kpi-delta.is-up   { color: #c0392b; }
+.tf-kpi-delta.is-down { color: #2eb872; }
+/* Para "Resueltos" subir es bueno → invertimos el color del delta */
+.tf-kpi--success .tf-kpi-delta.is-up   { color: #2eb872; }
+.tf-kpi--success .tf-kpi-delta.is-down { color: #c0392b; }
+
+.tf-kpi-value {
+    font-size: 1.7rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--color-text, inherit);
+    margin-top: 2px;
+}
+.tf-kpi-label {
+    font-size: 0.78rem;
+    color: var(--color-text-secondary, #777);
+}
+.tf-kpi-card--danger .tf-kpi-value,
+.tf-kpi--danger .tf-kpi-value { color: #dc3545; }
+
+/* Tablas del reporting (admin_panel.css no se carga aquí) */
+.tf-report-wrap .tf-admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .86rem;
+}
+.tf-report-wrap .tf-admin-table th,
+.tf-report-wrap .tf-admin-table td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--color-border, #e6e6e9);
+    vertical-align: middle;
+}
+.tf-report-wrap .tf-admin-table thead th {
+    font-weight: 600;
+    font-size: .76rem;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: var(--color-text-secondary, #888);
+    border-bottom: 2px solid var(--color-border, #ddd);
+    white-space: nowrap;
+}
+.tf-report-wrap .tf-admin-table tbody tr:hover {
+    background: var(--color-surface-2, #f6f7fa);
+}
+.tf-report-wrap .tf-admin-table tbody tr:last-child td { border-bottom: none; }
+/* Desglose por empresa: 1ª columna texto, resto numéricas a la derecha */
+.tf-report-wrap .tf-admin-table th + th,
+.tf-report-wrap .tf-admin-table td + td { text-align: right; }
+/* Tickets antiguos: todo texto a la izquierda salvo la antigüedad (última) */
+.tf-report-wrap .tf-report-table th,
+.tf-report-wrap .tf-report-table td { text-align: left; }
+.tf-report-wrap .tf-report-table th:last-child,
+.tf-report-wrap .tf-report-table td:last-child { text-align: right; }
+
+/* Tabla de tickets más antiguos */
+.tf-report-table .tf-cell-subject {
+    max-width: 420px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tf-report-table .tf-age-old { color: #dc3545; font-weight: 600; }
+.tf-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: .72rem;
+    text-transform: capitalize;
+    background: var(--color-surface-2, #eef0f5);
+    color: var(--color-text-secondary, #555);
+}
+.tf-badge--open    { background: rgba(91,103,202,.14);  color: #5b67ca; }
+.tf-badge--pending { background: rgba(209,154,102,.18); color: #c8862f; }
+
+.tf-report-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3, 12px);
+}
+.tf-report-panel {
+    background: var(--color-surface-1, #fff);
+    border: 1px solid var(--color-border, #e2e2e2);
+    border-radius: var(--radius-md, 8px);
+    padding: var(--space-3, 12px);
+    min-width: 0;
+}
+.tf-report-panel h3 {
+    margin: 0 0 var(--space-2, 8px);
+    font-size: 0.95rem;
+    color: var(--color-text-secondary, inherit);
+}
+.tf-report-panel--wide { grid-column: 1 / -1; }
+.tf-report-canvas {
+    position: relative;
+    height: 260px;
+}
+.tf-report-panel--wide .tf-report-canvas { height: 300px; }
+
+@media (max-width: 900px) {
+    .tf-report-grid { grid-template-columns: 1fr; }
+}

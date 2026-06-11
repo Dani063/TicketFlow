@@ -17,7 +17,9 @@ HTTP (views.py)            Celery (tasks.py)
  │  MergeService · AssignmentService          │
  │  AutomationService · SLAService            │
  │  EmailIngestionService · NotificationService│
- │  metrics.record_metric                     │
+ │  OutboundEmailService · ResponseTemplateService│
+ │  TicketAIService · ai (Azure OpenAI)        │
+ │  msgraph (token Graph) · metrics            │
  └──────────────────────────────────────────┘
       │            │            │
       ▼            ▼            ▼
@@ -155,14 +157,67 @@ Motor de reglas condición→acción sobre tickets.
 
 Políticas de SLA de primera respuesta y resolución.
 
-- `find_policy(ticket)`: elige la `SLAPolicy` activa más específica (prioridad/servicio/grupo).
+- `find_policy(ticket)`: elige la `SLAPolicy` activa más específica
+  (prioridad/servicio/**marca**/grupo — especificidad 0–4).
 - `apply_policy(ticket)`: fija `first_response_due_at` y `resolution_due_at`/`due_at` desde
   `created_at`. **Solo arma la primera respuesta si aún no se ha respondido**
   (`not ticket.first_responded_at`) — evita que una edición posterior resucite un SLA ya cumplido.
 - `record_first_response(ticket, actor)`: en la primera respuesta pública de un agente,
-  sella `first_responded_at` y limpia `first_response_due_at`.
+  sella `first_responded_at`, **persiste `first_response_met`** (el due se limpia, así que
+  el cumplimiento no es computable a posteriori) y limpia `first_response_due_at`.
+- `annotate_urgency(qs)`: anota `sla_next_due` (próximo vencimiento, con guardas Case
+  porque `LEAST()` en MySQL devuelve NULL si algún argumento es NULL). Es la fuente única
+  para el orden de cola por SLA y la detección de riesgo.
 - `mark_breaches()`: tarea periódica que marca `sla_breached_at` en tickets vencidos no
-  resueltos, con `TicketEvent("sla_breach")`, notificación y métrica `sla.breach`.
+  resueltos, **escala la prioridad** (low→normal→high→urgent, con `TicketEvent` y
+  `sla_escalated_at`), notifica a requester/assignee y **a todo el grupo asignado**, y
+  registra la métrica `sla.breach`.
+- `notify_at_risk(window_minutes=60)`: tarea periódica que avisa al asignado y a su grupo
+  cuando el próximo vencimiento entra en la ventana; idempotente vía `sla_risk_notified_at`.
+
+### `ResponseTemplateService` — `email_templates.py`
+
+Plantillas de respuesta al cliente por clave + marca + idioma (ES/EN).
+
+- `pick_language(ticket)`: `ticket.language` (normaliza valores Zendesk
+  'español'/'inglés') → `brand.language` → `'es'`.
+- `resolve(key, brand, language)`: cascada marca+idioma → global+idioma → marca+es → global+es.
+- `render(template, context)`: motor de plantillas de Django sobre strings con contexto de
+  **solo escalares** (nunca instancias de modelo — evita traversal de atributos desde una
+  plantilla editada en el panel).
+
+### `OutboundEmailService` — `email_outbound.py`
+
+Envío de email saliente por marca (`Brand.mailbox_type`): `ses` → API SESv2 con boto3
+(**rol IAM del pod**, sin credenciales SMTP), `m365` → Graph `sendMail` (token MSAL de
+`msgraph.py`, requiere permiso `Mail.Send`).
+
+- `queue_ticket_confirmation(ticket)`: anti-bucles (kill switch `OUTBOUND_EMAIL_ENABLED`,
+  buzones propios, patrones noreply, correo entrante auto-generado vía
+  `EmailIngestionService.is_auto_generated`), renderiza la plantilla `ticket_created`,
+  crea `OutboundEmailLog` con `dedup_key` único y encola `send_outbound_email` en
+  `transaction.on_commit`. Toda supresión queda registrada con su motivo.
+- `deliver(log)`: entrega real, llamada desde la tarea. SES devuelve `MessageId`; Graph
+  devuelve 202 (la copia queda en Enviados).
+
+### `TicketAIService` — `ticket_ai.py` (+ `ai.py`)
+
+Clasificación ITIL automática al crear un ticket (Azure OpenAI; `ai.py` es la única capa
+que importa el SDK y mapea errores a `AIRetryableError`/`AIPermanentError`).
+
+- Prompt en español con definiciones ITIL (incident = fallo puntual no planificado;
+  problem = causa raíz/patrón recurrente) + few-shots; JSON Schema estricto con enums y
+  validación defensiva en código.
+- **Política fill-empty-only**: solo rellena campos vacíos (`type`, `category`, `priority`,
+  `language`) con confianza ≥ `AI_AUTO_APPLY_CONFIDENCE`; lo escrito por humanos nunca se
+  sobrescribe. Cada campo aplicado emite `TicketEvent` con el usuario sistema
+  `ai-assistant@ticketflow.local`. Si aplica `priority`, re-ejecuta
+  `SLAService.apply_policy` (los plazos no pudieron computarse con priority=NULL).
+- Idempotente por `input_fingerprint` (sha256 del input + versión de prompt) frente a
+  redeliveries de SQS. La llamada HTTP ocurre fuera de locks; el apply usa
+  `select_for_update` corto.
+- Histórico completo en `TicketAIAnalysis` (confianza por campo, razonamiento, versión de
+  prompt/modelo, tokens, latencia) — base del feedback loop del Q3.
 
 ### `EmailIngestionService` — `email_ingestion.py`
 
@@ -184,7 +239,9 @@ Convierte un mensaje de Graph API en ticket/comentario. Llamado por `tasks._proc
 ### `NotificationService` — `notifications.py`
 
 `notify_ticket_users(ticket, message, actor)` crea `Notification` para requester y
-assignee (sin duplicar ni notificar al propio actor). `unread_for_user(user)` para el badge.
+assignee (sin duplicar ni notificar al propio actor). `notify_users(ticket, message, users)`
+y `notify_group(ticket, message, group, exclude_ids)` para los avisos de SLA al grupo
+completo. `unread_for_user(user)` para el badge.
 
 ### `metrics.py`
 
@@ -203,10 +260,24 @@ flujo de negocio: si falla, lo registra en el log y devuelve `None`.
 | `AutomationRule` | Regla condición→acción | `priority`, `conditions` (JSON), `actions` (JSON) |
 | `AutomationExecution` | Marca de ejecución (idempotencia) | `unique(rule,ticket,event_key)` |
 | `InboundEmailLog` | Auditoría de email entrante | estado, `result`, `error`, `payload`; `unique(brand,message_id)` |
+| `OutboundEmailLog` | Auditoría de email saliente | queued/sent/failed/suppressed + motivo, `provider`, `provider_message_id`, `dedup_key` único (190 chars por límite utf8mb4) |
+| `ResponseTemplate` | Plantilla de respuesta al cliente | `unique(key,brand,language)`; brand NULL = global; variables `{{ticket_id}}`… |
+| `TicketAIAnalysis` | Histórico de clasificación IA | sugerencias + confianza por campo, `input_fingerprint` (idempotencia), `prompt_version`, tokens/latencia |
 | `OperationalMetric` | Métrica operativa puntual | `name`, `value`, `labels` (JSON), `recorded_at` |
 
-**Campos nuevos en `Ticket`**: `first_response_due_at`, `first_responded_at`,
-`resolution_due_at`, `sla_breached_at`, más índices compuestos para la paginación de listas.
+**Campos en `Ticket`** (sprint SLA + sprint junio 2026): `first_response_due_at`,
+`first_responded_at`, `resolution_due_at`, `sla_breached_at`, `first_response_met`,
+`sla_risk_notified_at`, `sla_escalated_at`, `problem` (self-FK problema↔incidentes,
+`related_name='incidents'`), `type`/`channel` con `choices` (taxonomía en
+`app/constants.py`), más índices compuestos para la paginación de listas (incl.
+`app_ticket_live_brand_idx`).
+
+### `app/constants.py` — taxonomías de dominio
+
+Módulo sin imports de Django: `TICKET_TYPE_CHOICES` (question/incident/problem/task,
+compatible Zendesk), `LEGACY_TYPE_MAP`/`LEGACY_CHANNEL_MAP` (normalización de los valores
+españoles históricos del formulario), `CHANNEL_CHOICES`, `normalize_language` ('español'→es),
+`PRIORITY_ESCALATION` y `SLA_AT_RISK_WINDOW_MINUTES`.
 
 ### Migraciones
 
@@ -216,6 +287,11 @@ flujo de negocio: si falla, lo registra en el log y devuelve `None`.
 | `0036` | Modelos operativos + campos SLA en `Ticket` |
 | `0037` | Campo `Ticket.first_responded_at` |
 | `0038` | **Data migration**: siembra la `AssignmentRule "Default inbound"` con Laura Moccia / Guillermo Soret / José María (reversible e idempotente; si no encuentra usuarios, no siembra nada). |
+| `0039` | Taxonomías (choices type/channel), `Ticket.problem`, campos SLA nuevos, índice por marca, `SLAPolicy.brand` |
+| `0040` | **Data migration** (red de seguridad): normaliza valores legacy de type/channel (la BBDD ya estaba canónica) |
+| `0041` | `ResponseTemplate` + `OutboundEmailLog` |
+| `0042` | **Data migration**: siembra plantillas `ticket_created` ES/EN (subject con `[Ticket #N]` para threading) |
+| `0043` | `TicketAIAnalysis` |
 
 > **Importante**: estas migraciones deben aplicarse en cada entorno (`python src/main.py migrate`).
 > El `docker-entrypoint.sh` lo hace al arrancar; en local hay que ejecutarlo a mano.
@@ -230,10 +306,22 @@ CRUD para configurar la lógica operativa desde el panel, protegidas con `@_admi
 | Endpoint | Modelo |
 |---|---|
 | `/api/admin/assignment-rules/` | `AssignmentRule` (+ miembros) |
-| `/api/admin/sla-policies/` | `SLAPolicy` |
+| `/api/admin/sla-policies/` | `SLAPolicy` (incluye `brand_id`) |
 | `/api/admin/automation-rules/` | `AutomationRule` |
+| `/api/admin/response-templates/` | `ResponseTemplate` (+ `POST ?action=preview` con contexto de ejemplo) |
 
 Soportan `GET` (listar), `POST` (crear), `PUT` (actualizar) y `DELETE` (desactivar, *soft delete*).
+
+### Reporting por entidad (agentes/admin)
+
+| Endpoint | Contenido |
+|---|---|
+| `/reporting/data/` | KPIs (creados, resueltos vía `TicketEvent`, backlog, % SLA, breaches, satisfacción), series diarias creados/cerrados, distribuciones (estado/prioridad/tipo/canal) y desglose por marca (incluye bucket «Sin marca»). Filtros `brand`, `from`, `to` (≤366 días); cache 60 s. |
+| `/reporting/export.csv` | Export CSV en streaming (BOM UTF-8 para Excel, `;` como separador) del conjunto filtrado. |
+
+> Limitación documentada: el cumplimiento de primera respuesta (`first_response_met`)
+> solo acumula desde su introducción — el due se limpia al responder y no es
+> retro-computable. `sla_breached_at` es la fuente de verdad del incumplimiento.
 
 ---
 
@@ -244,6 +332,14 @@ Soportan `GET` (listar), `POST` (crear), `PUT` (actualizar) y `DELETE` (desactiv
 | `poll_m365_mailboxes` | 120 s | `EmailIngestionService` |
 | `auto_assign_unassigned_tickets` | 300 s | `AssignmentService.auto_assign_unassigned` |
 | `mark_sla_breaches` | 300 s | `SLAService.mark_breaches` |
+| `notify_sla_at_risk` | 300 s | `SLAService.notify_at_risk` (aviso 60 min antes del vencimiento) |
+
+### Tareas event-driven (encoladas con `transaction.on_commit`)
+
+| Tarea | Disparador | Notas |
+|---|---|---|
+| `send_outbound_email(log_id)` | `TicketService.create_ticket` → confirmación al solicitante | Idempotente (`status=='sent'` + `dedup_key`); autoretry ×5 con backoff; al agotar marca `failed` en `OutboundEmailLog` |
+| `classify_ticket_ai(ticket_id)` | `TicketService.create_ticket` (si `AI_CLASSIFICATION_ENABLED`) | Idempotente por fingerprint; retryable ×3 con backoff; errores permanentes marcan `TicketAIAnalysis.failed` sin envenenar la cola. El dispatch va en try/except: si el broker está caído, el ticket se crea igual. |
 
 ---
 

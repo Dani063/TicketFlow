@@ -10,7 +10,7 @@
     margin-left: 59px;                     /* sidebar width */
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 50px);             /* 50px = navbar height */
+    height: calc(100vh - 50px - 49px);      /* navbar (50) + title-bar (~49) */
     overflow: hidden;
 }
 

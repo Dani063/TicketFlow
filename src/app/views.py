@@ -3,14 +3,14 @@ Definition of views.
 """
 # -*- coding: utf-8 -*-
 from django.db import transaction
-from django.db.models import Q, OuterRef, Subquery, Count, Max, Case, When, IntegerField
+from django.db.models import Q, OuterRef, Subquery, Count, Max, Case, When, IntegerField, F
 from django.utils.dateparse import parse_datetime
 from datetime import datetime, timedelta
 from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import Brand, Organization, Ticket, Comment, User, TicketTag, Attachment, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating, AssignmentRule, AssignmentRuleMember, SLAPolicy, AutomationRule
+from .models import Brand, Organization, Ticket, Comment, User, TicketTag, Attachment, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating, AssignmentRule, AssignmentRuleMember, SLAPolicy, AutomationRule, ResponseTemplate, OutboundEmailLog
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
@@ -32,12 +32,14 @@ from django.views import View
 from django.views.decorators.http import require_GET
 from django.core.cache import cache
 from .api import APIValidationError, api_login_required, json_error, json_ok, parse_json_body
+from .constants import SLA_AT_RISK_WINDOW_MINUTES
 from .permissions import can_manage_users, can_update_ticket, can_view_ticket, is_admin as permission_is_admin, is_agent as permission_is_agent
 from .sanitizers import sanitize_email_html
 from .services.assignment import AssignmentService
 from .services.comments import CommentService
 from .services.merge import MergeService
 from .services.notifications import NotificationService
+from .services.sla import SLAService
 from .services.tickets import TicketService
 
 logger = logging.getLogger('app.views')
@@ -74,6 +76,10 @@ _TICKET_SORT_FIELDS = {
     'updated_at': 'updated_at',
     'service':    'service',
     'assignee':   'assignee__name',
+    'brand':      'brand__name',
+    'channel':    'channel',
+    'priority':   'priority',
+    'sla':        'sla_next_due',  # requiere SLAService.annotate_urgency (se aplica en filter_tickets)
 }
 
 # Subfiltro (agrupación) por vista, replicando el comportamiento de Zendesk
@@ -107,6 +113,8 @@ _TICKET_GROUP_BY = {
     'new_in_groups':          'group',
     'open':                   'assignee',
     'no_update_48h':          'assignee',
+    'sla_breached':           'assignee',
+    'sla_at_risk':            'assignee',
 }
 
 _GROUP_DB_SORT = {
@@ -258,12 +266,19 @@ def _parse_page_size(raw):
         return _DEFAULT_PAGE_SIZE
 
 
-def _ticket_filter_counts_cache_key(user):
+def _ticket_filter_counts_cache_key(user, brand_id=None):
     role_name = (getattr(getattr(user, 'role', None), 'role_name', '') or '').lower()
     return (
-        f"tickets:filter-counts:v2:user:{user.id}:"
-        f"role:{role_name}:group:{user.group_id or 0}"
+        f"tickets:filter-counts:v3:user:{user.id}:"
+        f"role:{role_name}:group:{user.group_id or 0}:brand:{brand_id or 0}"
     )
+
+
+def _ensure_urgency(qs):
+    """Anota sla_next_due si el queryset no lo trae ya (la vista sla_at_risk lo anota)."""
+    if 'sla_next_due' in qs.query.annotations:
+        return qs
+    return SLAService.annotate_urgency(qs)
 
 
 def _base_tickets_queryset(user):
@@ -283,11 +298,11 @@ def _tickets_for_view(base_qs, view, user):
             created_at__gte=now - timedelta(days=30),
         )
     if view == "unsolved_no_tareas":
-        return base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea"))
+        return base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="task"))
     if view == "unassigned":
         return base_qs.filter(assignee__isnull=True)
     if view == "all_unsolved_no_tareas":
-        return base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="tarea"))
+        return base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="task"))
     if view == "recently_updated":
         return base_qs.filter(updated_at__gte=now - timedelta(hours=24))
     if view == "recently_solved":
@@ -295,7 +310,7 @@ def _tickets_for_view(base_qs, view, user):
     if view == "pendientes":
         return base_qs.filter(status="pending")
     if view == "tareas":
-        return base_qs.filter(type="tarea")
+        return base_qs.filter(type="task")
     if view == "unsolved_groups":
         return base_qs.filter(~Q(status__in=["closed", "resolved"]), assignee__group=user.group)
     if view == "rated_last7":
@@ -305,11 +320,11 @@ def _tickets_for_view(base_qs, view, user):
         ).values_list('ticket_id', flat=True)
         return base_qs.filter(id__in=rated_ids)
     if view == "internos_comuny":
-        return base_qs.filter(service="Comunycarse", status="open")
+        return base_qs.filter(service="internocomuny", status="open")
     if view == "abiertos_ecomfax":
         return base_qs.filter(service="ecomfax", status="open")
     if view == "recordia_sgsd":
-        return base_qs.filter(service="Recordia SGSD", status="open")
+        return base_qs.filter(service="recordia", status="open")
     if view == "closed":
         return base_qs.filter(status="closed")
     if view == "sus_pendientes":
@@ -333,7 +348,7 @@ def _tickets_for_view(base_qs, view, user):
     if view == "twitter_like":
         return base_qs.filter(channel="twitter_like")
     if view == "sus_tareas":
-        return base_qs.filter(requester=user, type="tarea")
+        return base_qs.filter(requester=user, type="task")
     if view == "resueltos":
         return base_qs.filter(status="resolved")
     if view == "new_in_groups":
@@ -342,6 +357,15 @@ def _tickets_for_view(base_qs, view, user):
         return base_qs.filter(status="open")
     if view == "no_update_48h":
         return base_qs.filter(updated_at__lte=now - timedelta(hours=48))
+    if view == "sla_breached":
+        return base_qs.filter(sla_breached_at__isnull=False).exclude(status__in=["closed", "resolved"])
+    if view == "sla_at_risk":
+        return SLAService.annotate_urgency(
+            base_qs.filter(sla_breached_at__isnull=True).exclude(status__in=["closed", "resolved"])
+        ).filter(
+            sla_next_due__gt=now,
+            sla_next_due__lte=now + timedelta(minutes=SLA_AT_RISK_WINDOW_MINUTES),
+        )
     return base_qs
 
 
@@ -423,7 +447,8 @@ def home(request):
 @login_required
 def tickets_list(request):
     # Los filtros se cargan de forma asíncrona desde filter_tickets?counts=1
-    return render(request, "tickets/tickets_list.html", {})
+    brands = list(Brand.objects.exclude(name='').order_by('name').values('id', 'name'))
+    return render(request, "tickets/tickets_list.html", {"brands": brands})
 
 @api_login_required
 def filter_tickets(request):
@@ -447,6 +472,12 @@ def filter_tickets(request):
 
     base_qs = _base_tickets_queryset(request.user)
 
+    # Filtro por marca/entidad: se aplica al queryset base para que vistas,
+    # contadores, totales y paginación lo hereden.
+    brand_id = _as_int_or_none(request.GET.get("brand_id"))
+    if brand_id:
+        base_qs = base_qs.filter(brand_id=brand_id)
+
     if total_only:
         total = _tickets_for_view(base_qs, view, request.user).count()
         return JsonResponse({
@@ -464,7 +495,7 @@ def filter_tickets(request):
     _counts_cache_key = None
     _counts_loaded_from_cache = False
     if compute_counts:
-        _counts_cache_key = _ticket_filter_counts_cache_key(request.user)
+        _counts_cache_key = _ticket_filter_counts_cache_key(request.user, brand_id)
         if not force_counts:
             cached_filtros = cache.get(_counts_cache_key)
             if cached_filtros is not None:
@@ -484,25 +515,37 @@ def filter_tickets(request):
             n_pending        = Count(Case(When(status='pending',  then=1), output_field=IntegerField())),
             n_closed         = Count(Case(When(status='closed',   then=1), output_field=IntegerField())),
             n_resolved       = Count(Case(When(status='resolved', then=1), output_field=IntegerField())),
-            n_tarea          = Count(Case(When(type='tarea',      then=1), output_field=IntegerField())),
+            n_tarea          = Count(Case(When(type='task',       then=1), output_field=IntegerField())),
             n_twitter        = Count(Case(When(channel='twitter',      then=1), output_field=IntegerField())),
             n_twitter_dm     = Count(Case(When(channel='twitter_dm',   then=1), output_field=IntegerField())),
             n_twitter_like   = Count(Case(When(channel='twitter_like', then=1), output_field=IntegerField())),
-            n_comuny         = Count(Case(When(service='Comunycarse',    status='open', then=1), output_field=IntegerField())),
+            n_comuny         = Count(Case(When(service='internocomuny',  status='open', then=1), output_field=IntegerField())),
             n_ecomfax        = Count(Case(When(service='ecomfax',        status='open', then=1), output_field=IntegerField())),
-            n_recordia       = Count(Case(When(service='Recordia SGSD',  status='open', then=1), output_field=IntegerField())),
+            n_recordia       = Count(Case(When(service='recordia',       status='open', then=1), output_field=IntegerField())),
             n_unassigned     = Count(Case(When(assignee__isnull=True,    then=1), output_field=IntegerField())),
             n_unsolved_notarea = Count(Case(
-                When(~Q(status__in=['closed', 'resolved']) & ~Q(type='tarea'), then=1),
+                When(~Q(status__in=['closed', 'resolved']) & ~Q(type='task'), then=1),
                 output_field=IntegerField()
             )),
             n_no_resueltos   = Count(Case(When(~Q(status='resolved'), then=1), output_field=IntegerField())),
+            n_sla_breached   = Count(Case(
+                When(Q(sla_breached_at__isnull=False) & ~Q(status__in=['closed', 'resolved']), then=1),
+                output_field=IntegerField()
+            )),
         )
+
+        # SLA en riesgo requiere la anotación sla_next_due — query propia pequeña.
+        n_sla_at_risk = _ensure_urgency(
+            base_qs.filter(sla_breached_at__isnull=True).exclude(status__in=['closed', 'resolved'])
+        ).filter(
+            sla_next_due__gt=_now,
+            sla_next_due__lte=_now + timedelta(minutes=SLA_AT_RISK_WINDOW_MINUTES),
+        ).count()
 
         # Query 2: contadores dependientes del usuario actual (requester/group)
         _user_agg = base_qs.filter(requester=request.user).aggregate(
             sus_pendientes = Count(Case(When(status='pending', then=1), output_field=IntegerField())),
-            sus_tareas     = Count(Case(When(type='tarea',     then=1), output_field=IntegerField())),
+            sus_tareas     = Count(Case(When(type='task',      then=1), output_field=IntegerField())),
             sus_no_cerrados_agent = Count(Case(When(~Q(status='closed'), then=1), output_field=IntegerField())),
         )
 
@@ -566,6 +609,8 @@ def filter_tickets(request):
             "new_in_groups":      n_new_in_groups,
             "open":               _agg['n_open'],
             "no_update_48h":      _time_agg['no_update_48h'],
+            "sla_breached":       _agg['n_sla_breached'],
+            "sla_at_risk":        n_sla_at_risk,
         }
 
     if _counts_cache_key and filtros and not _counts_loaded_from_cache:
@@ -595,10 +640,18 @@ def filter_tickets(request):
     if group_sort:
         tickets = tickets.order_by(group_sort, '-updated_at')
     elif db_sort_signed:
-        tickets = tickets.order_by(db_sort_signed)
+        if sort_by == 'sla':
+            # Orden por urgencia de SLA: el próximo vencimiento primero, sin SLA al final.
+            tickets = _ensure_urgency(tickets)
+            tickets = tickets.order_by(
+                F('sla_next_due').desc(nulls_last=True) if sort_dir == 'desc'
+                else F('sla_next_due').asc(nulls_last=True)
+            )
+        else:
+            tickets = tickets.order_by(db_sort_signed)
 
     offset = (page - 1) * page_size
-    page_qs = tickets.select_related('requester', 'assignee', 'assigned_group')
+    page_qs = tickets.select_related('requester', 'assignee', 'assigned_group', 'brand')
     exact_total = True
     has_next = False
 
@@ -659,6 +712,24 @@ def filter_tickets(request):
             return t.requester.name if t.requester else '—'
         return None
 
+    _payload_now = timezone.now()
+    _risk_window = timedelta(minutes=SLA_AT_RISK_WINDOW_MINUTES)
+
+    def _sla_payload(t):
+        dues = [d for d in (t.first_response_due_at, t.resolution_due_at) if d]
+        next_due = min(dues) if dues else None
+        breached = bool(t.sla_breached_at) and t.status not in ('closed', 'resolved')
+        at_risk = bool(
+            next_due and not breached
+            and t.status not in ('closed', 'resolved')
+            and _payload_now < next_due <= _payload_now + _risk_window
+        )
+        return {
+            "next_due": next_due.strftime("%d/%m/%Y %H:%M") if next_due else None,
+            "breached": breached,
+            "at_risk": at_risk,
+        }
+
     data = []
     for t in tickets_page:
         lc = last_comments.get(t.id)
@@ -671,6 +742,10 @@ def filter_tickets(request):
             "assignee": t.assignee.name if t.assignee else "-",
             "status": t.status,
             "priority": t.priority or "",
+            "brand": t.brand.name if t.brand else "-",
+            "channel": t.channel or "-",
+            "type": t.type or "",
+            "sla": _sla_payload(t),
             "description": (t.description or "")[:200],
             "group_value": _group_value(t),
             "last_comment": {
@@ -818,8 +893,317 @@ def reporting(request):
     context = {
         'username': request.user.name,
         'email': request.user.email,
+        'brands': list(Brand.objects.exclude(name='').order_by('name').values('id', 'name')),
     }
     return render(request, "tickets/reporting.html", context)
+
+
+def _reporting_params(request):
+    """Parsea brand/from/to con defaults (últimos 30 días) y clamp a 366 días."""
+    from datetime import date
+
+    brand_id = _as_int_or_none(request.GET.get('brand'))
+    today = timezone.localdate()
+    try:
+        date_from = datetime.strptime(request.GET.get('from', ''), '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        date_from = today - timedelta(days=30)
+    try:
+        date_to = datetime.strptime(request.GET.get('to', ''), '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        date_to = today
+    if date_to < date_from:
+        date_from, date_to = date_to, date_from
+    if (date_to - date_from).days > 366:
+        date_from = date_to - timedelta(days=366)
+
+    tz = timezone.get_current_timezone()
+    start_dt = timezone.make_aware(datetime.combine(date_from, datetime.min.time()), tz)
+    end_dt = timezone.make_aware(datetime.combine(date_to, datetime.max.time()), tz)
+    return brand_id, date_from, date_to, start_dt, end_dt
+
+
+@api_login_required
+def reporting_data(request):
+    """KPIs, series y distribuciones por entidad para /reporting/."""
+    from django.db.models import Avg, Min
+    from django.db.models.functions import ExtractHour, ExtractWeekDay, TruncDate
+
+    if not _is_agent(request.user) and not _is_admin(request.user):
+        return json_error('forbidden', 'No tienes permisos para ver los reportes.', status=403)
+
+    brand_id, date_from, date_to, start_dt, end_dt = _reporting_params(request)
+    cache_key = f"reporting:v2:{brand_id or 0}:{date_from}:{date_to}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return JsonResponse(cached)
+
+    live = Ticket.objects.filter(is_deleted=False, merged_into__isnull=True)
+    if brand_id:
+        live = live.filter(brand_id=brand_id)
+    created_qs = live.filter(created_at__range=(start_dt, end_dt))
+
+    # KPIs sobre los tickets creados en el rango.
+    # Compliance de primera respuesta solo acumula desde que first_response_met
+    # existe (el due se limpia al responder: no es retro-computable); breached
+    # via sla_breached_at es la fuente de verdad del incumplimiento.
+    kpis = created_qs.aggregate(
+        created=Count('id'),
+        breached=Count(Case(When(sla_breached_at__isnull=False, then=1), output_field=IntegerField())),
+        with_sla=Count(Case(When(
+            Q(resolution_due_at__isnull=False) | Q(first_response_due_at__isnull=False)
+            | Q(sla_breached_at__isnull=False) | Q(first_response_met__isnull=False),
+            then=1), output_field=IntegerField())),
+        fr_met=Count(Case(When(first_response_met=True, then=1), output_field=IntegerField())),
+        fr_measured=Count(Case(When(first_response_met__isnull=False, then=1), output_field=IntegerField())),
+    )
+    sla_compliance = (
+        round((kpis['with_sla'] - kpis['breached']) / kpis['with_sla'] * 100)
+        if kpis['with_sla'] else None
+    )
+
+    # Snapshot actual del backlog (no depende del rango): mide la cola viva.
+    snapshot = live.aggregate(
+        backlog=Count(Case(When(status__in=('open', 'pending'), then=1), output_field=IntegerField())),
+        open_now=Count(Case(When(status='open', then=1), output_field=IntegerField())),
+        pending_now=Count(Case(When(status='pending', then=1), output_field=IntegerField())),
+        unassigned=Count(Case(When(
+            Q(status__in=('open', 'pending')) & Q(assignee__isnull=True), then=1),
+            output_field=IntegerField())),
+    )
+    backlog = snapshot['backlog']
+
+    def _resolved_qs(s, e):
+        qs = TicketEvent.objects.filter(
+            field_name='status',
+            new_value__in=('resolved', 'closed'),
+            created_at__range=(s, e),
+            ticket__is_deleted=False,
+            ticket__merged_into__isnull=True,
+        )
+        if brand_id:
+            qs = qs.filter(ticket__brand_id=brand_id)
+        return qs
+
+    resolved_events = _resolved_qs(start_dt, end_dt)
+    resolved = resolved_events.values('ticket_id').distinct().count()
+
+    # Reaperturas: tickets que volvieron de resuelto/cerrado a open/pending en el rango.
+    reopened_qs = TicketEvent.objects.filter(
+        field_name='status',
+        old_value__in=('resolved', 'closed'),
+        new_value__in=('open', 'pending'),
+        created_at__range=(start_dt, end_dt),
+        ticket__is_deleted=False,
+        ticket__merged_into__isnull=True,
+    )
+    if brand_id:
+        reopened_qs = reopened_qs.filter(ticket__brand_id=brand_id)
+    reopened = reopened_qs.values('ticket_id').distinct().count()
+
+    # Tiempo medio de resolución (horas): desde la creación del ticket hasta su
+    # primer evento de resolución dentro del rango.
+    res_rows = list(
+        resolved_events.values('ticket_id').annotate(
+            resolved_at=Min('created_at'),
+            opened_at=Min('ticket__created_at'),
+        )
+    )
+    durations = [
+        (r['resolved_at'] - r['opened_at']).total_seconds() / 3600.0
+        for r in res_rows
+        if r['resolved_at'] and r['opened_at'] and r['resolved_at'] >= r['opened_at']
+    ]
+    avg_resolution_hours = round(sum(durations) / len(durations), 1) if durations else None
+
+    # Deltas vs periodo equivalente inmediatamente anterior (▲/▼ estilo dashboard).
+    period_len = end_dt - start_dt
+    prev_start, prev_end = start_dt - period_len, start_dt
+    created_prev = live.filter(created_at__range=(prev_start, prev_end)).count()
+    resolved_prev = _resolved_qs(prev_start, prev_end).values('ticket_id').distinct().count()
+
+    ratings = SatisfactionRating.objects.filter(
+        created_at__range=(start_dt, end_dt), score__in=('good', 'bad'),
+        ticket__is_deleted=False,
+    )
+    if brand_id:
+        ratings = ratings.filter(ticket__brand_id=brand_id)
+    good = ratings.filter(score='good').count()
+    bad = ratings.filter(score='bad').count()
+    satisfaction = round(good / (good + bad) * 100) if (good + bad) else None
+
+    # Series diarias: creados y cerrados
+    created_series = list(
+        created_qs.annotate(day=TruncDate('created_at')).values('day')
+        .annotate(n=Count('id')).order_by('day')
+    )
+    closed_series = list(
+        live.filter(closed_at__range=(start_dt, end_dt))
+        .annotate(day=TruncDate('closed_at')).values('day')
+        .annotate(n=Count('id')).order_by('day')
+    )
+
+    # Distribución de carga: creados por hora del día (0-23) y por día de la
+    # semana — clave para dimensionar turnos del equipo de soporte.
+    hour_map = {
+        row['h']: row['n']
+        for row in created_qs.annotate(h=ExtractHour('created_at')).values('h')
+        .annotate(n=Count('id')) if row['h'] is not None
+    }
+    by_hour = [hour_map.get(h, 0) for h in range(24)]
+    # ExtractWeekDay: 1=domingo … 7=sábado (convención Django). Reordenamos a L-D.
+    wd_map = {
+        row['wd']: row['n']
+        for row in created_qs.annotate(wd=ExtractWeekDay('created_at')).values('wd')
+        .annotate(n=Count('id')) if row['wd'] is not None
+    }
+    _wd_order = [2, 3, 4, 5, 6, 7, 1]  # lunes…domingo
+    by_weekday = [wd_map.get(d, 0) for d in _wd_order]
+
+    # Tickets abiertos más antiguos: lista accionable para atacar el backlog.
+    oldest_rows = [
+        {
+            'id': t.id,
+            'subject': t.subject,
+            'status': t.status,
+            'assignee': t.assignee.name if t.assignee else None,
+            'created': t.created_at.strftime('%Y-%m-%d') if t.created_at else None,
+            'age_days': (timezone.now() - t.created_at).days if t.created_at else None,
+        }
+        for t in live.filter(status__in=('open', 'pending'))
+        .select_related('assignee').order_by('created_at')[:10]
+    ]
+
+    def _dist(field):
+        return [
+            {'label': row[field] or '—', 'n': row['n']}
+            for row in created_qs.values(field).annotate(n=Count('id')).order_by('-n')
+        ]
+
+    # Desglose por marca (siempre sobre el rango; muestra el bucket sin marca
+    # para medir cobertura de entidad)
+    brand_rows = [
+        {
+            'brand': row['brand__name'] or '— Sin marca —',
+            'created': row['n'],
+            'open': row['n_open'],
+            'breached': row['n_breached'],
+        }
+        for row in Ticket.objects.filter(
+            is_deleted=False, merged_into__isnull=True,
+            created_at__range=(start_dt, end_dt),
+        ).values('brand__name').annotate(
+            n=Count('id'),
+            n_open=Count(Case(When(status__in=('open', 'pending'), then=1), output_field=IntegerField())),
+            n_breached=Count(Case(When(sla_breached_at__isnull=False, then=1), output_field=IntegerField())),
+        ).order_by('-n')
+    ]
+
+    payload = {
+        'ok': True,
+        'range': {'from': str(date_from), 'to': str(date_to), 'brand_id': brand_id},
+        'kpis': {
+            'created': kpis['created'],
+            'created_prev': created_prev,
+            'resolved': resolved,
+            'resolved_prev': resolved_prev,
+            'backlog': backlog,
+            'open_now': snapshot['open_now'],
+            'pending_now': snapshot['pending_now'],
+            'unassigned': snapshot['unassigned'],
+            'sla_compliance_pct': sla_compliance,
+            'sla_breached': kpis['breached'],
+            'first_response_met': kpis['fr_met'],
+            'first_response_measured': kpis['fr_measured'],
+            'avg_resolution_hours': avg_resolution_hours,
+            'reopened': reopened,
+            'satisfaction_pct': satisfaction,
+            'satisfaction_good': good,
+            'satisfaction_bad': bad,
+        },
+        'series': {
+            'created': [{'day': str(r['day']), 'n': r['n']} for r in created_series],
+            'closed': [{'day': str(r['day']), 'n': r['n']} for r in closed_series],
+            'by_hour': by_hour,
+            'by_weekday': by_weekday,
+        },
+        'oldest_open': oldest_rows,
+        'distributions': {
+            'status': _dist('status'),
+            'priority': _dist('priority'),
+            'type': _dist('type'),
+            'channel': _dist('channel'),
+        },
+        'by_brand': brand_rows,
+    }
+    cache.set(cache_key, payload, 60)
+    return JsonResponse(payload)
+
+
+@api_login_required
+def reporting_export_csv(request):
+    """Exporta a CSV (compatible Excel) el conjunto filtrado del reporting."""
+    import csv
+    from django.http import StreamingHttpResponse
+
+    if not _is_agent(request.user) and not _is_admin(request.user):
+        return json_error('forbidden', 'No tienes permisos para exportar.', status=403)
+
+    brand_id, date_from, date_to, start_dt, end_dt = _reporting_params(request)
+    qs = Ticket.objects.filter(
+        is_deleted=False, merged_into__isnull=True,
+        created_at__range=(start_dt, end_dt),
+    )
+    if brand_id:
+        qs = qs.filter(brand_id=brand_id)
+    rating_sub = SatisfactionRating.objects.filter(
+        ticket=OuterRef('pk'), score__in=['good', 'bad']
+    ).order_by('-created_at').values('score')[:1]
+    qs = (
+        qs.select_related('brand', 'requester', 'assignee')
+        .annotate(satisfaction=Subquery(rating_sub))
+        .order_by('id')
+    )
+
+    class _Echo:
+        def write(self, value):
+            return value
+
+    writer = csv.writer(_Echo(), delimiter=';')
+
+    def _rows():
+        # BOM para que Excel abra acentos en UTF-8 correctamente
+        yield '﻿'
+        yield writer.writerow([
+            'id', 'asunto', 'marca', 'estado', 'prioridad', 'tipo', 'canal', 'servicio',
+            'solicitante', 'agente', 'creado', 'cerrado', 'primera_respuesta_ok',
+            'sla_incumplido', 'satisfaccion',
+        ])
+        for t in qs.iterator(chunk_size=2000):
+            yield writer.writerow([
+                t.id,
+                t.subject,
+                t.brand.name if t.brand else '',
+                t.status,
+                t.priority or '',
+                t.type or '',
+                t.channel or '',
+                t.service or '',
+                t.requester.name if t.requester else '',
+                t.assignee.name if t.assignee else '',
+                t.created_at.strftime('%d/%m/%Y %H:%M') if t.created_at else '',
+                t.closed_at.strftime('%d/%m/%Y %H:%M') if t.closed_at else '',
+                {True: 'si', False: 'no'}.get(t.first_response_met, ''),
+                'si' if t.sla_breached_at else 'no',
+                t.satisfaction or '',
+            ])
+
+    brand_part = f'brand{brand_id}' if brand_id else 'todas'
+    response = StreamingHttpResponse(_rows(), content_type='text/csv; charset=utf-8')
+    response['Content-Disposition'] = (
+        f'attachment; filename="tickets_{brand_part}_{date_from}_{date_to}.csv"'
+    )
+    return response
 
 @login_required
 def settings(request):
@@ -978,6 +1362,7 @@ def ticket_detail_api(request, ticket_id):
 
     data = {
         'empresa': ticket.brand.name if ticket.brand else '',
+        'brand_id': ticket.brand_id,
         'solicitante': ticket.requester_id,
         'solicitante_name': ticket.requester.name if ticket.requester else '',
         'asignado': ticket.assignee_id,
@@ -987,6 +1372,12 @@ def ticket_detail_api(request, ticket_id):
         'ccs': [{'id': u.id, 'name': u.name} for u in ticket.ccs.all()],
         'tags': [tag.id for tag in ticket.tags.all()],
         'tipo': ticket.type,
+        'problem_id': ticket.problem_id,
+        'problem_subject': ticket.problem.subject if ticket.problem_id and ticket.problem else None,
+        'incidents': [
+            {'id': inc.id, 'subject': inc.subject, 'status': inc.status}
+            for inc in ticket.incidents.filter(is_deleted=False)[:50]
+        ] if ticket.type == 'problem' else [],
         'prioridad': ticket.priority,
         'servicio': ticket.service,
         'canal': ticket.channel,
@@ -1271,6 +1662,34 @@ def add_comment(request, ticket_id):
         'attachments': list(atts),
         'new_status': applied_status,
     })
+
+
+@api_login_required
+@require_POST
+def ai_suggest_reply(request, ticket_id):
+    """Asistencia IA: borradores de respuesta al cliente a partir del ticket,
+    sus comentarios públicos y casos similares resueltos. No persiste nada."""
+    from app.services.ticket_reply import TicketReplyService
+
+    ticket = get_object_or_404(Ticket, id=ticket_id)
+    if not permission_is_agent(request.user):
+        return json_error("forbidden", "Solo agentes pueden usar la asistencia de IA.", status=403)
+    if not TicketReplyService.can_use(request.user):
+        return json_error("ai_disabled", "La asistencia de respuesta IA no está disponible.", status=503)
+    try:
+        data = parse_json_body(request)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+
+    instruction = (data.get("instruction") or "")[:1000]
+    try:
+        result = TicketReplyService.suggest(ticket, instruction=instruction)
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).exception("ai_suggest_reply failed ticket=%s", ticket_id)
+        return json_error("ai_error", f"No se pudo generar la respuesta: {exc}", status=502)
+    return json_ok(result)
+
+
 @api_login_required
 def update_user_notes(request, user_id):
     if request.method != 'POST':
@@ -1397,6 +1816,96 @@ def macros_api(request):
         return JsonResponse({'error': 'Forbidden'}, status=403)
     macros = Macro.objects.filter(active=True).order_by('name').values('id', 'name', 'description', 'actions')
     return JsonResponse({'macros': list(macros)})
+
+
+_MACRO_STATUS_CHOICES = {'open', 'pending', 'resolved', 'closed'}
+_MACRO_PRIORITY_CHOICES = {'low', 'normal', 'high', 'urgent'}
+
+
+def _serialize_macro(m):
+    return {
+        'id': m.id,
+        'name': m.name,
+        'description': m.description or '',
+        'actions': m.actions or {},
+        'active': m.active,
+        'zendesk_id': m.zendesk_id,
+    }
+
+
+def _macro_actions_from_payload(data):
+    """Construye el dict `actions` a partir del payload, validando enums.
+
+    Solo incluye claves con valor; omite las vacías para no escribir campos en
+    blanco al aplicar la macro. Devuelve (actions, error) — error es un
+    JsonResponse si algo no valida.
+    """
+    actions = {}
+    status = (data.get('status') or '').strip().lower()
+    if status:
+        if status not in _MACRO_STATUS_CHOICES:
+            return None, json_error('invalid_status', 'status no válido', status=400)
+        actions['status'] = status
+    priority = (data.get('priority') or '').strip().lower()
+    if priority:
+        if priority not in _MACRO_PRIORITY_CHOICES:
+            return None, json_error('invalid_priority', 'priority no válida', status=400)
+        actions['priority'] = priority
+    assignee_id = _as_int_or_none(data.get('assignee_id'))
+    if assignee_id:
+        actions['assignee_id'] = assignee_id
+    comment = (data.get('comment') or '').strip()
+    if comment:
+        actions['comment'] = comment
+    return actions, None
+
+
+@api_login_required
+def macros_manage_api(request):
+    """CRUD de macros para agentes. Las macros son compartidas (sin dueño)."""
+    if not _is_agent(request.user):
+        return json_error('forbidden', 'No autorizado', status=403)
+
+    if request.method == 'GET':
+        macros = Macro.objects.order_by('-active', 'name')
+        return JsonResponse({'ok': True, 'macros': [_serialize_macro(m) for m in macros]})
+
+    try:
+        data = parse_json_body(request)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+
+    if request.method in ('POST', 'PUT'):
+        macro = Macro.objects.filter(id=data.get('id')).first() if request.method == 'PUT' else Macro()
+        if request.method == 'PUT' and not macro:
+            return json_error('macro_not_found', 'Macro no encontrada', status=404)
+
+        name = (data.get('name') or '').strip()
+        if not name:
+            return json_error('name_required', 'El nombre es obligatorio', status=400)
+
+        actions, err = _macro_actions_from_payload(data)
+        if err:
+            return err
+        if not actions:
+            return json_error('actions_required', 'La macro debe tener al menos una acción', status=400)
+
+        macro.name = name[:255]
+        macro.description = ((data.get('description') or '').strip()[:500]) or None
+        macro.actions = actions
+        macro.active = bool(data.get('active', True))
+        macro.save()
+        return JsonResponse({'ok': True, 'macro': _serialize_macro(macro)})
+
+    if request.method == 'DELETE':
+        macro_id = _as_int_or_none(request.GET.get('id'))
+        macro = Macro.objects.filter(id=macro_id).first()
+        if not macro:
+            return json_error('macro_not_found', 'Macro no encontrada', status=404)
+        macro.delete()
+        return JsonResponse({'ok': True, 'deleted': True})
+
+    return json_error('method_not_allowed', 'Método no permitido', status=405)
 
 
 @api_login_required
@@ -1578,10 +2087,12 @@ def admin_panel(request):
     )
     roles = Role.objects.order_by('role_name')
     groups = Group.objects.order_by('group_name')
+    brands = Brand.objects.exclude(name='').order_by('name')
     return render(request, 'admin_panel.html', {
         'users': users,
         'roles': roles,
         'groups': groups,
+        'brands': brands,
         'username': request.user.name,
         'email': request.user.email,
     })
@@ -2012,6 +2523,8 @@ def _serialize_sla_policy(policy):
         'active': policy.active,
         'priority': policy.priority or '',
         'service': policy.service or '',
+        'brand_id': policy.brand_id,
+        'brand_name': policy.brand.name if policy.brand_id and policy.brand else '',
         'assigned_group_id': policy.assigned_group_id,
         'first_response_minutes': policy.first_response_minutes,
         'resolution_minutes': policy.resolution_minutes,
@@ -2021,7 +2534,7 @@ def _serialize_sla_policy(policy):
 @_admin_required
 def admin_sla_policies_api(request):
     if request.method == 'GET':
-        policies = SLAPolicy.objects.select_related('assigned_group').order_by('name')
+        policies = SLAPolicy.objects.select_related('assigned_group', 'brand').order_by('name')
         return JsonResponse({'ok': True, 'policies': [_serialize_sla_policy(policy) for policy in policies]})
 
     try:
@@ -2040,6 +2553,7 @@ def admin_sla_policies_api(request):
         policy.active = bool(data.get('active', True))
         policy.priority = (data.get('priority') or '').strip() or None
         policy.service = (data.get('service') or '').strip() or None
+        policy.brand_id = _as_int_or_none(data.get('brand_id'))
         policy.assigned_group_id = _as_int_or_none(data.get('assigned_group_id'))
         policy.first_response_minutes = max(_as_int_or_none(data.get('first_response_minutes')) or 0, 0)
         policy.resolution_minutes = max(_as_int_or_none(data.get('resolution_minutes')) or 0, 0)
@@ -2053,6 +2567,107 @@ def admin_sla_policies_api(request):
             return json_error('sla_policy_not_found', 'Politica SLA no encontrada', status=404)
         policy.active = False
         policy.save(update_fields=['active'])
+        return JsonResponse({'ok': True, 'deactivated': True})
+
+    return json_error('method_not_allowed', 'Metodo no permitido', status=405)
+
+
+def _serialize_response_template(tpl):
+    return {
+        'id': tpl.id,
+        'key': tpl.key,
+        'brand_id': tpl.brand_id,
+        'brand_name': tpl.brand.name if tpl.brand_id and tpl.brand else '',
+        'language': tpl.language,
+        'subject': tpl.subject,
+        'body_html': tpl.body_html,
+        'body_text': tpl.body_text,
+        'active': tpl.active,
+    }
+
+
+_TEMPLATE_PREVIEW_CONTEXT = {
+    'ticket_id': 12345,
+    'subject': 'Ejemplo: no puedo acceder al portal',
+    'requester_name': 'María Ejemplo',
+    'requester_email': 'maria@example.com',
+    'brand_name': 'Mi Marca',
+    'support_email': 'helpdesk@example.com',
+    'from_name': 'Soporte Mi Marca',
+    'ticket_url': 'https://ticketflow.example.com/tickets/create/?id=12345',
+    'created_at': '10/06/2026 15:30',
+}
+
+
+@_admin_required
+def admin_response_templates_api(request):
+    from app.services.email_templates import ResponseTemplateService
+
+    if request.method == 'GET':
+        templates = ResponseTemplate.objects.select_related('brand').order_by('key', 'brand__name', 'language')
+        return JsonResponse({'ok': True, 'templates': [_serialize_response_template(t) for t in templates]})
+
+    try:
+        data = parse_json_body(request)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+
+    if request.method == 'POST' and request.GET.get('action') == 'preview':
+        # Renderiza subject/body con contexto de ejemplo sin guardar nada.
+        class _Tmp:
+            subject = (data.get('subject') or '')
+            body_html = sanitize_email_html(data.get('body_html') or '')
+            body_text = (data.get('body_text') or '')
+        try:
+            rendered = ResponseTemplateService.render(_Tmp, _TEMPLATE_PREVIEW_CONTEXT)
+        except Exception as exc:
+            return json_error('template_render_error', f'Error de plantilla: {exc}', status=400)
+        return JsonResponse({'ok': True, 'preview': rendered})
+
+    if request.method in ('POST', 'PUT'):
+        tpl = ResponseTemplate.objects.filter(id=data.get('id')).first() if request.method == 'PUT' else ResponseTemplate()
+        if request.method == 'PUT' and not tpl:
+            return json_error('template_not_found', 'Plantilla no encontrada', status=404)
+
+        key = slugify((data.get('key') or '').strip())
+        if not key:
+            return json_error('key_required', 'key requerida', status=400)
+        language = (data.get('language') or 'es').strip().lower()
+        if language not in ('es', 'en'):
+            return json_error('invalid_language', "language debe ser 'es' o 'en'", status=400)
+        subject = (data.get('subject') or '').strip()
+        body_html = sanitize_email_html(data.get('body_html') or '')
+        if not subject or not body_html:
+            return json_error('subject_body_required', 'subject y body_html son obligatorios', status=400)
+        if key == 'ticket_created' and '{{ticket_id}}' not in subject.replace(' ', ''):
+            # El token [Ticket #N] del subject es el mecanismo de threading de
+            # las respuestas; avisamos pero no bloqueamos.
+            logger.warning('response_template ticket_created sin {{ticket_id}} en subject')
+
+        brand_id = _as_int_or_none(data.get('brand_id'))
+        duplicate = ResponseTemplate.objects.filter(
+            key=key, brand_id=brand_id, language=language
+        ).exclude(id=tpl.id or 0).exists()
+        if duplicate:
+            return json_error('duplicate_template', 'Ya existe una plantilla con esa key/marca/idioma', status=400)
+
+        tpl.key = key
+        tpl.brand_id = brand_id
+        tpl.language = language
+        tpl.subject = subject[:255]
+        tpl.body_html = body_html
+        tpl.body_text = (data.get('body_text') or '').strip()
+        tpl.active = bool(data.get('active', True))
+        tpl.save()
+        return JsonResponse({'ok': True, 'template': _serialize_response_template(tpl)})
+
+    if request.method == 'DELETE':
+        tpl_id = _as_int_or_none(request.GET.get('id'))
+        tpl = ResponseTemplate.objects.filter(id=tpl_id).first()
+        if not tpl:
+            return json_error('template_not_found', 'Plantilla no encontrada', status=404)
+        tpl.active = False
+        tpl.save(update_fields=['active'])
         return JsonResponse({'ok': True, 'deactivated': True})
 
     return json_error('method_not_allowed', 'Metodo no permitido', status=405)

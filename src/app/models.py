@@ -6,6 +6,8 @@ from unicodedata import category
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 
+from app.constants import CHANNEL_CHOICES, TICKET_TYPE_CHOICES
+
 class Organization(models.Model):
     zendesk_id = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
     name = models.CharField(max_length=255)
@@ -135,10 +137,16 @@ class Ticket(models.Model):
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='assigned_tickets')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_tickets')
     brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
-    type = models.CharField(max_length=255, null=True)
+    type = models.CharField(max_length=255, null=True, blank=True, choices=TICKET_TYPE_CHOICES)
+    # Un problema (type='problem') agrupa los incidentes que provoca (compatible con problem_id de Zendesk).
+    problem = models.ForeignKey(
+        'self', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='incidents',
+        limit_choices_to={'type': 'problem'},
+    )
     ccs = models.ManyToManyField('User', related_name='tickets_ccd', blank=True)
     tags = models.ManyToManyField('TicketTag', related_name='tickets', blank=True)
-    channel = models.CharField(max_length=255, null=True)
+    channel = models.CharField(max_length=255, null=True, blank=True, choices=CHANNEL_CHOICES)
     service = models.CharField(max_length=255, null=True)
     language = models.CharField(max_length=255, null=True)
     assigned_group = models.ForeignKey('Group', on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
@@ -150,6 +158,12 @@ class Ticket(models.Model):
     first_responded_at = models.DateTimeField(null=True, blank=True)
     resolution_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
     sla_breached_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    # Cumplimiento de primera respuesta, persistido al responder (record_first_response
+    # limpia first_response_due_at, así que no es computable a posteriori). NULL = no medido.
+    first_response_met = models.BooleanField(null=True, blank=True)
+    # Marcadores de idempotencia para aviso de riesgo y escalado de SLA.
+    sla_risk_notified_at = models.DateTimeField(null=True, blank=True)
+    sla_escalated_at = models.DateTimeField(null=True, blank=True)
     category = models.CharField(max_length=255, null=True)
     security_related = models.BooleanField(null=True, blank=True)
     monitoring = models.BooleanField(null=True, blank=True)
@@ -178,6 +192,7 @@ class Ticket(models.Model):
             models.Index(fields=['is_deleted', 'merged_into', 'channel', 'updated_at'], name='app_ticket_live_channel'),
             models.Index(fields=['is_deleted', 'merged_into', 'service', 'status', 'updated_at'], name='app_ticket_live_service'),
             models.Index(fields=['is_deleted', 'merged_into', 'created_at', 'updated_at'], name='app_ticket_live_created'),
+            models.Index(fields=['is_deleted', 'merged_into', 'brand', 'status'], name='app_ticket_live_brand_idx'),
         ]
 
 
@@ -329,6 +344,10 @@ class SLAPolicy(models.Model):
     active = models.BooleanField(default=True, db_index=True)
     priority = models.CharField(max_length=255, null=True, blank=True)
     service = models.CharField(max_length=255, null=True, blank=True)
+    brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True, related_name='sla_policies')
+    # Organización del SOLICITANTE (cliente). Permite SLA por cliente: p.ej.
+    # Telefónica 2h de primera respuesta, resto 24h.
+    organization = models.ForeignKey('Organization', on_delete=models.SET_NULL, null=True, blank=True, related_name='sla_policies')
     assigned_group = models.ForeignKey('Group', on_delete=models.SET_NULL, null=True, blank=True, related_name='sla_policies')
     first_response_minutes = models.PositiveIntegerField(default=0)
     resolution_minutes = models.PositiveIntegerField(default=0)
@@ -397,6 +416,141 @@ class InboundEmailLog(models.Model):
 
     def __str__(self):
         return f"{self.message_id} ({self.status})"
+
+
+class ResponseTemplate(models.Model):
+    """Plantilla de respuesta al cliente, por clave + marca + idioma.
+
+    brand=NULL es la plantilla global por defecto; una fila con brand concreta
+    la sobreescribe para esa marca. Variables tipo {{ticket_id}} se renderizan
+    con el motor de plantillas de Django sobre un contexto de escalares.
+    """
+    key = models.SlugField(max_length=64, db_index=True)  # p.ej. 'ticket_created'
+    brand = models.ForeignKey('Brand', on_delete=models.CASCADE, null=True, blank=True,
+                              related_name='response_templates')
+    language = models.CharField(max_length=5, default='es',
+                                choices=[('es', 'Español'), ('en', 'English')])
+    subject = models.CharField(max_length=255)
+    body_html = models.TextField()
+    body_text = models.TextField(blank=True, default='')  # vacío => derivado de body_html
+    active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('key', 'brand', 'language')]
+        ordering = ['key', 'language']
+
+    def __str__(self):
+        scope = self.brand.name if self.brand_id and self.brand else 'global'
+        return f"{self.key} [{scope}/{self.language}]"
+
+
+class OutboundEmailLog(models.Model):
+    STATUS_QUEUED = 'queued'
+    STATUS_SENT = 'sent'
+    STATUS_FAILED = 'failed'
+    STATUS_SUPPRESSED = 'suppressed'
+    STATUS_CHOICES = [
+        (STATUS_QUEUED, 'Queued'),
+        (STATUS_SENT, 'Sent'),
+        (STATUS_FAILED, 'Failed'),
+        (STATUS_SUPPRESSED, 'Suppressed'),
+    ]
+
+    brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name='outbound_email_logs')
+    ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name='outbound_email_logs')
+    template_key = models.CharField(max_length=64, blank=True, default='')
+    provider = models.CharField(max_length=10, blank=True, default='',
+                                choices=[('m365', 'Microsoft 365'), ('ses', 'Amazon SES')])
+    to_email = models.EmailField()
+    subject = models.CharField(max_length=255, blank=True, default='')
+    payload = models.JSONField(default=dict, blank=True)  # snapshot de cuerpo/headers renderizados
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_QUEUED, db_index=True)
+    result = models.CharField(max_length=64, null=True, blank=True)  # 'sent' o motivo de supresión
+    error = models.TextField(null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    provider_message_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+    # 190 chars: límite de índice unique utf8mb4 en MySQL
+    dedup_key = models.CharField(max_length=190, unique=True, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.template_key or 'email'} -> {self.to_email} ({self.status})"
+
+
+class TicketAIAnalysis(models.Model):
+    """Resultado de un análisis de IA sobre un ticket (clasificación ITIL).
+
+    Modelo separado de Ticket a propósito: conserva el histórico entre
+    re-clasificaciones y congela la sugerencia de la IA en el tiempo, que es
+    exactamente lo que necesita el feedback loop del Q3 (comparar sugerencia
+    vs corrección humana en TicketEvent).
+    """
+    KIND_CLASSIFICATION = 'classification'
+    STATUS_PENDING = 'pending'
+    STATUS_SUCCESS = 'success'
+    STATUS_FAILED = 'failed'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_SUCCESS, 'Success'),
+        (STATUS_FAILED, 'Failed'),
+    ]
+
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='ai_analyses')
+    kind = models.CharField(max_length=32, default=KIND_CLASSIFICATION, db_index=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+
+    suggested_type = models.CharField(max_length=32, null=True, blank=True)      # question|incident|problem|task
+    suggested_category = models.CharField(max_length=255, null=True, blank=True)
+    suggested_priority = models.CharField(max_length=32, null=True, blank=True)  # low|normal|high|urgent
+    suggested_language = models.CharField(max_length=10, null=True, blank=True)  # es|en
+    confidence = models.FloatField(null=True, blank=True)            # mínimo de las confianzas por campo
+    field_confidences = models.JSONField(default=dict, blank=True)   # {"type": 0.93, ...}
+    reasoning = models.TextField(null=True, blank=True)              # justificación breve, visible para agentes
+    applied_fields = models.JSONField(default=list, blank=True)      # ["type", "category", ...]
+
+    input_fingerprint = models.CharField(max_length=64, db_index=True, blank=True, default='')
+    input_excerpt = models.TextField(blank=True, default='')         # lo que se envió (truncado)
+    raw_response = models.JSONField(default=dict, blank=True)
+    model_name = models.CharField(max_length=100, blank=True, default='')
+    prompt_version = models.CharField(max_length=20, blank=True, default='v1')
+    input_tokens = models.IntegerField(null=True, blank=True)
+    output_tokens = models.IntegerField(null=True, blank=True)
+    latency_ms = models.IntegerField(null=True, blank=True)
+    error = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['ticket', 'kind', 'status'], name='app_aianalysis_tks_idx')]
+
+    def __str__(self):
+        return f"AI {self.kind} ticket #{self.ticket_id} ({self.status})"
+
+
+class TicketEmbedding(models.Model):
+    """Vector de embedding de un ticket para la búsqueda de casos similares.
+
+    Coseno en memoria al volumen actual; la interfaz SimilarTicketIndex permite
+    cambiar a OpenSearch k-NN si crece. content_hash evita recomputar si el texto
+    no cambió. Base del módulo Q3 de casos similares + feedback de la IA.
+    """
+    ticket = models.OneToOneField(Ticket, on_delete=models.CASCADE, related_name='embedding')
+    vector = models.JSONField(default=list)
+    content_hash = models.CharField(max_length=64, db_index=True, blank=True, default='')
+    model_name = models.CharField(max_length=100, blank=True, default='')
+    dim = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Embedding ticket #{self.ticket_id} (dim={self.dim})"
 
 
 class OperationalMetric(models.Model):

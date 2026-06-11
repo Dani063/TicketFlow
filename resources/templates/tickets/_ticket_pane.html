@@ -109,11 +109,17 @@
                     <label for="tipo">Tipo</label>
                     <select id="tipo" name="tipo" class="select2">
                         <option value="" selected>-</option>
-                        <option value="incidencia">Incidencia</option>
-                        <option value="consulta">Consulta</option>
-                        <option value="mejora">Problema</option>
-                        <option value="tarea">Tarea</option>
+                        <option value="question">Consulta</option>
+                        <option value="incident">Incidencia</option>
+                        <option value="problem">Problema</option>
+                        <option value="task">Tarea</option>
                     </select>
+                </div>
+                <div class="form-group" id="problemLinkGroup" style="display:none">
+                    <label for="problem_id">Problema vinculado</label>
+                    <input type="number" id="problem_id" name="problem_id" class="form-control-input"
+                           min="1" placeholder="# de ticket tipo problema">
+                    <a id="problemLinkRef" class="linked-ref" style="display:none" href="#"></a>
                 </div>
                 <div class="form-group">
                     <label for="prioridad">Prioridad</label>
@@ -125,6 +131,10 @@
                         <option value="urgent">Urgente</option>
                     </select>
                 </div>
+            </div>
+            <div class="form-group" id="linkedIncidentsGroup" style="display:none">
+                <label>Incidencias vinculadas <span id="linkedIncidentsCount" class="linked-count"></span></label>
+                <ul id="linkedIncidentsList" class="linked-incidents"></ul>
             </div>
             <div class="form-group">
                 <label for="servicio">Servicio</label>
@@ -148,7 +158,7 @@
                 <select id="canal" name="canal" class="select2">
                     <option value="" selected>-</option>
                     <option value="email">Email</option>
-                    <option value="telefono">Teléfono</option>
+                    <option value="phone">Teléfono</option>
                     <option value="web">Web</option>
                     <option value="api">API</option>
                 </select>
@@ -304,6 +314,9 @@
                 </div>
                 <div id="quill-editor" class="quill-editor"></div>
                 <textarea id="new-message" name="message" placeholder="Escribe un mensaje... (puedes pegar o arrastrar archivos)" hidden></textarea>
+                {% if can_use_internal %}
+                <div id="ai-reply-panel" class="ai-reply-panel" data-ticket-id="{{ ticket.id }}" hidden></div>
+                {% endif %}
                 <div class="compose-toolbar">
                     {# Solo agentes ven el toggle Público/Interno #}
                     {% if can_use_internal %}
@@ -345,6 +358,13 @@
                            multiple hidden>
                     <!-- Previsualización de adjuntos pendientes de enviar -->
                     <div class="pending-attachments" id="pending-attachments"></div>
+                    {% if can_use_internal %}
+                    <!-- Asistencia de respuesta IA -->
+                    <button type="button" id="ai-reply-btn" class="ai-reply-btn"
+                            data-ticket-id="{{ ticket.id }}" title="Sugerir respuesta con IA">
+                        <i class="fas fa-robot"></i> <span>IA</span>
+                    </button>
+                    {% endif %}
                     <!-- Enviar -->
                     <button type="button" id="send-message-btn" title="Enviar">
                         <i class="fas fa-paper-plane"></i>
@@ -435,6 +455,11 @@
                     <ul class="macro-list" id="macro-list">
                         <li class="macro-empty">Cargando…</li>
                     </ul>
+                    <div class="macro-panel-footer">
+                        <button type="button" class="macro-manage-btn" id="macro-manage-btn">
+                            <i class="fas fa-sliders-h"></i> Gestionar macros
+                        </button>
+                    </div>
                 </div>
             </div>
             <div class="footer-sep"></div>
@@ -481,6 +506,73 @@
     </div>
 </div>
 {% endif %}
+{% if ticket and can_use_internal %}
+<div id="macro-modal" class="dialog-backdrop tf-dialog-macro">
+    <div class="dialog dialog--lg dialog--form" role="dialog" aria-modal="true">
+        <div class="dialog__header">
+            <h3 class="dialog__title"><i class="fas fa-magic"></i> Gestionar macros</h3>
+            <button type="button" id="macro-modal-close" class="dialog__close" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="dialog__body macro-manage-body">
+            <div class="macro-manage-list-col">
+                <div class="macro-manage-toolbar">
+                    <input type="text" id="macro-manage-search" class="tf-input" placeholder="Buscar…" autocomplete="off">
+                    <button type="button" id="macro-new-btn" class="tf-btn tf-btn--primary"><i class="fas fa-plus"></i> Nueva</button>
+                </div>
+                <ul id="macro-manage-list" class="macro-manage-list">
+                    <li class="macro-empty">Cargando…</li>
+                </ul>
+            </div>
+            <form id="macro-form" class="macro-manage-form" style="display:none">
+                <input type="hidden" id="macro-form-id">
+                <div class="tf-field">
+                    <label for="macro-form-name">Nombre <span class="req">*</span></label>
+                    <input type="text" id="macro-form-name" class="tf-input" maxlength="255" required>
+                </div>
+                <div class="tf-field">
+                    <label for="macro-form-desc">Descripción</label>
+                    <input type="text" id="macro-form-desc" class="tf-input" maxlength="500">
+                </div>
+                <div class="macro-form-row">
+                    <div class="tf-field">
+                        <label for="macro-form-status">Estado</label>
+                        <select id="macro-form-status" class="tf-input">
+                            <option value="">— sin cambio —</option>
+                            <option value="open">Abierto</option>
+                            <option value="pending">Pendiente</option>
+                            <option value="resolved">Resuelto</option>
+                            <option value="closed">Cerrado</option>
+                        </select>
+                    </div>
+                    <div class="tf-field">
+                        <label for="macro-form-priority">Prioridad</label>
+                        <select id="macro-form-priority" class="tf-input">
+                            <option value="">— sin cambio —</option>
+                            <option value="low">Baja</option>
+                            <option value="normal">Media</option>
+                            <option value="high">Alta</option>
+                            <option value="urgent">Urgente</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="tf-field">
+                    <label for="macro-form-comment">Comentario / respuesta</label>
+                    <textarea id="macro-form-comment" class="tf-input" rows="5" placeholder="Texto que se insertará en el editor de respuesta…"></textarea>
+                </div>
+                <div class="tf-field tf-field--check">
+                    <label><input type="checkbox" id="macro-form-active" checked> Activa (visible en el desplegable)</label>
+                </div>
+                <div class="macro-form-actions">
+                    <button type="button" id="macro-delete-btn" class="tf-btn tf-btn--danger" style="display:none"><i class="fas fa-trash"></i> Eliminar</button>
+                    <span class="macro-form-spacer"></span>
+                    <button type="button" id="macro-form-cancel" class="tf-btn tf-btn--secondary">Cancelar</button>
+                    <button type="submit" id="macro-form-save" class="tf-btn tf-btn--primary">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
 <script>
 // Per-pane context — picked up by initTicketPane() based on data-ticket-id.
 // Also publishes legacy window.ticketId/window.urls so create_ticket.js works
@@ -493,6 +585,7 @@
         currentUserId: {{ request.user.id|default:'null' }},
         addCommentUrl: tid ? ('/tickets/' + tid + '/add_comment/') : null,
         mergeTicketUrl: tid ? ('/tickets/' + tid + '/merge/') : null,
+        aiSuggestReplyUrl: tid ? ('/api/tickets/' + tid + '/ai-suggest-reply/') : null,
         searchUrl: '/search/',
     };
     // Legacy globals — kept for current create_ticket.js (will be removed in step 6)

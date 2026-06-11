@@ -161,6 +161,11 @@
 .with-pagination .tabla {
     max-height: calc(100vh - 200px);
 }
+/* Si además hay barra de filtro de marca encima (filtro "Empresa", ~48px),
+   reserva ese alto extra para que la paginación no se salga del viewport. */
+.with-pagination .brand-filter-bar ~ .tabla {
+    max-height: calc(100vh - 248px);
+}
 
     .tabla table {
         width: 100%;

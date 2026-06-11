@@ -89,6 +89,14 @@
                 <span class="filter-name">Tickets Telefónica último mes</span>
                 <span class="filter-count">–</span>
             </li>
+            <li data-view="sla_breached" class="filter-sla-breached">
+                <span class="filter-name"><i class="fas fa-exclamation-circle"></i> SLA incumplido</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="sla_at_risk" class="filter-sla-risk">
+                <span class="filter-name"><i class="fas fa-hourglass-half"></i> SLA en riesgo</span>
+                <span class="filter-count">–</span>
+            </li>
             <li data-view="unsolved_no_tareas">
                 <span class="filter-name">Tus tickets no resueltos (sin tareas)</span>
                 <span class="filter-count">–</span>
@@ -204,6 +212,16 @@
 <div class="profile-content">
     <div class="stats-group with-pagination" style="width: 100%;">
         <h2>Tickets</h2>
+        {% if brands %}
+        <div class="brand-filter-bar">
+            <select id="brandFilter" class="tf-select">
+                <option value="">Todas las empresas</option>
+                {% for b in brands %}
+                <option value="{{ b.id }}">{{ b.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
         <div class="tabla">
             <div id="loadingSpinner" class="tf-spinner tf-spinner--overlay" style="display:none;"></div>
             <table>
@@ -215,11 +233,14 @@
                         <th class="sortable" data-sort="requester" onclick="toggleSort('requester')">Solicitante <i class="sort-icon fas fa-sort"></i></th>
                         <th class="sortable" data-sort="updated_at" onclick="toggleSort('updated_at')">Actualizado <i class="sort-icon fas fa-sort"></i></th>
                         <th class="sortable" data-sort="service" onclick="toggleSort('service')">Servicio <i class="sort-icon fas fa-sort"></i></th>
+                        <th class="sortable" data-sort="brand" onclick="toggleSort('brand')">Empresa <i class="sort-icon fas fa-sort"></i></th>
+                        <th class="sortable" data-sort="channel" onclick="toggleSort('channel')">Canal <i class="sort-icon fas fa-sort"></i></th>
+                        <th class="sortable" data-sort="sla" onclick="toggleSort('sla')">SLA <i class="sort-icon fas fa-sort"></i></th>
                         <th class="sortable" data-sort="assignee" onclick="toggleSort('assignee')">Asignado <i class="sort-icon fas fa-sort"></i></th>
                     </tr>
                 </thead>
                 <tbody id="ticketsTableBody">
-                    <tr><td colspan="7"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message">Cargando...</span></div></td></tr>
+                    <tr><td colspan="10"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message">Cargando...</span></div></td></tr>
                 </tbody>
             </table>
         </div>
@@ -245,5 +266,5 @@
 <script>
 window.__ticketsData = { createTicketUrl: "{% url 'create_ticket' %}" };
 </script>
-<script src="{% static 'tickets/tickets_list.js' %}?v=s4.8"></script>
+<script src="{% static 'tickets/tickets_list.js' %}?v=s4.9"></script>
 {% endblock %}

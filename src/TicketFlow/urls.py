@@ -24,6 +24,7 @@ urlpatterns = [
     path('tickets/bulk_delete/', views.bulk_delete, name='bulk_delete'),
     path('tickets/bulk_merge/', views.bulk_merge, name='bulk_merge'),
     path('api/tickets/<int:ticket_id>/', views.ticket_detail_api, name='ticket_detail_api'),
+    path('api/tickets/<int:ticket_id>/ai-suggest-reply/', views.ai_suggest_reply, name='ai_suggest_reply'),
     path("tickets/filter/", views.filter_tickets, name="filter_tickets"),
     path('api/tags/', views.tags_api, name='tags_api'),
     path('api/users/search/', views.users_search_api, name='users_search_api'),
@@ -33,6 +34,8 @@ urlpatterns = [
     path('customers/', views.customers_list, name='customers_list'),
     path("customers/profile/", views.customer_profile, name="customer_profile"),
     path('reporting/', views.reporting, name='reporting'),
+    path('reporting/data/', views.reporting_data, name='reporting_data'),
+    path('reporting/export.csv', views.reporting_export_csv, name='reporting_export_csv'),
     path('settings/', views.settings, name='settings'),
     # Admin panel (solo accesible para usuarios con rol admin)
     path('admin-panel/', views.admin_panel, name='admin_panel'),
@@ -43,6 +46,7 @@ urlpatterns = [
     path('api/admin/assignment-rules/', views.admin_assignment_rules_api, name='admin_assignment_rules_api'),
     path('api/admin/sla-policies/', views.admin_sla_policies_api, name='admin_sla_policies_api'),
     path('api/admin/automation-rules/', views.admin_automation_rules_api, name='admin_automation_rules_api'),
+    path('api/admin/response-templates/', views.admin_response_templates_api, name='admin_response_templates_api'),
     path('profile/', views.profile, name='profile'),
     path('docs/', views.documentation, name='documentation'),
     path("api/users/<int:user_id>/notes/", views.update_user_notes, name="update_user_notes"),
@@ -61,6 +65,7 @@ urlpatterns = [
 
     path("search/", views.global_search, name="global_search"),
     path("api/macros/", views.macros_api, name="macros_api"),
+    path("api/macros/manage/", views.macros_manage_api, name="macros_manage_api"),
 ]
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

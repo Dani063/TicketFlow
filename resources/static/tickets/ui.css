@@ -406,3 +406,46 @@
     align-self: stretch;
     margin: 0 var(--space-2);
 }
+
+/* ----- SLA badges (lista de tickets) ----- */
+.sla-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.sla-badge.sla-breached {
+    background: rgba(220, 53, 69, 0.15);
+    color: #dc3545;
+    border: 1px solid rgba(220, 53, 69, 0.4);
+}
+.sla-badge.sla-risk {
+    background: rgba(255, 152, 0, 0.15);
+    color: #e08600;
+    border: 1px solid rgba(255, 152, 0, 0.4);
+}
+.sla-badge.sla-ok {
+    color: var(--color-text-secondary, inherit);
+    font-weight: 400;
+}
+
+/* Entradas SLA del sidebar de filtros */
+#filters li.filter-sla-breached .filter-name i { color: #dc3545; }
+#filters li.filter-sla-risk .filter-name i { color: #e08600; }
+
+/* ----- Barra de filtro por empresa/marca ----- */
+.brand-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2, 8px);
+    margin-bottom: var(--space-3, 12px);
+}
+/* El select usa el estilo global .tf-select (caja blanca redondeada).
+   Ancho fijo para que no ocupe toda la barra, como los filtros del panel admin. */
+.brand-filter-bar .tf-select {
+    flex: 0 0 auto;
+    width: 220px;
+    max-width: 100%;
+}

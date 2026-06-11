@@ -226,7 +226,13 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'TicketFlow.wsgi.application'
 # Database — credenciales desde AWS SSM Parameter Store (prod/dev) o .env (local sin SSM)
-_ssm_prefix = os.getenv("AWS_SSM_PREFIX")
+# DISABLE_AWS_SSM=1 (variable de entorno, no .env) permite ejecutar checks/tests
+# sin sesión AWS: el .env se carga con override=True, así que es la única forma
+# de desactivar SSM puntualmente desde fuera. (Documentada en docs/backend-architecture.md)
+if os.getenv("DISABLE_AWS_SSM", os.getenv("AWS_SSM_DISABLE", "")).lower() in ("1", "true", "yes", "on"):
+    _ssm_prefix = None
+else:
+    _ssm_prefix = os.getenv("AWS_SSM_PREFIX")
 
 
 # Credenciales agrupadas desde SSM (una sola llamada por bloque)
@@ -348,6 +354,11 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {
         _sqs_queue_name: {'url': _sqs_queue_url},
     } if _sqs_queue_url else {},
 }
+# Modo eager (solo dev): ejecuta las tareas .delay() en el mismo proceso, sin worker
+# ni broker. Gated por env, apagado por defecto -> cero impacto en producción. Útil
+# para probar en local el flujo que dispara Celery (p.ej. clasificación IA al crear).
+CELERY_TASK_ALWAYS_EAGER = os.getenv('CELERY_TASK_ALWAYS_EAGER', '').lower() in ('1', 'true', 'yes', 'on')
+CELERY_TASK_EAGER_PROPAGATES = CELERY_TASK_ALWAYS_EAGER
 # Los resultados de tareas no se usan — se descartan para no necesitar result backend
 CELERY_TASK_IGNORE_RESULT = True
 CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'cache+memory://')
@@ -364,13 +375,72 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'app.tasks.mark_sla_breaches',
         'schedule': 300.0,
     },
+    'notify-sla-at-risk': {
+        'task': 'app.tasks.notify_sla_at_risk',
+        'schedule': 300.0,
+    },
 }
 
-# === Azure AD (lectura buzones M365) ===
+# === Azure AD (lectura buzones M365 + envío via Graph sendMail) ===
 # Local: desde .env | Producción: desde SSM /Recordia/.../AzureCredentials
 AZURE_TENANT_ID     = os.getenv('AZURE_TENANT_ID')     or _ssm_azure.get('AZURE_TENANT_ID', '')
 AZURE_CLIENT_ID     = os.getenv('AZURE_CLIENT_ID')     or _ssm_azure.get('AZURE_CLIENT_ID', '')
 AZURE_CLIENT_SECRET = os.getenv('AZURE_CLIENT_SECRET') or _ssm_azure.get('AZURE_CLIENT_SECRET', '')
+
+# === Azure OpenAI (clasificación IA de tickets) ===
+# Local: .env | Producción: SSM {prefix}/AzureOpenAICredentials (SecureString JSON
+# con AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_KEY / AZURE_OPENAI_DEPLOYMENT /
+# AZURE_OPENAI_API_VERSION). Parámetro OPCIONAL: si no existe, la IA queda apagada.
+_ssm_aoai = {}
+if _ssm_prefix:
+    try:
+        _ssm_aoai = _get_ssm_json(f"{_ssm_prefix}/AzureOpenAICredentials")
+    except Exception as _aoai_exc:
+        _logging.getLogger(__name__).warning(
+            "AzureOpenAICredentials no disponible en SSM (%s): clasificación IA desactivada", _aoai_exc
+        )
+AZURE_OPENAI_ENDPOINT    = os.getenv('AZURE_OPENAI_ENDPOINT')    or _ssm_aoai.get('AZURE_OPENAI_ENDPOINT', '')
+AZURE_OPENAI_API_KEY     = os.getenv('AZURE_OPENAI_API_KEY')     or _ssm_aoai.get('AZURE_OPENAI_API_KEY', '')
+AZURE_OPENAI_DEPLOYMENT  = os.getenv('AZURE_OPENAI_DEPLOYMENT')  or _ssm_aoai.get('AZURE_OPENAI_DEPLOYMENT', 'gpt-4o-mini')
+AZURE_OPENAI_API_VERSION = os.getenv('AZURE_OPENAI_API_VERSION') or _ssm_aoai.get('AZURE_OPENAI_API_VERSION', '2024-10-21')
+
+# === OpenAI directo (alternativa a Azure OpenAI) ===
+# Si no hay endpoint de Azure pero sí OPENAI_API_KEY, ai.py usa el cliente OpenAI
+# estándar (api.openai.com). El nombre del modelo va en OPENAI_MODEL. Útil en local
+# y como proveedor de respaldo; el resto del código (chat_json) es idéntico.
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY') or _ssm_aoai.get('OPENAI_API_KEY', '')
+OPENAI_MODEL   = os.getenv('OPENAI_MODEL')   or _ssm_aoai.get('OPENAI_MODEL', 'gpt-4o-mini')
+
+# Embeddings (casos similares + asistencia de respuesta). Mismo proveedor que el chat.
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.getenv('AZURE_OPENAI_EMBEDDING_DEPLOYMENT') or _ssm_aoai.get('AZURE_OPENAI_EMBEDDING_DEPLOYMENT', '')
+OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL') or _ssm_aoai.get('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small')
+
+# Flags de la clasificación IA. Por defecto solo se enciende si hay credenciales
+# (Azure OpenAI u OpenAI directo), así los entornos sin keys no notan ningún cambio.
+_AI_HAS_CREDS = bool((AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY) or OPENAI_API_KEY)
+AI_CLASSIFICATION_ENABLED = os.getenv(
+    'AI_CLASSIFICATION_ENABLED',
+    'true' if _AI_HAS_CREDS else 'false'
+).lower() in ('1', 'true', 'yes', 'on')
+AI_AUTO_APPLY = os.getenv('AI_AUTO_APPLY', 'true').lower() in ('1', 'true', 'yes', 'on')
+AI_AUTO_APPLY_CONFIDENCE = float(os.getenv('AI_AUTO_APPLY_CONFIDENCE', '0.7'))
+# Asistencia de respuesta IA (borradores a partir del ticket + casos similares).
+# Se enciende por defecto si hay credenciales, como la clasificación.
+AI_REPLY_ASSIST_ENABLED = os.getenv(
+    'AI_REPLY_ASSIST_ENABLED', 'true' if _AI_HAS_CREDS else 'false'
+).lower() in ('1', 'true', 'yes', 'on')
+AI_SIMILAR_TICKETS_K = int(os.getenv('AI_SIMILAR_TICKETS_K', '3'))
+AI_MAX_BODY_CHARS = int(os.getenv('AI_MAX_BODY_CHARS', '6000'))
+AI_REQUEST_TIMEOUT_SECONDS = int(os.getenv('AI_REQUEST_TIMEOUT_SECONDS', '30'))
+
+# === Email saliente (confirmaciones al cliente) ===
+# SES autentica con el rol IAM del pod (como SQS/SSM): sin credenciales SMTP.
+# Kill switch global; en local conviene dejarlo a false (BBDD compartida).
+OUTBOUND_EMAIL_ENABLED = os.getenv('OUTBOUND_EMAIL_ENABLED', 'false').lower() in ('1', 'true', 'yes', 'on')
+AWS_SES_REGION = os.getenv('AWS_SES_REGION', 'eu-west-1')
+SES_CONFIGURATION_SET = os.getenv('SES_CONFIGURATION_SET', '')  # opcional: tracking de bounces/quejas
+# Base de los enlaces {{ticket_url}} en plantillas (sin barra final)
+TICKETFLOW_PUBLIC_URL = os.getenv('TICKETFLOW_PUBLIC_URL', '')
 
 # Configuracion de la URL de inicio de sesión
 LOGIN_URL = '/login/'

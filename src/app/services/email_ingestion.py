@@ -25,6 +25,37 @@ BODY_RE = re.compile(r"<body[^>]*>(.*?)</body>", re.DOTALL | re.IGNORECASE)
 
 class EmailIngestionService:
     @staticmethod
+    def is_auto_generated(message):
+        """Detecta auto-respuestas/correo automatizado por cabeceras RFC 3834 y
+        afines, o remitente que es un buzón propio. Estos correos siguen creando
+        ticket, pero NUNCA reciben confirmación automática (anti-bucles)."""
+        headers = {
+            (h.get("name") or "").strip().lower(): (h.get("value") or "").strip().lower()
+            for h in (message.get("internetMessageHeaders") or [])
+        }
+        auto_submitted = headers.get("auto-submitted", "")
+        if auto_submitted and auto_submitted != "no":
+            return True
+        suppress = headers.get("x-auto-response-suppress", "")
+        if any(token in suppress for token in ("all", "oof", "autoreply")):
+            return True
+        if headers.get("precedence", "") in ("bulk", "junk", "auto_reply", "list"):
+            return True
+        if "x-autoreply" in headers or "x-autorespond" in headers or "list-id" in headers:
+            return True
+
+        sender_email = (message.get("from", {}).get("emailAddress", {}).get("address") or "").strip().lower()
+        if sender_email:
+            from app.models import Brand
+            own = {
+                e.lower()
+                for e in Brand.objects.exclude(support_email="").values_list("support_email", flat=True)
+            }
+            if sender_email in own:
+                return True
+        return False
+
+    @staticmethod
     def process_message(message, brand):
         msg_id = message["id"]
         conversation_id = message.get("conversationId") or ""
@@ -120,6 +151,7 @@ class EmailIngestionService:
                 "email_conversation_id": conversation_id or None,
                 "via_channel": "email",
                 "is_public": True,
+                "suppress_requester_email": EmailIngestionService.is_auto_generated(message),
             },
         )
         return "ticket_created", ticket

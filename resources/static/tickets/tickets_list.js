@@ -14,9 +14,31 @@
     let _pageSize    = 50;
     let _sortBy      = '';
     let _sortDir     = 'asc';
+    let _brandId     = '';
     let _selectedIds = new Set();
     let _lastRenderedCount = 0;
     let _totalRequestSeq = 0;
+
+    const COLSPAN = 10;
+
+    const CHANNEL_LABELS = {
+        email: 'Email', web: 'Web', phone: 'Teléfono', api: 'API', chat: 'Chat',
+        twitter: 'Twitter', twitter_dm: 'Twitter DM', twitter_like: 'Twitter Like', internal: 'Interno',
+    };
+    function channelLabel(c) { return CHANNEL_LABELS[c] || c || '-'; }
+
+    function slaBadge(sla) {
+        if (!sla) return '-';
+        if (sla.breached) {
+            const title = sla.next_due ? `SLA incumplido · venció ${sla.next_due}` : 'SLA incumplido';
+            return `<span class="sla-badge sla-breached" title="${title}">Incumplido</span>`;
+        }
+        if (sla.at_risk) return `<span class="sla-badge sla-risk" title="Vence ${sla.next_due}">En riesgo</span>`;
+        if (sla.next_due) return `<span class="sla-badge sla-ok">${sla.next_due}</span>`;
+        return '-';
+    }
+
+    function brandParam() { return _brandId ? `&brand_id=${encodeURIComponent(_brandId)}` : ''; }
 
     function getUrlParam(name) {
         return new URLSearchParams(window.location.search).get(name);
@@ -151,7 +173,7 @@
         const seq = ++_totalRequestSeq;
         try {
             const response = await fetch(
-                `/tickets/filter/?view=${encodeURIComponent(view)}&total_only=1&page_size=${pageSize}`
+                `/tickets/filter/?view=${encodeURIComponent(view)}&total_only=1&page_size=${pageSize}${brandParam()}`
             );
             const json = await response.json();
             const total = Number(json.pagination && json.pagination.total);
@@ -210,7 +232,7 @@
         try {
             refreshIcon.classList.add("spin-once");
             const forceParam = force === true ? '&force_counts=1' : '';
-            const response = await fetch(`/tickets/filter/?counts=1&counts_only=1&page_size=${_pageSize}${forceParam}`);
+            const response = await fetch(`/tickets/filter/?counts=1&counts_only=1&page_size=${_pageSize}${forceParam}${brandParam()}`);
             const json = await response.json();
             if (json.filtros) {
                 for (const [key, value] of Object.entries(json.filtros)) {
@@ -247,14 +269,14 @@
             tbody.innerHTML = "";
             clearSelection();
 
-            let url = `/tickets/filter/?view=${encodeURIComponent(view)}&page=${page}&page_size=${_pageSize}&fast=1`;
+            let url = `/tickets/filter/?view=${encodeURIComponent(view)}&page=${page}&page_size=${_pageSize}&fast=1${brandParam()}`;
             if (_sortBy) url += `&sort_by=${_sortBy}&sort_dir=${_sortDir}`;
             const response = await fetch(url);
             const json = await response.json();
             _lastRenderedCount = Array.isArray(json.tickets) ? json.tickets.length : 0;
 
             if (!json.tickets || json.tickets.length === 0) {
-                tbody.innerHTML = emptyRow(7, 'No hay tickets.');
+                tbody.innerHTML = emptyRow(COLSPAN, 'No hay tickets.');
             } else {
                 const fragment = document.createDocumentFragment();
                 const groupBy = json.group_by;
@@ -270,7 +292,7 @@
                         const headerRow = document.createElement('tr');
                         headerRow.className = 'group-header-row';
                         const headerCell = document.createElement('td');
-                        headerCell.colSpan = 7;
+                        headerCell.colSpan = COLSPAN;
                         headerCell.className = 'group-header';
                         headerCell.textContent = `${groupLabel}: ${t.group_value}`;
                         headerRow.appendChild(headerCell);
@@ -324,6 +346,9 @@
                       <td>${t.requester}</td>
                       <td>${t.updated_at}</td>
                       <td>${t.service}</td>
+                      <td>${t.brand || '-'}</td>
+                      <td>${channelLabel(t.channel)}</td>
+                      <td>${slaBadge(t.sla)}</td>
                       <td>${t.assignee}</td>
                     `;
                     row.insertBefore(cbCell, row.firstChild);
@@ -346,11 +371,13 @@
                 u.searchParams.set("page_size", _pageSize);
                 if (_sortBy) { u.searchParams.set("sort_by", _sortBy); u.searchParams.set("sort_dir", _sortDir); }
                 else { u.searchParams.delete("sort_by"); u.searchParams.delete("sort_dir"); }
+                if (_brandId) u.searchParams.set("brand_id", _brandId);
+                else u.searchParams.delete("brand_id");
                 window.history.replaceState({}, "", u);
             }
         } catch (err) {
             console.error("Error cargando tickets:", err);
-            tbody.innerHTML = emptyRow(7, 'Error al cargar tickets.', 'var(--color-danger)');
+            tbody.innerHTML = emptyRow(COLSPAN, 'Error al cargar tickets.', 'var(--color-danger)');
         } finally {
             spinner.style.display = "none";
         }
@@ -371,6 +398,19 @@
         }
         const savedSort = getUrlParam("sort_by");
         if (savedSort) { _sortBy = savedSort; _sortDir = getUrlParam("sort_dir") || 'asc'; }
+
+        const brandSel = document.getElementById('brandFilter');
+        const savedBrand = getUrlParam('brand_id');
+        if (brandSel) {
+            if (savedBrand) brandSel.value = savedBrand;
+            _brandId = brandSel.value || '';
+            brandSel.addEventListener('change', () => {
+                _brandId = brandSel.value || '';
+                clearSelection();
+                loadTickets(_currentView, 1);
+                refreshFilterCounts(true);
+            });
+        }
 
         if (!activeView && filters.length > 0) activeView = filters[0].dataset.view;
 

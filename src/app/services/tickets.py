@@ -3,6 +3,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from app.api import APIValidationError
+from app.constants import CHANNEL_VALUES, LEGACY_CHANNEL_MAP, LEGACY_TYPE_MAP, TICKET_TYPE_VALUES
 from app.models import Brand, Comment, Group, Ticket, TicketEvent, TicketTag, User
 from app.permissions import can_update_ticket, is_agent
 from app.services.assignment import AssignmentService
@@ -22,13 +23,33 @@ class TicketService:
         ("subject", "subject"),
         ("assignee_id", "assignee_id"),
         ("group_id", "assigned_group_id"),
+        ("type", "type"),
+        ("problem_id", "problem_id"),
     ]
+
+    @staticmethod
+    def normalize_type(raw):
+        """Acepta valores canónicos y legacy del formulario; inválidos -> None."""
+        value = (raw or "").strip().lower()
+        if not value:
+            return None
+        return LEGACY_TYPE_MAP.get(value) or (value if value in TICKET_TYPE_VALUES else None)
+
+    @staticmethod
+    def normalize_channel(raw):
+        value = (raw or "").strip().lower()
+        if not value:
+            return None
+        return LEGACY_CHANNEL_MAP.get(value) or (value if value in CHANNEL_VALUES else None)
 
     @staticmethod
     def create_or_update_from_post(actor, post_data, ticket_id=None):
         payload = TicketService._payload_from_post(actor, post_data)
         if ticket_id:
             return TicketService.update_ticket(actor, ticket_id, payload)
+        # El formulario web es el único caller; canal por defecto solo al crear
+        # (en update machacaría el canal real, p. ej. "email").
+        payload["channel"] = payload.get("channel") or "web"
         return TicketService.create_ticket(actor, payload)
 
     @staticmethod
@@ -46,7 +67,13 @@ class TicketService:
             priority = None
 
         empresa_name = (post_data.get("empresa") or "").strip()
-        brand = Brand.objects.get_or_create(name=empresa_name)[0] if empresa_name else None
+        brand = None
+        if empresa_name:
+            # Lookup estricto: el select es de vocabulario cerrado; get_or_create
+            # creaba marcas fantasma ante cualquier valor inesperado.
+            brand = Brand.objects.filter(name=empresa_name).first()
+            if brand is None:
+                raise APIValidationError("brand_not_found", f"Empresa desconocida: {empresa_name}", status=400)
         grupo_id = TicketService._optional_int(post_data.get("grupo"))
         asignado_id = TicketService._optional_int(post_data.get("asignado"))
         solicitante_id = TicketService._optional_int(post_data.get("solicitante")) or actor.id
@@ -65,8 +92,9 @@ class TicketService:
             "assignee_id": asignado_id,
             "assigned_group_id": grupo_id,
             "brand": brand,
-            "type": post_data.get("tipo") or None,
-            "channel": post_data.get("canal") or None,
+            "type": TicketService.normalize_type(post_data.get("tipo")),
+            "channel": TicketService.normalize_channel(post_data.get("canal")),
+            "problem_id": TicketService._optional_int(post_data.get("problem_id")),
             "service": post_data.get("servicio") or None,
             "language": post_data.get("idioma") or None,
             "category": post_data.get("categoria") or None,
@@ -80,6 +108,27 @@ class TicketService:
             "tags": TicketService._get_list(post_data, "tags"),
             "is_public": str((post_data.get("is_public") or "true")).lower() in ("true", "1", "yes", "on"),
         }
+
+    @staticmethod
+    def _validate_problem_link(payload, ticket_id=None):
+        """Devuelve el problem_id validado (o None). Solo incidentes pueden vincularse a un problema."""
+        problem_id = payload.get("problem_id")
+        if not problem_id:
+            return None
+        if payload.get("type") != "incident":
+            raise APIValidationError(
+                "invalid_problem_link", "Solo una incidencia puede vincularse a un problema.", status=400
+            )
+        if ticket_id and int(problem_id) == int(ticket_id):
+            raise APIValidationError("invalid_problem_link", "Un ticket no puede vincularse a sí mismo.", status=400)
+        target = Ticket.objects.filter(
+            id=problem_id, is_deleted=False, merged_into__isnull=True
+        ).only("id", "type").first()
+        if target is None or target.type != "problem":
+            raise APIValidationError(
+                "invalid_problem_link", f"El ticket #{problem_id} no existe o no es de tipo problema.", status=400
+            )
+        return target.id
 
     @staticmethod
     @transaction.atomic
@@ -99,6 +148,8 @@ class TicketService:
             )
             assignee_id = assignee.id if assignee else None
 
+        problem_id = TicketService._validate_problem_link(payload)
+
         now = timezone.now()
         ticket = Ticket.objects.create(
             subject=payload["subject"],
@@ -111,6 +162,7 @@ class TicketService:
             created_by_id=actor.id,
             brand=payload.get("brand"),
             type=payload.get("type"),
+            problem_id=problem_id,
             channel=payload.get("channel"),
             service=payload.get("service"),
             language=payload.get("language"),
@@ -148,6 +200,28 @@ class TicketService:
         NotificationService.notify_ticket_users(ticket, f"Nuevo ticket #{ticket.id}: {ticket.subject}", actor=actor)
         AutomationService.run_for_ticket(ticket, actor=actor, event="ticket_created", event_key=f"ticket_created:{ticket.id}")
         record_metric("tickets.created", labels={"ticket_id": ticket.id})
+        if not payload.get("suppress_requester_email"):
+            # Import local: email_outbound importa modelos y este módulo se importa
+            # desde tasks vía email_ingestion (evitar ciclos).
+            from app.services.email_outbound import OutboundEmailService
+            OutboundEmailService.queue_ticket_confirmation(ticket)
+
+        from django.conf import settings as dj_settings
+        if getattr(dj_settings, "AI_CLASSIFICATION_ENABLED", False):
+            ticket_id = ticket.id
+
+            def _dispatch_ai():
+                try:
+                    # Import local: tasks.py importa este módulo vía email_ingestion (ciclo)
+                    from app.tasks import classify_ticket_ai
+                    classify_ticket_ai.delay(ticket_id)
+                except Exception:
+                    # Broker caído => el ticket se crea igual, sin clasificar
+                    import logging
+                    logging.getLogger(__name__).exception("ai_dispatch_failed", extra={"ticket_id": ticket_id})
+                    record_metric("ai.dispatch_failed", labels={"ticket_id": ticket_id})
+
+            transaction.on_commit(_dispatch_ai)
         return ticket
 
     @staticmethod
@@ -182,6 +256,7 @@ class TicketService:
             "required_tasks",
         ):
             setattr(ticket, field, payload.get(field))
+        ticket.problem_id = TicketService._validate_problem_link(payload, ticket_id=ticket.id)
         ticket.assignee_id = payload.get("assignee_id")
         ticket.assigned_group_id = payload.get("assigned_group_id")
         if ticket.status == "closed" and not ticket.closed_at:

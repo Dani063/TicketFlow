@@ -25,7 +25,7 @@
     {# Bump ?v= on each Sprint deploy to bust browser cache on legacy clients. #}
     <!-- CSS globales -->
     <link rel="stylesheet" href="{% static 'tickets/style.css' %}?v=s4.7">
-    <link rel="stylesheet" href="{% static 'tickets/ui.css' %}?v=s4.7">
+    <link rel="stylesheet" href="{% static 'tickets/ui.css' %}?v=s5.0">
     <link rel="stylesheet" href="{% static 'tickets/toast.css' %}?v=s4.7">
     <link rel="stylesheet" href="{% static 'tickets/dialog.css' %}?v=s4.7">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
@@ -34,10 +34,10 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css">
     <!-- create_ticket.css loaded globally so ticket panes are styled even when
          the user navigates to a non-ticket page first (e.g. Home → ticket). -->
-    <link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s4.7">
+    <link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s5.0">
     <!-- home.css is the shared sidebar-page stylesheet; load globally so
          SPA fragment swaps don't lose styling. -->
-    <link rel="stylesheet" href="{% static 'tickets/home.css' %}?v=s4.7">
+    <link rel="stylesheet" href="{% static 'tickets/home.css' %}?v=s5.0">
 
     {% block extra_css %}{% endblock %}
 </head>
@@ -96,7 +96,8 @@
     <script src="{% static 'tickets/theme.js' %}?v=s4.7"></script>
     <!-- create_ticket.js loaded globally so initTicketPane is available even
          when the user navigates Home → ticket via SPA (no full page reload). -->
-    <script src="{% static 'tickets/create_ticket.js' %}?v=s4.7"></script>
+    <script src="{% static 'tickets/create_ticket.js' %}?v=s5.0"></script>
+    <script src="{% static 'tickets/ai_reply.js' %}?v=s4.8"></script>
 
     {% block extra_js %}{% endblock %}
 </body>

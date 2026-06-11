@@ -4,11 +4,11 @@ from django.conf import settings
 from celery import shared_task
 from app.services.assignment import AssignmentService
 from app.services.email_ingestion import EmailIngestionService
+from app.services.metrics import record_metric
+from app.services.msgraph import GRAPH_BASE, get_graph_token
 from app.services.sla import SLAService
 
 logger = logging.getLogger(__name__)
-
-GRAPH_BASE = 'https://graph.microsoft.com/v1.0'
 
 
 # ---------------------------------------------------------------------------
@@ -16,16 +16,8 @@ GRAPH_BASE = 'https://graph.microsoft.com/v1.0'
 # ---------------------------------------------------------------------------
 
 def _get_graph_token():
-    import msal
-    client = msal.ConfidentialClientApplication(
-        settings.AZURE_CLIENT_ID,
-        authority=f'https://login.microsoftonline.com/{settings.AZURE_TENANT_ID}',
-        client_credential=settings.AZURE_CLIENT_SECRET,
-    )
-    result = client.acquire_token_for_client(scopes=['https://graph.microsoft.com/.default'])
-    if 'access_token' not in result:
-        raise RuntimeError(f"Graph token error: {result.get('error_description', result)}")
-    return result['access_token']
+    # Delegado a app.services.msgraph para compartirlo con el envío saliente.
+    return get_graph_token()
 
 
 def _process_message(message, brand):
@@ -61,7 +53,7 @@ def poll_m365_mailboxes():
         url = (
             f'{GRAPH_BASE}/users/{mailbox}/mailFolders/Inbox/messages'
             '?$filter=isRead eq false'
-            '&$select=id,subject,from,body,receivedDateTime,conversationId'
+            '&$select=id,subject,from,body,receivedDateTime,conversationId,internetMessageHeaders'
             '&$top=50'
             '&$orderby=receivedDateTime asc'
         )
@@ -104,3 +96,91 @@ def auto_assign_unassigned_tickets():
 def mark_sla_breaches():
     breached = SLAService.mark_breaches()
     return f'breached_count: {len(breached)}'
+
+
+@shared_task(name='app.tasks.notify_sla_at_risk')
+def notify_sla_at_risk():
+    notified = SLAService.notify_at_risk()
+    return f'at_risk_count: {len(notified)}'
+
+
+@shared_task(
+    name='app.tasks.classify_ticket_ai',
+    bind=True,
+    max_retries=3,
+)
+def classify_ticket_ai(self, ticket_id, force=False):
+    """Clasificación ITIL por IA de un ticket recién creado.
+
+    Un fallo aquí JAMÁS afecta al ticket (ya está creado). Errores transitorios
+    reintentan con backoff; los permanentes se registran y se tragan para no
+    envenenar la cola.
+    """
+    from app.models import Ticket
+    from app.services.ai import AIRetryableError
+    from app.services.ticket_ai import TicketAIService
+
+    if not getattr(settings, 'AI_CLASSIFICATION_ENABLED', False):
+        return 'disabled'
+    try:
+        ticket = Ticket.objects.select_related('brand', 'requester').get(
+            id=ticket_id, is_deleted=False, merged_into__isnull=True
+        )
+    except Ticket.DoesNotExist:
+        return 'ticket_missing'
+
+    try:
+        return TicketAIService.classify_and_apply(ticket, force=force)
+    except AIRetryableError as exc:
+        if self.request.retries >= self.max_retries:
+            TicketAIService.mark_failed(ticket, exc)
+            record_metric('ai.classification.failed', labels={'ticket_id': ticket_id, 'error': 'retries_exhausted'})
+            logger.error('classify_ticket_ai agotó reintentos [ticket=%s]: %s', ticket_id, exc)
+            return 'failed'
+        # Backoff: 30s, 60s, 120s
+        raise self.retry(exc=exc, countdown=min(30 * (2 ** self.request.retries), 600))
+    except Exception as exc:
+        logger.exception('classify_ticket_ai failed [ticket=%s]', ticket_id)
+        TicketAIService.mark_failed(ticket, exc)
+        record_metric('ai.classification.failed', labels={'ticket_id': ticket_id, 'error': type(exc).__name__})
+        return 'failed'
+
+
+@shared_task(name='app.tasks.send_outbound_email', bind=True, max_retries=5)
+def send_outbound_email(self, log_id):
+    """Entrega un OutboundEmailLog encolado. Idempotente: SQS es at-least-once."""
+    from django.utils import timezone
+    from app.models import OutboundEmailLog
+    from app.services.email_outbound import OutboundEmailService
+
+    log = OutboundEmailLog.objects.select_related('brand').filter(id=log_id).first()
+    if log is None:
+        return 'log_missing'
+    if log.status == OutboundEmailLog.STATUS_SENT:
+        return 'already_sent'
+    if log.status == OutboundEmailLog.STATUS_SUPPRESSED:
+        return 'suppressed'
+
+    log.attempts += 1
+    log.save(update_fields=['attempts'])
+
+    try:
+        message_id = OutboundEmailService.deliver(log)
+    except Exception as exc:
+        if self.request.retries >= self.max_retries:
+            log.status = OutboundEmailLog.STATUS_FAILED
+            log.error = str(exc)[:2000]
+            log.save(update_fields=['status', 'error'])
+            record_metric('email.outbound.failed', labels={'log_id': log.id, 'error': type(exc).__name__})
+            logger.error('send_outbound_email failed permanently [log=%s]: %s', log.id, exc)
+            return 'failed'
+        # Backoff exponencial: 60s, 120s, 240s, 480s, 600s (cap)
+        raise self.retry(exc=exc, countdown=min(60 * (2 ** self.request.retries), 600))
+
+    log.status = OutboundEmailLog.STATUS_SENT
+    log.sent_at = timezone.now()
+    log.provider_message_id = message_id or None
+    log.error = None
+    log.save(update_fields=['status', 'sent_at', 'provider_message_id', 'error'])
+    record_metric('email.outbound.sent', labels={'log_id': log.id, 'provider': log.provider})
+    return 'sent'

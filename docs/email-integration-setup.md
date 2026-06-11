@@ -48,6 +48,7 @@ Permite que TicketFlow lea los buzones de helpdesk de los dominios en Microsoft 
 |---|---|---|
 | Mail.Read | Application (sin usuario) | Granted (admin consent) |
 | Mail.ReadWrite | Application (sin usuario) | Granted (admin consent) |
+| Mail.Send | Application (sin usuario) | ⚠️ **PENDIENTE de conceder** — requerido por el envío saliente vía Graph `sendMail` (marcas con `mailbox_type=m365`). Tras conceder, re-verificar la Application Access Policy con `Test-ApplicationAccessPolicy` (RestrictAccess también limita el envío, que es lo deseado). |
 
 ### Dónde gestionar la app
 [Azure Portal → App registrations → TicketFlow Mail Reader](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/ceccd3ef-7fad-49b8-8cd7-9fe2f5e3475c)
@@ -96,17 +97,27 @@ Get-ApplicationAccessPolicy | Where-Object {$_.AppId -eq "ceccd3ef-7fad-49b8-8cd
 ## Variables de entorno necesarias en `.env`
 
 ```env
-# Azure AD / Microsoft Graph (buzones M365)
+# Azure AD / Microsoft Graph (buzones M365 — lectura y envío)
 AZURE_TENANT_ID=4810d7e9-64fd-4a61-aaf0-b6289ef860c3
 AZURE_CLIENT_ID=ceccd3ef-7fad-49b8-8cd7-9fe2f5e3475c
 AZURE_CLIENT_SECRET=<valor del secret — ver gestor de contraseñas>
 
-# Amazon SES (email saliente + buzones Recordia/FxSigner)
-AWS_SES_SMTP_HOST=email-smtp.eu-west-1.amazonaws.com
-AWS_SES_SMTP_PORT=587
-AWS_SES_SMTP_USER=<SMTP user de SES>
-AWS_SES_SMTP_PASSWORD=<SMTP password de SES>
+# Email saliente
+OUTBOUND_EMAIL_ENABLED=true            # kill switch global (false en local)
+AWS_SES_REGION=eu-west-1
+# SES_CONFIGURATION_SET=ticketflow     # opcional: tracking de bounces/quejas
+TICKETFLOW_PUBLIC_URL=https://<host>   # base de los enlaces {{ticket_url}} en plantillas
 ```
+
+> **SES sin credenciales SMTP.** El envío usa la API SESv2 con boto3 y el **rol IAM
+> del pod** (igual que SQS/SSM): no hay usuario/contraseña SMTP que gestionar ni
+> rotar. Requisitos en AWS:
+> 1. `ses:SendEmail` en la policy del rol del worker (idealmente scoped a las
+>    identidades verificadas).
+> 2. Identidades de dominio verificadas (DKIM) para las marcas que envían por SES.
+> 3. Cuenta SES **fuera del sandbox** en eu-west-1 (en sandbox solo se puede enviar
+>    a destinatarios verificados → todas las confirmaciones fallarían; los fallos
+>    quedan visibles en `OutboundEmailLog` con status `failed`).
 
 ---
 
@@ -159,15 +170,39 @@ Implementadas como tareas periódicas de Celery Beat:
 
 ---
 
+## Email saliente — diseño implementado (sprint junio 2026)
+
+- **Routing por marca** (`Brand.mailbox_type`): `ses` → API SESv2 con boto3 (rol IAM),
+  `m365` → Graph `sendMail` con las credenciales MSAL existentes (requiere Mail.Send).
+- **Plantillas** (`ResponseTemplate`): por clave + marca + idioma (ES/EN) con variables
+  `{{ticket_id}}`, `{{requester_name}}`, etc. Administración en el panel admin
+  (pestaña Plantillas, con vista previa) y API `api/admin/response-templates/`.
+  El subject de `ticket_created` lleva `[Ticket #N]`: es el mecanismo de threading
+  de las respuestas del cliente.
+- **Confirmación de creación**: `TicketService.create_ticket` encola la confirmación
+  al solicitante en su idioma (`ticket.language` → `brand.language` → es) desde la
+  dirección de su marca; tarea Celery `send_outbound_email` con reintentos.
+- **Anti-bucles** (defensa en profundidad): detección de cabeceras de auto-respuesta
+  entrantes (`Auto-Submitted`, `X-Auto-Response-Suppress`, `Precedence`, `List-Id`),
+  blocklist de buzones propios, patrones noreply, dedup por (plantilla, ticket,
+  destinatario) y cabeceras de supresión en lo que enviamos.
+- **Auditoría**: `OutboundEmailLog` (queued/sent/failed/suppressed + motivo), visible
+  en el admin de Django.
+
+---
+
 ## Estado de implementación
 
 | Componente | Estado |
 |---|---|
 | Azure AD App Registration | ✅ Completado |
 | Exchange Online Access Policy | ✅ Completado |
-| Email saliente (SES SMTP) | ⏳ Pendiente — falta config SES |
-| Lectura buzones M365 (Graph API) | ⏳ Pendiente — implementación en TicketFlow |
+| Lectura buzones M365 (Graph API) | ✅ Completado — poll Celery cada 2 min |
+| Email saliente (código: SESv2 + Graph sendMail) | ✅ Implementado — tras kill switch `OUTBOUND_EMAIL_ENABLED` |
+| Permiso Graph `Mail.Send` + admin consent | ⏳ Pendiente (bloquea envío M365) |
+| SES production access + identidades DKIM + IAM `ses:SendEmail` | ⏳ Pendiente (bloquea envío SES) |
+| Confirmación de creación al cliente (acuse de recibo ES/EN) | ✅ Implementado |
 | Lectura buzones SES (recordia, fxsigner) | ⏳ Pendiente — falta revisar receipt rules actuales |
-| Notificaciones email al cliente | ⏳ Pendiente |
-| Automations (Celery Beat) | ⏳ Pendiente |
+| Triggers restantes (respuesta de agente, resuelto, asignación) | ⏳ Pendiente — el sistema de plantillas ya los soporta (añadir claves nuevas) |
+| Automations (Celery Beat: auto-cierre, CSAT, alerta 24h) | ⏳ Pendiente |
 | Horario laboral en BD | ⏳ Pendiente |

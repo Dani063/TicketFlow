@@ -52,6 +52,7 @@
             document.getElementById('tab-' + btn.dataset.tab).classList.add('is-active');
             if (btn.dataset.tab === 'roles')  loadRoles();
             if (btn.dataset.tab === 'groups') loadGroups();
+            if (btn.dataset.tab === 'templates') loadTemplates();
         });
     });
 
@@ -519,6 +520,153 @@
             const json = await res.json();
             if (!json.ok) { window.toast.error(json.error||'Error'); return; }
             window.toast.success('Grupo eliminado'); loadGroups();
+        } catch(e) { window.toast.error('Error de red'); }
+    }
+
+    /* ================================================================
+       RESPONSE TEMPLATES (plantillas de respuesta al cliente)
+       ================================================================ */
+    const _tMap = new Map();
+    let _tQuill = null;
+
+    function ensureTemplateQuill() {
+        if (_tQuill) return _tQuill;
+        if (!window.Quill) return null;
+        _tQuill = new Quill('#templateModalBodyEditor', {
+            theme: 'snow',
+            modules: {
+                toolbar: [
+                    ['bold', 'italic', 'underline'],
+                    [{ list: 'ordered' }, { list: 'bullet' }],
+                    ['link', 'blockquote'],
+                    ['clean'],
+                ],
+            },
+        });
+        return _tQuill;
+    }
+
+    async function loadTemplates() {
+        const tbody = document.getElementById('templatesTbody');
+        tbody.innerHTML = emptyRow(7, 'Cargando…');
+        try {
+            const res  = await fetch('/api/admin/response-templates/');
+            const json = await res.json();
+            _tMap.clear();
+            if (!json.templates || !json.templates.length) {
+                tbody.innerHTML = emptyRow(7, 'Sin plantillas');
+                return;
+            }
+            const frag = document.createDocumentFragment();
+            json.templates.forEach(t => {
+                _tMap.set(t.id, t);
+                const tr = document.createElement('tr');
+                tr.innerHTML =
+                    `<td class="col-id">${t.id}</td>
+                    <td><code>${esc(t.key)}</code></td>
+                    <td>${esc(t.brand_name || 'Global')}</td>
+                    <td>${esc((t.language || '').toUpperCase())}</td>
+                    <td title="${esc(t.subject)}">${esc(t.subject)}</td>
+                    <td class="col-status">
+                        <span class="tf-pill ${t.active?'tf-pill--success':'tf-pill--danger'}">${t.active?'Activa':'Inactiva'}</span>
+                    </td>
+                    <td class="col-actions"><div class="tf-admin-table-actions">
+                        <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${t.id}" title="Editar"><i class="fas fa-pen"></i></button>
+                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${t.id}" ${t.active?'':'disabled'} title="Desactivar"><i class="fas fa-ban"></i></button>
+                    </div></td>`;
+                frag.appendChild(tr);
+            });
+            tbody.innerHTML = '';
+            tbody.appendChild(frag);
+        } catch(e) {
+            tbody.innerHTML = `<tr><td colspan="7"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message" style="color: var(--color-danger);">Error al cargar</span></div></td></tr>`;
+        }
+    }
+
+    document.getElementById('templatesTbody').addEventListener('click', e => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn || btn.disabled) return;
+        const id = parseInt(btn.dataset.id, 10);
+        if (btn.dataset.action === 'edit') openTemplateModal(_tMap.get(id));
+        if (btn.dataset.action === 'del')  deactivateTemplate(id);
+    });
+
+    document.getElementById('btnNewTemplate').addEventListener('click', () => openTemplateModal(null));
+
+    function openTemplateModal(t) {
+        hideErr('templateModalError');
+        document.getElementById('templateModalId').value      = t ? t.id : '';
+        document.getElementById('templateModalTitle').textContent = t ? 'Editar plantilla' : 'Nueva plantilla';
+        document.getElementById('templateModalKey').value     = t ? t.key : '';
+        document.getElementById('templateModalBrand').value   = t && t.brand_id ? t.brand_id : '';
+        document.getElementById('templateModalLanguage').value = t ? t.language : 'es';
+        document.getElementById('templateModalSubject').value = t ? t.subject : '';
+        document.getElementById('templateModalBodyText').value = t ? (t.body_text || '') : '';
+        document.getElementById('templateModalActive').value  = t ? String(t.active) : 'true';
+        document.getElementById('templatePreviewArea').style.display = 'none';
+        openModal('templateModal');
+        const quill = ensureTemplateQuill();
+        if (quill) {
+            quill.clipboard.dangerouslyPasteHTML(t ? (t.body_html || '') : '');
+        }
+    }
+
+    function templatePayload() {
+        const quill = ensureTemplateQuill();
+        return {
+            key:       document.getElementById('templateModalKey').value.trim(),
+            brand_id:  document.getElementById('templateModalBrand').value || null,
+            language:  document.getElementById('templateModalLanguage').value,
+            subject:   document.getElementById('templateModalSubject').value.trim(),
+            body_html: quill ? quill.root.innerHTML : '',
+            body_text: document.getElementById('templateModalBodyText').value,
+            active:    document.getElementById('templateModalActive').value === 'true',
+        };
+    }
+
+    document.getElementById('btnPreviewTemplate').addEventListener('click', async () => {
+        hideErr('templateModalError');
+        try {
+            const res  = await fetch('/api/admin/response-templates/?action=preview', {
+                method: 'POST', headers: hdr(), body: JSON.stringify(templatePayload()),
+            });
+            const json = await res.json();
+            if (!json.ok) { showErr('templateModalError', json.error || 'Error en la vista previa'); return; }
+            document.getElementById('templatePreviewSubject').textContent = json.preview.subject;
+            document.getElementById('templatePreviewBody').innerHTML = json.preview.body_html;
+            document.getElementById('templatePreviewArea').style.display = '';
+        } catch(e) { showErr('templateModalError', 'Error de red'); }
+    });
+
+    document.getElementById('btnSaveTemplate').addEventListener('click', async () => {
+        hideErr('templateModalError');
+        const id = document.getElementById('templateModalId').value;
+        const payload = templatePayload();
+        if (id) payload.id = parseInt(id, 10);
+        try {
+            const res  = await fetch('/api/admin/response-templates/', {
+                method: id ? 'PUT' : 'POST', headers: hdr(), body: JSON.stringify(payload),
+            });
+            const json = await res.json();
+            if (!json.ok) { showErr('templateModalError', json.error || 'Error al guardar'); return; }
+            closeModal('templateModal');
+            window.toast.success(id ? 'Plantilla actualizada' : 'Plantilla creada');
+            loadTemplates();
+        } catch(e) { showErr('templateModalError', 'Error de red'); }
+    });
+
+    async function deactivateTemplate(id) {
+        const ok = await window.dialog.confirm({
+            title: 'Desactivar plantilla',
+            message: 'La plantilla dejará de usarse (no se borra). ¿Continuar?',
+            confirmText: 'Desactivar', cancelText: 'Cancelar', variant: 'danger',
+        });
+        if (!ok) return;
+        try {
+            const res  = await fetch('/api/admin/response-templates/?id=' + id, { method: 'DELETE', headers: hdr() });
+            const json = await res.json();
+            if (!json.ok) { window.toast.error(json.error || 'Error'); return; }
+            window.toast.success('Plantilla desactivada'); loadTemplates();
         } catch(e) { window.toast.error('Error de red'); }
     }
 

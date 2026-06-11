@@ -728,7 +728,11 @@ window.initTicketPane = function (root, ctx) {
     });
 
     // Manejo de Guardar y Cargar Datos del Formulario en localStorage
-    const ticketId = new URLSearchParams(window.location.search).get('id');
+    // El id viene del pane (data-ticket-id, ya resuelto en ctx.ticketId). En el SPA
+    // la URL es /tickets/N/ (sin ?id=), así que leer solo el query param dejaba
+    // ticketId=null y NO se poblaba el formulario desde la API (campos vacíos
+    // aunque la IA/los datos existieran). Fallback al query param por compatibilidad.
+    const ticketId = ctx.ticketId || new URLSearchParams(window.location.search).get('id');
 
     const saveFormData = () => {
         if (!ticketId) return;
@@ -756,6 +760,61 @@ window.initTicketPane = function (root, ctx) {
     $root.find('select.select2').on('change', saveFormData);
     loadFormData();
 
+    // "Problema vinculado" solo aplica a incidencias (ITIL: un problema agrupa incidentes)
+    const toggleProblemLink = () => {
+        const isIncident = $root.find('#tipo').val() === 'incident';
+        $root.find('#problemLinkGroup').toggle(isIncident);
+        if (!isIncident) $root.find('#problem_id').val('');
+    };
+    $root.find('#tipo').on('change', toggleProblemLink);
+    toggleProblemLink();
+
+    // Abre un ticket en una pestaña del SPA (o navega si no hay Tabs).
+    const openTicketTab = (id, subject) => {
+        const url = window.location.pathname + '?id=' + id;
+        if (window.Tabs && typeof window.Tabs.addTab === 'function') {
+            window.Tabs.addTab(subject || ('Ticket ' + id), url);
+        } else {
+            window.location.href = url;
+        }
+    };
+
+    // Pinta el contexto del vínculo problema↔incidencias (ITIL):
+    //  - en una incidencia: "Problema vinculado" como enlace con su asunto;
+    //  - en un problema: la lista de incidencias agrupadas, clicables.
+    const escHtml = (s) => $('<div>').text(s == null ? '' : s).html();
+    const renderProblemLinks = (data) => {
+        const $ref = $root.find('#problemLinkRef');
+        if (data.problem_id && data.problem_subject) {
+            $ref.text('#' + data.problem_id + ' · ' + data.problem_subject)
+                .attr('href', window.location.pathname + '?id=' + data.problem_id)
+                .off('click').on('click', (e) => { e.preventDefault(); openTicketTab(data.problem_id, data.problem_subject); })
+                .show();
+        } else {
+            $ref.hide();
+        }
+
+        const incidents = data.incidents || [];
+        const $group = $root.find('#linkedIncidentsGroup');
+        const $list = $root.find('#linkedIncidentsList');
+        if (data.tipo === 'problem' && incidents.length) {
+            $root.find('#linkedIncidentsCount').text('(' + incidents.length + ')');
+            $list.html(incidents.map(inc =>
+                '<li><a href="' + window.location.pathname + '?id=' + inc.id + '" data-id="' + inc.id + '">' +
+                '<span class="li-status status-' + escHtml(inc.status) + '"></span>' +
+                '#' + inc.id + ' · ' + escHtml(inc.subject) + '</a></li>'
+            ).join(''));
+            $list.find('a').off('click').on('click', function (e) {
+                e.preventDefault();
+                openTicketTab($(this).data('id'), '');
+            });
+            $group.show();
+        } else {
+            $group.hide();
+            $list.empty();
+        }
+    };
+
     // Cargar Información del Ticket si Existe
     if (ticketId) {
         fetch(`/api/tickets/${ticketId}/`)
@@ -766,11 +825,25 @@ window.initTicketPane = function (root, ctx) {
                 $root.find('#grupo').val(data.grupo || '').trigger('change');
                 $root.find('#tags').val(data.tags).trigger('change');
                 $root.find('#tipo').val(data.tipo).trigger('change');
+                $root.find('#problem_id').val(data.problem_id || '');
+                toggleProblemLink();
+                renderProblemLinks(data);
                 $root.find('#prioridad').val(data.prioridad || '').trigger('change');
                 $root.find('#servicio').val(data.servicio).trigger('change');
                 $root.find('#canal').val(data.canal).trigger('change');
                 $root.find('#idioma').val(data.idioma).trigger('change');
-                $root.find('#categoria').val(data.categoria).trigger('change');
+                // categoria es texto libre (la IA puede proponer una fuera del listado
+                // fijo). Si el valor no existe como <option>, lo añadimos para que se
+                // muestre y se conserve al guardar.
+                if (data.categoria) {
+                    const $cat = $root.find('#categoria');
+                    if (!$cat.find(`option[value="${data.categoria}"]`).length) {
+                        $cat.append(new Option(data.categoria, data.categoria, true, true));
+                    }
+                    $cat.val(data.categoria).trigger('change');
+                } else {
+                    $root.find('#categoria').val('').trigger('change');
+                }
                 $root.find('#security_related').prop('checked', !!data.security_related);
                 $root.find('#monitoring').prop('checked', !!data.monitoring);
                 $root.find('#approval_status').val(data.approval_status || '');
@@ -955,6 +1028,150 @@ window.initTicketPane = function (root, ctx) {
                 closeMacroPanel();
             }
         });
+
+        // ---- Gestión de macros (CRUD) ----
+        const manageBtn   = rootEl.querySelector('#macro-manage-btn');
+        const modal       = rootEl.querySelector('#macro-modal');
+        if (manageBtn && modal) {
+            const mList   = modal.querySelector('#macro-manage-list');
+            const mSearch = modal.querySelector('#macro-manage-search');
+            const form    = modal.querySelector('#macro-form');
+            const fId      = modal.querySelector('#macro-form-id');
+            const fName    = modal.querySelector('#macro-form-name');
+            const fDesc    = modal.querySelector('#macro-form-desc');
+            const fStatus  = modal.querySelector('#macro-form-status');
+            const fPrio    = modal.querySelector('#macro-form-priority');
+            const fComment = modal.querySelector('#macro-form-comment');
+            const fActive  = modal.querySelector('#macro-form-active');
+            const delBtn   = modal.querySelector('#macro-delete-btn');
+            let manageCache = [];
+
+            const toast = (kind, msg) => (window.toast && window.toast[kind]) ? window.toast[kind](msg) : null;
+            const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => (
+                { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+            function renderManageList() {
+                const q = (mSearch.value || '').toLowerCase();
+                const list = manageCache.filter(m =>
+                    m.name.toLowerCase().includes(q) ||
+                    (m.description || '').toLowerCase().includes(q));
+                if (!list.length) {
+                    mList.innerHTML = '<li class="macro-empty">Sin macros</li>';
+                    return;
+                }
+                const sel = fId.value;
+                mList.innerHTML = list.map(m => {
+                    const a = m.actions || {};
+                    const bits = [a.status, a.priority, a.comment ? 'comentario' : null]
+                        .filter(Boolean).join(' · ');
+                    return `<li class="macro-manage-item${String(m.id) === sel ? ' selected' : ''}${m.active ? '' : ' inactive'}" data-id="${m.id}">
+                        <div class="mm-name">${esc(m.name)}${m.active ? '' : ' <span class="mm-badge">inactiva</span>'}</div>
+                        ${bits ? `<div class="mm-actions">${esc(bits)}</div>` : ''}
+                    </li>`;
+                }).join('');
+                mList.querySelectorAll('.macro-manage-item').forEach(li => {
+                    li.addEventListener('click', () => {
+                        const m = manageCache.find(x => String(x.id) === li.dataset.id);
+                        if (m) loadForm(m);
+                    });
+                });
+            }
+
+            function loadForm(m) {
+                const a = (m && m.actions) || {};
+                fId.value      = m ? m.id : '';
+                fName.value    = m ? m.name : '';
+                fDesc.value    = m ? (m.description || '') : '';
+                fStatus.value  = a.status || '';
+                fPrio.value    = a.priority || '';
+                fComment.value = a.comment || '';
+                fActive.checked = m ? !!m.active : true;
+                delBtn.style.display = m ? '' : 'none';
+                form.style.display = '';
+                renderManageList();
+                fName.focus();
+            }
+
+            async function loadManage() {
+                mList.innerHTML = '<li class="macro-empty">Cargando…</li>';
+                try {
+                    const res = await fetch('/api/macros/manage/');
+                    const data = await res.json();
+                    manageCache = data.macros || [];
+                    renderManageList();
+                } catch {
+                    mList.innerHTML = '<li class="macro-empty">Error al cargar</li>';
+                }
+            }
+
+            function openModal() {
+                closeMacroPanel();
+                modal.classList.add('open');
+                form.style.display = 'none';
+                fId.value = '';
+                mSearch.value = '';
+                loadManage();
+            }
+            function closeModal() { modal.classList.remove('open'); }
+
+            manageBtn.addEventListener('click', (e) => { e.stopPropagation(); openModal(); });
+            modal.querySelector('#macro-modal-close').addEventListener('click', closeModal);
+            modal.querySelector('#macro-form-cancel').addEventListener('click', () => {
+                form.style.display = 'none'; fId.value = ''; renderManageList();
+            });
+            modal.querySelector('#macro-new-btn').addEventListener('click', () => loadForm(null));
+            modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+            mSearch.addEventListener('input', renderManageList);
+
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const name = fName.value.trim();
+                if (!name) { toast('error', 'El nombre es obligatorio'); return; }
+                if (!fStatus.value && !fPrio.value && !fComment.value.trim()) {
+                    toast('error', 'La macro debe tener al menos una acción'); return;
+                }
+                const isEdit = !!fId.value;
+                const payload = {
+                    id: isEdit ? Number(fId.value) : undefined,
+                    name,
+                    description: fDesc.value.trim(),
+                    status: fStatus.value,
+                    priority: fPrio.value,
+                    comment: fComment.value.trim(),
+                    active: fActive.checked,
+                };
+                try {
+                    const res = await fetch('/api/macros/manage/', {
+                        method: isEdit ? 'PUT' : 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+                        body: JSON.stringify(payload),
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data.ok) { toast('error', data.detail || (data.error && data.error.message) || 'Error al guardar'); return; }
+                    toast('success', isEdit ? 'Macro actualizada' : 'Macro creada');
+                    macrosCache = null;           // invalida la caché del desplegable
+                    await loadManage();
+                    loadForm(data.macro);         // mantiene la macro abierta tras crear/editar
+                } catch { toast('error', 'Error de red'); }
+            });
+
+            delBtn.addEventListener('click', async () => {
+                if (!fId.value) return;
+                if (!window.confirm('¿Eliminar esta macro? No se puede deshacer.')) return;
+                try {
+                    const res = await fetch('/api/macros/manage/?id=' + encodeURIComponent(fId.value), {
+                        method: 'DELETE',
+                        headers: { 'X-CSRFToken': getCookie('csrftoken') },
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data.ok) { toast('error', data.detail || (data.error && data.error.message) || 'Error al eliminar'); return; }
+                    toast('success', 'Macro eliminada');
+                    macrosCache = null;
+                    form.style.display = 'none'; fId.value = '';
+                    await loadManage();
+                } catch { toast('error', 'Error de red'); }
+            });
+        }
     }
 
     // ---- Historial de interacciones: popup en hover ----
