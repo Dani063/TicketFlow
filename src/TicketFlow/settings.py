@@ -387,29 +387,46 @@ AZURE_TENANT_ID     = os.getenv('AZURE_TENANT_ID')     or _ssm_azure.get('AZURE_
 AZURE_CLIENT_ID     = os.getenv('AZURE_CLIENT_ID')     or _ssm_azure.get('AZURE_CLIENT_ID', '')
 AZURE_CLIENT_SECRET = os.getenv('AZURE_CLIENT_SECRET') or _ssm_azure.get('AZURE_CLIENT_SECRET', '')
 
-# === Azure OpenAI (clasificación IA de tickets) ===
-# Local: .env | Producción: SSM {prefix}/AzureOpenAICredentials (SecureString JSON
-# con AZURE_OPENAI_ENDPOINT / AZURE_OPENAI_API_KEY / AZURE_OPENAI_DEPLOYMENT /
-# AZURE_OPENAI_API_VERSION). Parámetro OPCIONAL: si no existe, la IA queda apagada.
+# === Azure OpenAI (alternativa heredada — opcional) ===
+# El proveedor de IA en producción es OpenAI directo (ver más abajo, {prefix}/OpenAiToken).
+# Este bloque solo aplica si algún día se aprovisiona Azure OpenAI: SSM
+# {prefix}/AzureOpenAICredentials (SecureString JSON con ENDPOINT/API_KEY/DEPLOYMENT/
+# API_VERSION). Su AUSENCIA es lo esperado hoy → log a debug, no warning (no implica
+# que la IA esté apagada: eso lo decide _AI_HAS_CREDS más abajo).
 _ssm_aoai = {}
 if _ssm_prefix:
     try:
         _ssm_aoai = _get_ssm_json(f"{_ssm_prefix}/AzureOpenAICredentials")
     except Exception as _aoai_exc:
-        _logging.getLogger(__name__).warning(
-            "AzureOpenAICredentials no disponible en SSM (%s): clasificación IA desactivada", _aoai_exc
+        _logging.getLogger(__name__).debug(
+            "AzureOpenAICredentials no presente en SSM (esperado: se usa OpenAI directo): %s", _aoai_exc
         )
 AZURE_OPENAI_ENDPOINT    = os.getenv('AZURE_OPENAI_ENDPOINT')    or _ssm_aoai.get('AZURE_OPENAI_ENDPOINT', '')
 AZURE_OPENAI_API_KEY     = os.getenv('AZURE_OPENAI_API_KEY')     or _ssm_aoai.get('AZURE_OPENAI_API_KEY', '')
 AZURE_OPENAI_DEPLOYMENT  = os.getenv('AZURE_OPENAI_DEPLOYMENT')  or _ssm_aoai.get('AZURE_OPENAI_DEPLOYMENT', 'gpt-4o-mini')
 AZURE_OPENAI_API_VERSION = os.getenv('AZURE_OPENAI_API_VERSION') or _ssm_aoai.get('AZURE_OPENAI_API_VERSION', '2024-10-21')
 
-# === OpenAI directo (alternativa a Azure OpenAI) ===
-# Si no hay endpoint de Azure pero sí OPENAI_API_KEY, ai.py usa el cliente OpenAI
-# estándar (api.openai.com). El nombre del modelo va en OPENAI_MODEL. Útil en local
-# y como proveedor de respaldo; el resto del código (chat_json) es idéntico.
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY') or _ssm_aoai.get('OPENAI_API_KEY', '')
-OPENAI_MODEL   = os.getenv('OPENAI_MODEL')   or _ssm_aoai.get('OPENAI_MODEL', 'gpt-4o-mini')
+# === OpenAI directo (proveedor de IA en producción) ===
+# Sin endpoint de Azure, ai.py usa el cliente OpenAI estándar (api.openai.com) con
+# OPENAI_API_KEY; el modelo va en OPENAI_MODEL. El resto del código es idéntico.
+#
+# Precedencia de la clave:
+#   1. OPENAI_API_KEY del entorno/.env  -> LOCAL: tu clave de desarrollo SIEMPRE manda.
+#   2. SSM {prefix}/OpenAiToken          -> PRODUCCIÓN: SecureString SIMPLE (no JSON)
+#      que dejó sistemas; el pod lo lee con el rol IAM.
+#   3. OPENAI_API_KEY dentro del JSON AzureOpenAICredentials -> compatibilidad.
+# SSM SOLO se consulta si no hay clave en el entorno: así el local queda desacoplado
+# del rollout a prod (no arrastra el secreto de producción al proceso de desarrollo)
+# y un fallo de permisos/parámetro nunca rompe el arranque (queda en debug).
+OPENAI_MODEL = os.getenv('OPENAI_MODEL') or _ssm_aoai.get('OPENAI_MODEL', 'gpt-4o-mini')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+if not OPENAI_API_KEY and _ssm_prefix:
+    try:
+        OPENAI_API_KEY = _get_ssm_parameter(f"{_ssm_prefix}/OpenAiToken").strip()
+    except Exception as _oai_exc:
+        _logging.getLogger(__name__).debug("OpenAiToken no disponible en SSM: %s", _oai_exc)
+if not OPENAI_API_KEY:
+    OPENAI_API_KEY = _ssm_aoai.get('OPENAI_API_KEY', '')
 
 # Embeddings (casos similares + asistencia de respuesta). Mismo proveedor que el chat.
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.getenv('AZURE_OPENAI_EMBEDDING_DEPLOYMENT') or _ssm_aoai.get('AZURE_OPENAI_EMBEDDING_DEPLOYMENT', '')
@@ -418,6 +435,11 @@ OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL') or _ssm_aoai.get('O
 # Flags de la clasificación IA. Por defecto solo se enciende si hay credenciales
 # (Azure OpenAI u OpenAI directo), así los entornos sin keys no notan ningún cambio.
 _AI_HAS_CREDS = bool((AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY) or OPENAI_API_KEY)
+if not _AI_HAS_CREDS:
+    _logging.getLogger(__name__).info(
+        "IA desactivada: sin credenciales. Define OPENAI_API_KEY en .env para local, "
+        "o el parámetro SSM {prefix}/OpenAiToken en el despliegue."
+    )
 AI_CLASSIFICATION_ENABLED = os.getenv(
     'AI_CLASSIFICATION_ENABLED',
     'true' if _AI_HAS_CREDS else 'false'
