@@ -258,6 +258,18 @@
         window.location.href = '/reporting/export.csv?' + params();
     });
 
+    // Redibujar las gráficas al cambiar de tema (claro/oscuro): Chart.js captura
+    // los colores (--color-text/--color-border) en el momento de pintar, así que
+    // hay que recrearlas. Listener singleton para no acumular handlers en cada
+    // re-entrada del fragmento (tabs.js re-ejecuta el script).
+    if (window.__tfReportThemeHandler) {
+        document.removeEventListener('tf:themechange', window.__tfReportThemeHandler);
+    }
+    window.__tfReportThemeHandler = function () {
+        if (document.getElementById('repKpis')) load();
+    };
+    document.addEventListener('tf:themechange', window.__tfReportThemeHandler);
+
     setPreset(30);
     load();
 })();

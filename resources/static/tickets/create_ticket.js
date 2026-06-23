@@ -786,7 +786,8 @@ window.initTicketPane = function (root, ctx) {
     const renderProblemLinks = (data) => {
         const $ref = $root.find('#problemLinkRef');
         if (data.problem_id && data.problem_subject) {
-            $ref.text('#' + data.problem_id + ' · ' + data.problem_subject)
+            $ref.html('<span class="li-status status-' + escHtml(data.problem_status || '') + '"></span>' +
+                      '#' + data.problem_id + ' · ' + escHtml(data.problem_subject))
                 .attr('href', window.location.pathname + '?id=' + data.problem_id)
                 .off('click').on('click', (e) => { e.preventDefault(); openTicketTab(data.problem_id, data.problem_subject); })
                 .show();

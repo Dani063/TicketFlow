@@ -115,12 +115,6 @@
                         <option value="task">Tarea</option>
                     </select>
                 </div>
-                <div class="form-group" id="problemLinkGroup" style="display:none">
-                    <label for="problem_id">Problema vinculado</label>
-                    <input type="number" id="problem_id" name="problem_id" class="form-control-input"
-                           min="1" placeholder="# de ticket tipo problema">
-                    <a id="problemLinkRef" class="linked-ref" style="display:none" href="#"></a>
-                </div>
                 <div class="form-group">
                     <label for="prioridad">Prioridad</label>
                     <select id="prioridad" name="prioridad" class="select2">
@@ -131,6 +125,12 @@
                         <option value="urgent">Urgente</option>
                     </select>
                 </div>
+            </div>
+            <div class="form-group" id="problemLinkGroup" style="display:none">
+                <label for="problem_id">Problema vinculado</label>
+                <input type="number" id="problem_id" name="problem_id" class="form-control-input"
+                       min="1" placeholder="# de ticket tipo problema">
+                <a id="problemLinkRef" class="linked-ref" style="display:none" href="#"></a>
             </div>
             <div class="form-group" id="linkedIncidentsGroup" style="display:none">
                 <label>Incidencias vinculadas <span id="linkedIncidentsCount" class="linked-count"></span></label>

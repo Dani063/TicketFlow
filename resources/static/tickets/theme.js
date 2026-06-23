@@ -38,6 +38,11 @@
         if (eff === 'dark') html.setAttribute('data-theme', 'dark');
         else html.removeAttribute('data-theme');
         html.setAttribute('data-theme-pref', pref);
+        // Notify components that paint with captured colors (e.g. Chart.js canvases
+        // in reporting.js) so they can re-read the --color-* tokens and redraw.
+        try {
+            document.dispatchEvent(new CustomEvent('tf:themechange', { detail: { theme: eff } }));
+        } catch (_) { /* CustomEvent unsupported — ignore */ }
     }
 
     // Expose a tiny API

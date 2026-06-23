@@ -1374,6 +1374,7 @@ def ticket_detail_api(request, ticket_id):
         'tipo': ticket.type,
         'problem_id': ticket.problem_id,
         'problem_subject': ticket.problem.subject if ticket.problem_id and ticket.problem else None,
+        'problem_status': ticket.problem.status if ticket.problem_id and ticket.problem else None,
         'incidents': [
             {'id': inc.id, 'subject': inc.subject, 'status': inc.status}
             for inc in ticket.incidents.filter(is_deleted=False)[:50]

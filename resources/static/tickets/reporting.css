@@ -17,7 +17,7 @@
     flex-wrap: wrap;
     align-items: flex-end;
     gap: var(--space-3, 14px);
-    background: var(--color-surface-1, #fff);
+    background: var(--color-surface, #fff);
     border: 1px solid var(--color-border, #e6e6e9);
     border-radius: var(--radius-md, 10px);
     padding: var(--space-3, 12px) var(--space-4, 16px);
@@ -32,7 +32,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: .04em;
-    color: var(--color-text-secondary, #999);
+    color: var(--color-text-subtle, #999);
 }
 .tf-filter-label i { margin-right: 4px; opacity: .8; }
 .tf-report-toolbar .tf-select { min-width: 170px; height: 36px; }
@@ -52,7 +52,7 @@
     padding: 0 14px;
     font-size: .82rem;
     font-weight: 600;
-    color: var(--color-text-secondary, #777);
+    color: var(--color-text-subtle, #777);
     cursor: pointer;
     border-left: 1px solid var(--color-border, #e2e2e8);
     transition: background .12s ease, color .12s ease;
@@ -70,7 +70,7 @@
     align-items: center;
     gap: 6px;
 }
-.tf-daterange-sep { color: var(--color-text-secondary, #aaa); }
+.tf-daterange-sep { color: var(--color-text-subtle, #aaa); }
 .tf-report-date { max-width: 150px; height: 36px; }
 
 .tf-report-kpis {
@@ -80,7 +80,7 @@
     margin: var(--space-4, 16px) 0;
 }
 .tf-kpi-card {
-    background: var(--color-surface-1, #fff);
+    background: var(--color-surface, #fff);
     border: 1px solid var(--color-border, #e2e2e2);
     border-radius: var(--radius-md, 8px);
     padding: var(--space-3, 12px) var(--space-4, 16px);
@@ -122,7 +122,7 @@
     justify-content: center;
     font-size: .9rem;
     background: var(--color-surface-2, #f1f2f7);
-    color: var(--color-text-secondary, #777);
+    color: var(--color-text-subtle, #777);
 }
 .tf-kpi--primary .tf-kpi-ico { background: rgba(91,103,202,.12);  color: #5b67ca; }
 .tf-kpi--success .tf-kpi-ico { background: rgba(46,184,114,.14);  color: #2eb872; }
@@ -132,7 +132,7 @@
 .tf-kpi-delta {
     font-size: .72rem;
     font-weight: 600;
-    color: var(--color-text-secondary, #888);
+    color: var(--color-text-subtle, #888);
     white-space: nowrap;
 }
 .tf-kpi-delta.is-up   { color: #c0392b; }
@@ -150,7 +150,7 @@
 }
 .tf-kpi-label {
     font-size: 0.78rem;
-    color: var(--color-text-secondary, #777);
+    color: var(--color-text-subtle, #777);
 }
 .tf-kpi-card--danger .tf-kpi-value,
 .tf-kpi--danger .tf-kpi-value { color: #dc3545; }
@@ -173,7 +173,7 @@
     font-size: .76rem;
     text-transform: uppercase;
     letter-spacing: .03em;
-    color: var(--color-text-secondary, #888);
+    color: var(--color-text-subtle, #888);
     border-bottom: 2px solid var(--color-border, #ddd);
     white-space: nowrap;
 }
@@ -205,7 +205,7 @@
     font-size: .72rem;
     text-transform: capitalize;
     background: var(--color-surface-2, #eef0f5);
-    color: var(--color-text-secondary, #555);
+    color: var(--color-text-subtle, #555);
 }
 .tf-badge--open    { background: rgba(91,103,202,.14);  color: #5b67ca; }
 .tf-badge--pending { background: rgba(209,154,102,.18); color: #c8862f; }
@@ -216,7 +216,7 @@
     gap: var(--space-3, 12px);
 }
 .tf-report-panel {
-    background: var(--color-surface-1, #fff);
+    background: var(--color-surface, #fff);
     border: 1px solid var(--color-border, #e2e2e2);
     border-radius: var(--radius-md, 8px);
     padding: var(--space-3, 12px);
@@ -225,7 +225,7 @@
 .tf-report-panel h3 {
     margin: 0 0 var(--space-2, 8px);
     font-size: 0.95rem;
-    color: var(--color-text-secondary, inherit);
+    color: var(--color-text-subtle, inherit);
 }
 .tf-report-panel--wide { grid-column: 1 / -1; }
 .tf-report-canvas {

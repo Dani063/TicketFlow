@@ -1526,16 +1526,32 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 .status-closed   { background: #6b7280; }
 /* gris */
 
-/* ---- Vínculo problema ↔ incidencias (ITIL) ---- */
-.linked-ref {
-    display: inline-block;
-    margin-top: 4px;
+/* ---- Vínculo problema ↔ incidencias (ITIL) ----
+   "Problema vinculado" (una incidencia → su problema padre) e "Incidencias
+   vinculadas" (un problema → sus incidencias hijas) son las dos caras de la
+   misma relación: comparten estilo de "chip de referencia" idéntico. */
+.linked-ref,
+.linked-incidents li a {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--color-border, #e2e2e8);
+    border-radius: var(--radius-sm, 6px);
     font-size: var(--font-size-sm, .85rem);
-    color: var(--color-primary, #5b67ca);
+    line-height: 1.3;
+    color: var(--color-text, #333);
     text-decoration: none;
-    word-break: break-word;
+    overflow-wrap: anywhere;
+    transition: background .12s ease, border-color .12s ease;
 }
-.linked-ref:hover { text-decoration: underline; }
+.linked-ref { margin-top: 6px; }
+.linked-ref:hover,
+.linked-incidents li a:hover {
+    background: var(--color-row-hover, #f5f6fa);
+    border-color: var(--color-primary, #5b67ca);
+    text-decoration: none;
+}
 .linked-count { color: var(--color-text-muted, #888); font-weight: 600; }
 .linked-incidents {
     list-style: none;
@@ -1543,34 +1559,19 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
 }
-.linked-incidents li a {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 8px;
-    border: 1px solid var(--color-border, #e2e2e8);
-    border-radius: var(--radius-sm, 6px);
-    font-size: var(--font-size-sm, .85rem);
-    color: var(--color-text, #333);
-    text-decoration: none;
-    transition: background .12s ease, border-color .12s ease;
-}
-.linked-incidents li a:hover {
-    background: var(--color-row-hover, #f5f6fa);
-    border-color: var(--color-primary, #5b67ca);
-}
-.linked-incidents .li-status {
+/* Punto de estado — usado tanto en .linked-ref como en .linked-incidents */
+.li-status {
     flex: 0 0 auto;
     width: 8px; height: 8px;
     border-radius: 50%;
     background: #9ca3af;
 }
-.linked-incidents .li-status.status-open     { background: #3b82f6; }
-.linked-incidents .li-status.status-pending  { background: #f59e0b; }
-.linked-incidents .li-status.status-resolved { background: #22c55e; }
-.linked-incidents .li-status.status-closed   { background: #6b7280; }
+.li-status.status-open     { background: #3b82f6; }
+.li-status.status-pending  { background: #f59e0b; }
+.li-status.status-resolved { background: #22c55e; }
+.li-status.status-closed   { background: #6b7280; }
 
 /* System event divider (audit trail) */
 .sys-event {
