@@ -94,6 +94,12 @@
         background-color: var(--color-stat-hover);
     }
 
+    /* Filtro activo: la tabla de abajo está acotada a este contador. */
+    .stat.is-active {
+        background-color: var(--color-stat-hover);
+        box-shadow: inset 0 0 0 2px var(--color-primary, #5b67ca);
+    }
+
 .stat-content {
     display: flex;
     flex-direction: column;

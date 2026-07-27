@@ -290,6 +290,47 @@ def _base_tickets_queryset(user):
 
 def _tickets_for_view(base_qs, view, user):
     now = timezone.now()
+
+    # --- Vistas del dashboard (home) -------------------------------------
+    # Siempre acotadas al usuario: _base_tickets_queryset devuelve TODOS los
+    # tickets cuando quien mira es agente, y la home solo debe enseñar los
+    # suyos. Cada clave replica la definición del contador que hay bajo el
+    # botón correspondiente en home(), para que el número del botón y las
+    # filas que salen al pulsarlo coincidan.
+    if view and view.startswith("home_"):
+        mine = base_qs.filter(
+            Q(requester=user) | Q(assignee=user) | Q(ccs=user)
+        ).distinct()
+        cutoff_60 = now - timedelta(days=60)
+        if view == "home_you":
+            return mine.filter(status="open")
+        if view == "home_groups":
+            # Ojo: el contador abarca todo el grupo, no solo lo del usuario.
+            if not user.group_id:
+                return base_qs.none()
+            return base_qs.filter(assignee__group_id=user.group_id, status="open")
+        if view == "home_bien":
+            return mine.filter(
+                satisfaction_ratings__score="good",
+                satisfaction_ratings__created_at__gte=cutoff_60,
+            ).distinct()
+        if view == "home_mal":
+            return mine.filter(
+                satisfaction_ratings__score="bad",
+                satisfaction_ratings__created_at__gte=cutoff_60,
+            ).distinct()
+        if view == "home_satisfaccion":
+            return mine.filter(
+                satisfaction_ratings__score__in=("good", "bad"),
+                satisfaction_ratings__created_at__gte=cutoff_60,
+            ).distinct()
+        if view == "home_solventado":
+            return mine.filter(
+                status__in=["closed", "resolved"], updated_at__gte=cutoff_60
+            )
+        # home_all: lo que requiere atención (todo lo mío sin cerrar).
+        return mine.exclude(status__in=["closed", "resolved"])
+
     if view == "mis_tickets":
         return base_qs
     if view == "telefonica_mes":
@@ -391,21 +432,11 @@ def home(request):
         updated_at__gte=cutoff_60,
     ).count()
 
-    # Annotate each ticket with its latest good/bad satisfaction score
-    rating_sub = SatisfactionRating.objects.filter(
-        ticket=OuterRef('pk'), score__in=['good', 'bad']
-    ).order_by('-created_at').values('score')[:1]
-
-    tickets_list = list(
-        tickets_qs
-        .exclude(status__in=['closed', 'resolved'])
-        .annotate(satisfaction_score=Subquery(rating_sub))
-        .select_related('requester', 'assignee')
-        .order_by('-updated_at')
-        [:100]
-    )
-
-    _attach_last_comments(tickets_list)
+    # La tabla ya no se pinta en servidor: la rellena home_tickets.js desde
+    # /tickets/filter/?view=home_* con paginación y orden, igual que /tickets/.
+    # Aquí solo hace falta el total para el encabezado, y el propio JS lo
+    # refresca con el que devuelve la API en cada carga.
+    pendientes_count = tickets_qs.exclude(status__in=['closed', 'resolved']).count()
 
     # Personal bien/mal: tickets del usuario, últimos 60 días
     user_ratings_60 = SatisfactionRating.objects.filter(
@@ -428,8 +459,7 @@ def home(request):
     context = {
         "username": user.name,
         "email": user.email,
-        "tickets": tickets_list,
-        "my_tickets": tickets_list,
+        "pendientes_count": pendientes_count,
         "current_user_id": user.id,
         "current_user_group_id": user.group_id,
         "stats": {
@@ -652,6 +682,20 @@ def filter_tickets(request):
 
     offset = (page - 1) * page_size
     page_qs = tickets.select_related('requester', 'assignee', 'assigned_group', 'brand')
+
+    # La columna "Val." solo existe en la tabla de la home. Se anota únicamente
+    # para esas vistas para no meter una subconsulta por fila en /tickets/.
+    _want_satisfaction = bool(view and view.startswith("home_"))
+    if _want_satisfaction:
+        page_qs = page_qs.annotate(
+            satisfaction_score=Subquery(
+                SatisfactionRating.objects
+                .filter(ticket=OuterRef('pk'), score__in=['good', 'bad'])
+                .order_by('-created_at')
+                .values('score')[:1]
+            )
+        )
+
     exact_total = True
     has_next = False
 
@@ -746,6 +790,7 @@ def filter_tickets(request):
             "channel": t.channel or "-",
             "type": t.type or "",
             "sla": _sla_payload(t),
+            "satisfaction": getattr(t, 'satisfaction_score', None) or "",
             "description": (t.description or "")[:200],
             "group_value": _group_value(t),
             "last_comment": {
