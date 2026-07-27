@@ -45,6 +45,7 @@
 
         <div class="tf-toolbar-grow"></div>
         <button class="tf-btn tf-btn--secondary tf-btn--sm" id="repExport"><i class="fas fa-file-csv"></i> Exportar CSV</button>
+        <button class="tf-btn tf-btn--secondary tf-btn--sm" id="repExportPdf"><i class="fas fa-file-pdf"></i> Exportar PDF</button>
     </div>
 
     <div id="repLoading" class="tf-spinner tf-spinner--overlay" style="display:none;"></div>
@@ -71,15 +72,15 @@
             <span class="tf-kpi-value" id="kpiSla">–</span><span class="tf-kpi-label">Cumplimiento SLA</span>
         </div>
         <div class="tf-kpi-card tf-kpi--danger">
-            <div class="tf-kpi-top"><span class="tf-kpi-ico"><i class="fas fa-triangle-exclamation"></i></span></div>
+            <div class="tf-kpi-top"><span class="tf-kpi-ico"><i class="fas fa-exclamation-triangle"></i></span></div>
             <span class="tf-kpi-value" id="kpiBreached">–</span><span class="tf-kpi-label">SLA incumplidos</span>
         </div>
         <div class="tf-kpi-card">
             <div class="tf-kpi-top"><span class="tf-kpi-ico"><i class="fas fa-clock"></i></span></div>
             <span class="tf-kpi-value" id="kpiResolution">–</span><span class="tf-kpi-label">T. medio resolución</span>
         </div>
-        <div class="tf-kpi-card">
-            <div class="tf-kpi-top"><span class="tf-kpi-ico"><i class="fas fa-face-smile"></i></span></div>
+        <div class="tf-kpi-card" id="kpiSatisfactionCard">
+            <div class="tf-kpi-top"><span class="tf-kpi-ico"><i class="fas fa-meh" id="kpiSatisfactionIco"></i></span></div>
             <span class="tf-kpi-value" id="kpiSatisfaction">–</span><span class="tf-kpi-label" id="kpiSatisfactionLabel">Satisfacción</span>
         </div>
     </div>
@@ -141,5 +142,6 @@
 
 {% block extra_js %}
 <script src="{% static 'tickets/vendor/chart.umd.min.js' %}"></script>
-<script src="{% static 'tickets/reporting.js' %}?v=s5.4"></script>
+<script src="{% static 'tickets/vendor/jspdf.umd.min.js' %}"></script>
+<script src="{% static 'tickets/reporting.js' %}?v=s5.5"></script>
 {% endblock %}
