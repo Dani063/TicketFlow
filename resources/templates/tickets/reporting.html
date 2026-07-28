@@ -4,7 +4,7 @@
 {% block title %}TicketFlow – Reportes{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'tickets/reporting.css' %}?v=s5.4">
+<link rel="stylesheet" href="{% static 'tickets/reporting.css' %}?v=s5.6">
 {% endblock %}
 
 {% block content %}
@@ -114,6 +114,16 @@
             <h3>Por canal</h3>
             <div class="tf-report-canvas"><canvas id="chartChannel"></canvas></div>
         </div>
+        <div class="tf-report-panel">
+            <h3>Satisfacción por agente</h3>
+            <span class="tf-report-note" id="repSatResponse">–</span>
+            <div class="tf-report-canvas"><canvas id="chartSatAgent"></canvas></div>
+        </div>
+        <div class="tf-report-panel">
+            <h3>Motivos de insatisfacción</h3>
+            <span class="tf-report-note">Sobre las valoraciones negativas del periodo.</span>
+            <div class="tf-report-canvas"><canvas id="chartSatReasons"></canvas></div>
+        </div>
         <div class="tf-report-panel tf-report-panel--wide">
             <h3>Tickets abiertos más antiguos</h3>
             <div class="tf-admin-table-area">
@@ -143,5 +153,5 @@
 {% block extra_js %}
 <script src="{% static 'tickets/vendor/chart.umd.min.js' %}"></script>
 <script src="{% static 'tickets/vendor/jspdf.umd.min.js' %}"></script>
-<script src="{% static 'tickets/reporting.js' %}?v=s5.5"></script>
+<script src="{% static 'tickets/reporting.js' %}?v=s5.6"></script>
 {% endblock %}

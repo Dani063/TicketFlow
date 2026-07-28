@@ -379,6 +379,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'app.tasks.notify_sla_at_risk',
         'schedule': 300.0,
     },
+    'offer-satisfaction-surveys': {
+        'task': 'app.tasks.offer_satisfaction_surveys',
+        'schedule': 900.0,  # Cada 15 min; el retardo real lo fija SATISFACTION_SURVEY_DELAY_HOURS
+    },
 }
 
 # === Azure AD (lectura buzones M365 + envío via Graph sendMail) ===
@@ -463,6 +467,18 @@ AWS_SES_REGION = os.getenv('AWS_SES_REGION', 'eu-west-1')
 SES_CONFIGURATION_SET = os.getenv('SES_CONFIGURATION_SET', '')  # opcional: tracking de bounces/quejas
 # Base de los enlaces {{ticket_url}} en plantillas (sin barra final)
 TICKETFLOW_PUBLIC_URL = os.getenv('TICKETFLOW_PUBLIC_URL', '')
+
+# === Encuesta de satisfacción (CSAT) ===
+# Kill switch propio, independiente de OUTBOUND_EMAIL_ENABLED: permite tener el
+# email saliente activo sin empezar a encuestar. Por defecto APAGADO.
+SATISFACTION_SURVEY_ENABLED = os.getenv('SATISFACTION_SURVEY_ENABLED', 'false').lower() in ('1', 'true', 'yes', 'on')
+# Horas desde la resolución antes de preguntar (Zendesk usaba 24): da margen a que
+# el cliente compruebe la solución y evita encuestar reaperturas inmediatas.
+SATISFACTION_SURVEY_DELAY_HOURS = int(os.getenv('SATISFACTION_SURVEY_DELAY_HOURS', '24'))
+# Validez del enlace de voto. Dentro de la ventana el cliente puede rectificar.
+SATISFACTION_SURVEY_TTL_DAYS = int(os.getenv('SATISFACTION_SURVEY_TTL_DAYS', '30'))
+# Tope de encuestas por vuelta del barrido: acota el daño de un arranque en frío.
+SATISFACTION_SURVEY_BATCH = int(os.getenv('SATISFACTION_SURVEY_BATCH', '200'))
 
 # Configuracion de la URL de inicio de sesión
 LOGIN_URL = '/login/'

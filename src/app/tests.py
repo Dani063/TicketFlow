@@ -18,6 +18,8 @@ from app.models import (
     OutboundEmailLog,
     ResponseTemplate,
     Role,
+    SatisfactionRating,
+    SatisfactionReason,
     SLAPolicy,
     Ticket,
     TicketAIAnalysis,
@@ -27,6 +29,7 @@ from app.models import (
 )
 from app.permissions import is_agent
 from app.services.email_ingestion import EmailIngestionService
+from app.services.satisfaction import SatisfactionService
 from app.services.sla import SLAService
 
 
@@ -1286,3 +1289,284 @@ class ReplyAssistTests(_BaseFixture):
             resp = self.client.post(url, data="{}", content_type="application/json")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["data"]["drafts"][0]["body"], "b")
+
+
+@override_settings(
+    OUTBOUND_EMAIL_ENABLED=True,
+    SATISFACTION_SURVEY_ENABLED=True,
+    TICKETFLOW_PUBLIC_URL="https://ticketflow.example",
+)
+class SatisfactionSurveyTests(_BaseFixture):
+    """Encuesta de satisfaccion nativa: oferta, voto y metricas.
+
+    Las plantillas 'satisfaction_survey' y el catalogo de motivos los siembra la
+    migracion 0047, asi que estan disponibles en la BBDD de test.
+    """
+
+    def _resolved_ticket(self, hours_ago=48, **overrides):
+        values = {"status": "resolved", "brand": self.brand_a}
+        values.update(overrides)
+        ticket = self.make_ticket(**values)
+        Ticket.objects.filter(id=ticket.id).update(
+            resolved_at=timezone.now() - timedelta(hours=hours_ago)
+        )
+        ticket.refresh_from_db()
+        return ticket
+
+    def _offer(self, ticket):
+        return SatisfactionService.offer(ticket)
+
+    def _survey_url(self, rating):
+        return reverse("satisfaction_survey", args=[rating.token])
+
+    # ---------------- Oferta ----------------
+
+    def test_offer_creates_offered_row_and_queues_email_with_vote_links(self):
+        ticket = self._resolved_ticket()
+        self.assertEqual(SatisfactionService.offer_pending_surveys(), 1)
+
+        rating = SatisfactionRating.objects.get(ticket=ticket)
+        self.assertEqual(rating.score, "offered")
+        self.assertEqual(rating.source, SatisfactionRating.SOURCE_NATIVE)
+        self.assertTrue(rating.token)
+        self.assertIsNone(rating.zendesk_id)
+        self.assertIsNotNone(rating.expires_at)
+        self.assertIsNone(rating.responded_at)
+
+        log = OutboundEmailLog.objects.get(ticket=ticket, template_key="satisfaction_survey")
+        self.assertEqual(log.status, OutboundEmailLog.STATUS_QUEUED)
+        # El token [Ticket #N] es lo que enlaza de vuelta una respuesta por correo.
+        self.assertIn("[Ticket #%d]" % ticket.id, log.subject)
+        self.assertIn("/satisfaction/%s/?score=good" % rating.token, log.payload["body_html"])
+        self.assertIn("/satisfaction/%s/?score=bad" % rating.token, log.payload["body_html"])
+
+    def test_offer_is_idempotent_per_resolution_cycle(self):
+        ticket = self._resolved_ticket()
+        SatisfactionService.offer_pending_surveys()
+        self.assertEqual(SatisfactionService.offer_pending_surveys(), 0)
+        self.assertEqual(SatisfactionRating.objects.filter(ticket=ticket).count(), 1)
+
+    @override_settings(SATISFACTION_SURVEY_ENABLED=False)
+    def test_kill_switch_blocks_every_offer(self):
+        self._resolved_ticket()
+        self.assertEqual(SatisfactionService.offer_pending_surveys(), 0)
+        self.assertFalse(SatisfactionRating.objects.exists())
+
+    def test_recent_resolutions_and_legacy_tickets_are_skipped(self):
+        self._resolved_ticket(hours_ago=1)                                 # aun no toca
+        legacy = self.make_ticket(status="resolved", brand=self.brand_a)   # resolved_at NULL
+        self.assertIsNone(legacy.resolved_at)
+        self.assertEqual(SatisfactionService.offer_pending_surveys(), 0)
+        self.assertFalse(SatisfactionRating.objects.exists())
+
+    def test_merged_and_deleted_tickets_are_never_surveyed(self):
+        target = self.make_ticket()
+        self._resolved_ticket(merged_into=target)
+        self._resolved_ticket(is_deleted=True)
+        self.assertEqual(SatisfactionService.offer_pending_surveys(), 0)
+        self.assertFalse(SatisfactionRating.objects.exists())
+
+    def test_no_offer_row_when_the_email_would_be_suppressed(self):
+        # Buzon propio: el envio se suprimiria, y una oferta que nadie puede
+        # responder falsearia la tasa de respuesta.
+        own = User.objects.create_user("helpdesk@comuny.example", "Propio", "secret")
+        self._resolved_ticket(requester=own)
+        self.assertEqual(SatisfactionService.offer_pending_surveys(), 0)
+        self.assertFalse(SatisfactionRating.objects.exists())
+
+    @override_settings(TICKETFLOW_PUBLIC_URL="")
+    def test_no_offer_without_a_public_url_for_the_vote_links(self):
+        self._resolved_ticket()
+        self.assertEqual(SatisfactionService.offer_pending_surveys(), 0)
+        self.assertFalse(SatisfactionRating.objects.exists())
+
+    def test_reopened_and_resolved_again_is_surveyed_again(self):
+        ticket = self._resolved_ticket(hours_ago=96)
+        SatisfactionService.offer_pending_surveys()
+        first = SatisfactionRating.objects.get(ticket=ticket)
+        SatisfactionService.record_vote(first, "good")
+        # La oferta se emitio hace 72 h (24 h despues de aquella resolucion).
+        SatisfactionRating.objects.filter(id=first.id).update(
+            created_at=timezone.now() - timedelta(hours=72),
+            offered_at=timezone.now() - timedelta(hours=72),
+        )
+
+        # Reapertura y nueva resolucion posterior: ciclo nuevo, encuesta nueva.
+        Ticket.objects.filter(id=ticket.id).update(
+            status="resolved", resolved_at=timezone.now() - timedelta(hours=48)
+        )
+        self.assertEqual(SatisfactionService.offer_pending_surveys(), 1)
+        self.assertEqual(SatisfactionRating.objects.filter(ticket=ticket).count(), 2)
+
+    def test_batch_limit_is_respected(self):
+        for _ in range(3):
+            self._resolved_ticket()
+        with override_settings(SATISFACTION_SURVEY_BATCH=2):
+            self.assertEqual(SatisfactionService.offer_pending_surveys(), 2)
+
+    # ---------------- resolved_at ----------------
+
+    def test_resolved_at_is_stamped_on_transition_and_refreshed_on_reresolution(self):
+        from app.services.tickets import TicketService
+
+        ticket = self.make_ticket(status="open")
+        self.assertIsNone(ticket.resolved_at)
+
+        # update_ticket reescribe TODOS los campos del payload (es el formulario
+        # completo), asi que hay que mandar el ticket entero, no solo el estado.
+        def _set_status(status):
+            TicketService.update_ticket(self.agent, ticket.id, {
+                "subject": ticket.subject,
+                "description": ticket.description,
+                "status": status,
+                "priority": ticket.priority,
+                "assignee_id": ticket.assignee_id,
+            })
+
+        _set_status("resolved")
+        ticket.refresh_from_db()
+        first_stamp = ticket.resolved_at
+        self.assertIsNotNone(first_stamp)
+
+        _set_status("open")
+        _set_status("resolved")
+        ticket.refresh_from_db()
+        self.assertGreater(ticket.resolved_at, first_stamp)
+
+    def test_direct_close_counts_as_resolution_for_the_survey_clock(self):
+        from app.services.comments import CommentService
+
+        ticket = self.make_ticket(status="open")
+        CommentService.add_comment(ticket, self.agent, "cerrado", new_status="closed")
+        ticket.refresh_from_db()
+        self.assertIsNotNone(ticket.resolved_at)
+
+    # ---------------- Pagina publica de voto ----------------
+
+    def test_public_page_is_reachable_without_login_and_records_a_bad_vote(self):
+        rating = self._offer(self._resolved_ticket())
+        reason = SatisfactionReason.objects.filter(language="es", code="not_resolved").first()
+
+        anonymous = Client()
+        page = anonymous.get(self._survey_url(rating) + "?score=bad")
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, reason.label)
+
+        voted = anonymous.post(self._survey_url(rating), {
+            "score": "bad", "reason_id": reason.id, "comment": "  Sigo esperando  ",
+        })
+        self.assertEqual(voted.status_code, 200)
+        rating.refresh_from_db()
+        self.assertEqual(rating.score, "bad")
+        self.assertEqual(rating.reason_choice_id, reason.id)
+        self.assertEqual(rating.comment, "Sigo esperando")
+        self.assertIsNotNone(rating.responded_at)
+
+    def test_vote_can_be_rectified_within_the_window_and_clears_the_reason(self):
+        rating = self._offer(self._resolved_ticket())
+        reason = SatisfactionReason.objects.filter(language="es").first()
+        SatisfactionService.record_vote(rating, "bad", reason=reason)
+
+        Client().post(self._survey_url(rating), {"score": "good"})
+        rating.refresh_from_db()
+        self.assertEqual(rating.score, "good")
+        self.assertIsNone(rating.reason_choice_id)
+
+    def test_vote_is_attributed_to_the_assignee_at_vote_time(self):
+        ticket = self._resolved_ticket()
+        rating = self._offer(ticket)
+        self.assertEqual(rating.assignee_id, self.agent.id)
+
+        other = User.objects.create_user("agent2@example.com", "Agent 2", "secret")
+        Ticket.objects.filter(id=ticket.id).update(assignee=other)
+        Client().post(self._survey_url(rating), {"score": "good"})
+        rating.refresh_from_db()
+        self.assertEqual(rating.assignee_id, other.id)
+
+    def test_expired_link_shows_the_expiry_notice_and_rejects_the_vote(self):
+        rating = self._offer(self._resolved_ticket())
+        SatisfactionRating.objects.filter(id=rating.id).update(
+            expires_at=timezone.now() - timedelta(days=1)
+        )
+        anonymous = Client()
+        self.assertContains(anonymous.get(self._survey_url(rating)), "caducado")
+
+        anonymous.post(self._survey_url(rating), {"score": "good"})
+        rating.refresh_from_db()
+        self.assertEqual(rating.score, "offered")
+
+    def test_invalid_score_does_not_touch_the_rating(self):
+        rating = self._offer(self._resolved_ticket())
+        page = Client().post(self._survey_url(rating), {"score": "regular"})
+        self.assertEqual(page.status_code, 200)
+        rating.refresh_from_db()
+        self.assertEqual(rating.score, "offered")
+
+    def test_unknown_token_returns_404(self):
+        self.assertEqual(Client().get("/satisfaction/inventado/").status_code, 404)
+
+    # ---------------- Metricas ----------------
+
+    def _reporting(self):
+        # /reporting/data/ cachea el payload 60 s con una clave que solo lleva marca
+        # y fechas, asi que sin limpiar se arrastraria el resultado de otro test.
+        from django.core.cache import cache
+
+        cache.clear()
+        today = timezone.localdate()
+        return self.client.get(
+            "/reporting/data/?from=%s&to=%s" % (today - timedelta(days=1), today)
+        ).json()
+
+    def test_offers_without_answer_do_not_move_the_csat(self):
+        self.client.force_login(self.admin)
+        SatisfactionService.record_vote(self._offer(self._resolved_ticket()), "good")
+        self._offer(self._resolved_ticket())  # se queda en 'offered'
+
+        kpis = self._reporting()["kpis"]
+        self.assertEqual(kpis["satisfaction_good"], 1)
+        self.assertEqual(kpis["satisfaction_bad"], 0)
+        self.assertEqual(kpis["satisfaction_pct"], 100)
+        # La oferta sin responder solo asoma en la tasa de respuesta.
+        self.assertEqual(kpis["satisfaction_offered"], 2)
+        self.assertEqual(kpis["satisfaction_answered"], 1)
+        self.assertEqual(kpis["satisfaction_response_rate_pct"], 50)
+
+    def test_agent_csat_hides_samples_below_the_minimum(self):
+        self.client.force_login(self.admin)
+        for _ in range(2):
+            SatisfactionService.record_vote(self._offer(self._resolved_ticket()), "good")
+        self.assertEqual(self._reporting()["satisfaction"]["by_agent"], [])
+
+        SatisfactionService.record_vote(self._offer(self._resolved_ticket()), "bad")
+        rows = self._reporting()["satisfaction"]["by_agent"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["total"], 3)
+        self.assertEqual(rows[0]["pct"], 67)
+
+    def test_reason_ranking_merges_catalog_and_zendesk_free_text(self):
+        self.client.force_login(self.admin)
+        reason = SatisfactionReason.objects.filter(language="es", code="slow_resolution").first()
+        SatisfactionService.record_vote(self._offer(self._resolved_ticket()), "bad", reason=reason)
+        # Fila al estilo de lo importado de Zendesk: motivo en texto libre.
+        SatisfactionRating.objects.create(
+            ticket=self._resolved_ticket(), zendesk_id=999001, score="bad",
+            reason="Motivo heredado", source=SatisfactionRating.SOURCE_ZENDESK,
+            created_at=timezone.now(),
+        )
+
+        labels = {r["label"]: r["n"] for r in self._reporting()["satisfaction"]["reasons"]}
+        self.assertEqual(labels.get(reason.label), 1)
+        self.assertEqual(labels.get("Motivo heredado"), 1)
+
+    def test_native_and_zendesk_ratings_coexist_with_nullable_zendesk_id(self):
+        # zendesk_id es unique y nullable: varias filas nativas a NULL tienen que
+        # convivir con las importadas sin romper el indice unico.
+        SatisfactionRating.objects.create(
+            ticket=self.make_ticket(), zendesk_id=555001, score="good",
+            source=SatisfactionRating.SOURCE_ZENDESK, created_at=timezone.now(),
+        )
+        self._offer(self._resolved_ticket())
+        self._offer(self._resolved_ticket())
+        self.assertEqual(SatisfactionRating.objects.filter(zendesk_id__isnull=True).count(), 2)
+        self.assertEqual(SatisfactionRating.objects.count(), 3)

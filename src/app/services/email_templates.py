@@ -73,3 +73,23 @@ class ResponseTemplateService:
             "ticket_url": f"{base_url}/tickets/create/?id={ticket.id}" if base_url else "",
             "created_at": ticket.created_at.strftime("%d/%m/%Y %H:%M") if ticket.created_at else "",
         }
+
+    @staticmethod
+    def context_for_survey(ticket, rating):
+        """Contexto del ticket más los enlaces de voto de la encuesta.
+
+        survey_url_good/bad llevan ?score= para que el cliente vote de un clic y
+        solo confirme, como hacía Zendesk. survey_url es la variante neutra.
+        Sigue siendo un dict de escalares (ver render()).
+        """
+        from django.conf import settings as dj_settings
+
+        base_url = (getattr(dj_settings, "TICKETFLOW_PUBLIC_URL", "") or "").rstrip("/")
+        survey_url = f"{base_url}/satisfaction/{rating.token}/" if base_url and rating.token else ""
+        context = ResponseTemplateService.context_for_ticket(ticket)
+        context.update({
+            "survey_url": survey_url,
+            "survey_url_good": f"{survey_url}?score=good" if survey_url else "",
+            "survey_url_bad": f"{survey_url}?score=bad" if survey_url else "",
+        })
+        return context

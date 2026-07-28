@@ -228,6 +228,14 @@
     color: var(--color-text-subtle, inherit);
 }
 .tf-report-panel--wide { grid-column: 1 / -1; }
+/* Nota bajo el título del panel (contexto del dato, no un dato en sí). El h3 ya
+   trae su propio margen inferior, así que aquí se sube para pegarla al título. */
+.tf-report-note {
+    display: block;
+    margin: calc(-1 * var(--space-1, 4px)) 0 var(--space-2, 8px);
+    font-size: 0.78rem;
+    color: var(--color-text-muted, #64748b);
+}
 .tf-report-canvas {
     position: relative;
     height: 260px;

@@ -176,6 +176,7 @@ class TicketService:
             email_message_id=payload.get("email_message_id"),
             email_conversation_id=payload.get("email_conversation_id"),
             closed_at=now if payload.get("status") == "closed" else None,
+            resolved_at=now if payload.get("status") == "resolved" else None,
         )
         TicketService._set_m2m(ticket, payload.get("ccs_ids") or [], payload.get("tags") or [])
         SLAService.apply_policy(ticket)
@@ -261,6 +262,14 @@ class TicketService:
         ticket.assigned_group_id = payload.get("assigned_group_id")
         if ticket.status == "closed" and not ticket.closed_at:
             ticket.closed_at = timezone.now()
+        # Reloj del que cuelga la encuesta de satisfacción. Se refresca en CADA
+        # entrada en 'resolved' (una reapertura y nueva resolución abre un ciclo de
+        # encuesta nuevo); un cierre directo sin pasar por 'resolved' también cuenta
+        # como resolución, o esos tickets no se encuestarían nunca.
+        if old_values["status"] != "resolved" and ticket.status == "resolved":
+            ticket.resolved_at = timezone.now()
+        elif ticket.status == "closed" and not ticket.resolved_at:
+            ticket.resolved_at = ticket.closed_at or timezone.now()
         ticket.save()
         TicketService._set_m2m(ticket, payload.get("ccs_ids") or [], payload.get("tags") or [])
 

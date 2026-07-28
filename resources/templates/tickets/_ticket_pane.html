@@ -32,9 +32,12 @@
     {% endif %}
     {% endif %}
     {% if ticket_satisfaction %}
-    <span class="sat-badge sat-{{ ticket_satisfaction.score }}" {% if ticket_satisfaction.comment %}title="{{ ticket_satisfaction.comment|escapejs }}"{% endif %}>
+    {# El motivo solo existe en votos negativos: del catálogo si es nativo, texto libre si viene de Zendesk. #}
+    {% firstof ticket_satisfaction.reason_choice.label ticket_satisfaction.reason '' as sat_reason %}
+    <span class="sat-badge sat-{{ ticket_satisfaction.score }}" {% if sat_reason or ticket_satisfaction.comment %}title="{% if sat_reason %}{{ sat_reason }}{% if ticket_satisfaction.comment %} — {% endif %}{% endif %}{{ ticket_satisfaction.comment|default_if_none:'' }}"{% endif %}>
         <i class="fas {% if ticket_satisfaction.score == 'good' %}fa-thumbs-up{% else %}fa-thumbs-down{% endif %}"></i>
         {% if ticket_satisfaction.score == 'good' %}Buena valoración{% else %}Mala valoración{% endif %}
+        {% if sat_reason %}<span class="sat-reason">· {{ sat_reason }}</span>{% endif %}
     </span>
     {% endif %}
 </div>

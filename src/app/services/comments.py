@@ -59,8 +59,14 @@ class CommentService:
             prev = ticket.status
             ticket.status = new_status
             ticket.closed_at = now if new_status == "closed" else ticket.closed_at
+            # Ver TicketService.update_ticket: resolved_at es el reloj de la encuesta
+            # de satisfacción y se refresca en cada entrada en 'resolved'.
+            if new_status == "resolved":
+                ticket.resolved_at = now
+            elif new_status == "closed" and not ticket.resolved_at:
+                ticket.resolved_at = now
             ticket.updated_at = now
-            ticket.save(update_fields=["status", "updated_at", "closed_at"])
+            ticket.save(update_fields=["status", "updated_at", "closed_at", "resolved_at"])
             TicketEvent.objects.create(
                 ticket=ticket,
                 actor=actor,

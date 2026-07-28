@@ -4,7 +4,7 @@
 {% block title %}Administración – TicketFlow{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'tickets/admin_panel.css' %}?v=s5.1">
+<link rel="stylesheet" href="{% static 'tickets/admin_panel.css' %}?v=s5.6">
 {% endblock %}
 
 {% block content %}
@@ -18,6 +18,7 @@
         <button class="tf-tab" data-tab="roles">Roles</button>
         <button class="tf-tab" data-tab="groups">Grupos</button>
         <button class="tf-tab" data-tab="templates">Plantillas</button>
+        <button class="tf-tab" data-tab="reasons">Motivos CSAT</button>
     </div>
 
     <!-- ======== USERS ======== -->
@@ -142,6 +143,76 @@
                 </thead>
                 <tbody id="templatesTbody"><tr><td colspan="7"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message">Cargando…</span></div></td></tr></tbody>
             </table>
+        </div>
+    </div>
+
+    <!-- ======== MOTIVOS DE VOTO NEGATIVO (CSAT) ======== -->
+    <div id="tab-reasons" class="tf-admin-panel">
+        <div class="tf-toolbar">
+            <span class="tf-muted">Motivos que se ofrecen al cliente cuando valora negativamente.</span>
+            <div class="tf-toolbar-grow"></div>
+            <button class="tf-btn tf-btn--primary" id="btnNewReason"><i class="fas fa-plus"></i> Nuevo motivo</button>
+        </div>
+        <div class="tf-admin-table-area">
+            <table class="tf-admin-table">
+                <thead>
+                    <tr>
+                        <th class="col-id">ID</th>
+                        <th>Código</th>
+                        <th>Etiqueta</th>
+                        <th style="width:80px">Idioma</th>
+                        <th style="width:80px">Orden</th>
+                        <th class="col-status">Estado</th>
+                        <th class="col-actions">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="reasonsTbody"><tr><td colspan="7"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message">Cargando…</span></div></td></tr></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ======== REASON MODAL ======== -->
+<div class="dialog-backdrop" id="reasonModal">
+    <div class="dialog dialog--form" role="dialog" aria-modal="true">
+        <div class="dialog__header">
+            <h3 class="dialog__title" id="reasonModalTitle">Nuevo motivo</h3>
+            <button type="button" class="dialog__close" data-close="reasonModal" aria-label="Cerrar">×</button>
+        </div>
+        <div class="dialog__body">
+            <div id="reasonModalError" class="tf-admin-alert tf-admin-alert--error" style="display:none;"></div>
+            <input type="hidden" id="reasonModalId">
+            <div class="tf-field">
+                <label>Etiqueta</label>
+                <input type="text" class="tf-input" id="reasonModalLabel" placeholder="Lo que ve el cliente">
+            </div>
+            <div class="tf-field">
+                <label>Código (opcional)</label>
+                <input type="text" class="tf-input" id="reasonModalCode" placeholder="Se deriva de la etiqueta si lo dejas vacío">
+                <small class="tf-hint">Comparte código entre idiomas para que sea el mismo motivo traducido.</small>
+            </div>
+            <div class="tf-field">
+                <label>Idioma</label>
+                <select class="tf-select" id="reasonModalLanguage">
+                    <option value="es">Español</option>
+                    <option value="en">English</option>
+                </select>
+            </div>
+            <div class="tf-field">
+                <label>Orden</label>
+                <input type="number" class="tf-input" id="reasonModalPosition" min="0" step="10" value="0">
+            </div>
+            <div class="tf-field">
+                <label>Estado</label>
+                <select class="tf-select" id="reasonModalActive">
+                    <option value="true">Activo</option>
+                    <option value="false">Inactivo</option>
+                </select>
+            </div>
+        </div>
+        <div class="dialog__footer">
+            <button class="tf-btn tf-btn--secondary" data-close="reasonModal">Cancelar</button>
+            <button class="tf-btn tf-btn--primary" id="btnSaveReason">Guardar</button>
         </div>
     </div>
 </div>
@@ -292,5 +363,5 @@
 <script>
 window.__adminPanelData = { currentUserId: {{ request.user.id }} };
 </script>
-<script src="{% static 'tickets/admin_panel.js' %}?v=s4.8"></script>
+<script src="{% static 'tickets/admin_panel.js' %}?v=s5.6"></script>
 {% endblock %}

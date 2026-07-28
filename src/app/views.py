@@ -10,7 +10,7 @@ from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import Brand, Organization, Ticket, Comment, User, TicketTag, Attachment, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating, AssignmentRule, AssignmentRuleMember, SLAPolicy, AutomationRule, ResponseTemplate, OutboundEmailLog
+from .models import Brand, Organization, Ticket, Comment, User, TicketTag, Attachment, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating, SatisfactionReason, AssignmentRule, AssignmentRuleMember, SLAPolicy, AutomationRule, ResponseTemplate, OutboundEmailLog
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
@@ -39,6 +39,7 @@ from .services.assignment import AssignmentService
 from .services.comments import CommentService
 from .services.merge import MergeService
 from .services.notifications import NotificationService
+from .services.satisfaction import SatisfactionService
 from .services.sla import SLAService
 from .services.tickets import TicketService
 
@@ -68,6 +69,10 @@ def _cached_all_users():
 _DEFAULT_PAGE_SIZE = 50
 _ALLOWED_PAGE_SIZES = {10, 20, 50, 100, 150}
 _TICKET_FILTER_COUNTS_TTL = 15
+
+# Valoraciones mínimas para publicar el CSAT de un agente en /reporting/: con dos
+# votos el porcentaje solo puede ser 0, 50 o 100 y no informa de nada.
+_SATISFACTION_MIN_SAMPLE = 3
 
 _TICKET_SORT_FIELDS = {
     'id':         'id',
@@ -1077,6 +1082,52 @@ def reporting_data(request):
     bad = ratings.filter(score='bad').count()
     satisfaction = round(good / (good + bad) * 100) if (good + bad) else None
 
+    # Tasa de respuesta: solo medible en las valoraciones nativas, que son las que
+    # registran la oferta (score='offered'). Lo importado de Zendesk no la trae.
+    offered_qs = SatisfactionRating.objects.filter(
+        offered_at__range=(start_dt, end_dt),
+        source=SatisfactionRating.SOURCE_NATIVE,
+        ticket__is_deleted=False,
+    )
+    if brand_id:
+        offered_qs = offered_qs.filter(ticket__brand_id=brand_id)
+    offered = offered_qs.count()
+    answered = offered_qs.filter(score__in=('good', 'bad')).count()
+    response_rate = round(answered / offered * 100) if offered else None
+
+    # CSAT por agente. Con muestras minúsculas el porcentaje es ruido puro, así que
+    # por debajo del mínimo no se publica.
+    agent_rows = []
+    for row in ratings.values('assignee__name').annotate(
+        n_good=Count(Case(When(score='good', then=1), output_field=IntegerField())),
+        n_bad=Count(Case(When(score='bad', then=1), output_field=IntegerField())),
+    ):
+        total = row['n_good'] + row['n_bad']
+        if total < _SATISFACTION_MIN_SAMPLE:
+            continue
+        agent_rows.append({
+            'agent': row['assignee__name'] or '— Sin asignar —',
+            'good': row['n_good'],
+            'bad': row['n_bad'],
+            'total': total,
+            'pct': round(row['n_good'] / total * 100),
+        })
+    agent_rows.sort(key=lambda r: (-r['pct'], -r['total']))
+    agent_rows = agent_rows[:15]
+
+    # Motivos de los votos negativos. Une el catálogo nativo (reason_choice) con el
+    # texto libre que trae el histórico de Zendesk (reason).
+    reason_counts = {}
+    for row in (ratings.filter(score='bad')
+                .values('reason_choice__label', 'reason').annotate(n=Count('id'))):
+        label = (row['reason_choice__label'] or (row['reason'] or '').strip()
+                 or '— Sin motivo indicado —')
+        reason_counts[label] = reason_counts.get(label, 0) + row['n']
+    reason_rows = sorted(
+        ({'label': label, 'n': n} for label, n in reason_counts.items()),
+        key=lambda r: -r['n'],
+    )[:10]
+
     # Series diarias: creados y cerrados
     created_series = list(
         created_qs.annotate(day=TruncDate('created_at')).values('day')
@@ -1165,6 +1216,14 @@ def reporting_data(request):
             'satisfaction_pct': satisfaction,
             'satisfaction_good': good,
             'satisfaction_bad': bad,
+            'satisfaction_offered': offered,
+            'satisfaction_answered': answered,
+            'satisfaction_response_rate_pct': response_rate,
+        },
+        'satisfaction': {
+            'by_agent': agent_rows,
+            'reasons': reason_rows,
+            'min_sample': _SATISFACTION_MIN_SAMPLE,
         },
         'series': {
             'created': [{'day': str(r['day']), 'n': r['n']} for r in created_series],
@@ -1201,12 +1260,20 @@ def reporting_export_csv(request):
     )
     if brand_id:
         qs = qs.filter(brand_id=brand_id)
-    rating_sub = SatisfactionRating.objects.filter(
+    _last_rating = SatisfactionRating.objects.filter(
         ticket=OuterRef('pk'), score__in=['good', 'bad']
-    ).order_by('-created_at').values('score')[:1]
+    ).order_by('-created_at')
+    rating_sub = _last_rating.values('score')[:1]
+    # Motivo del voto: del catálogo si es nativo, del texto libre si viene de Zendesk.
+    reason_sub = _last_rating.values('reason_choice__label')[:1]
+    reason_text_sub = _last_rating.values('reason')[:1]
     qs = (
         qs.select_related('brand', 'requester', 'assignee')
-        .annotate(satisfaction=Subquery(rating_sub))
+        .annotate(
+            satisfaction=Subquery(rating_sub),
+            satisfaction_reason=Subquery(reason_sub),
+            satisfaction_reason_text=Subquery(reason_text_sub),
+        )
         .order_by('id')
     )
 
@@ -1222,7 +1289,7 @@ def reporting_export_csv(request):
         yield writer.writerow([
             'id', 'asunto', 'marca', 'estado', 'prioridad', 'tipo', 'canal', 'servicio',
             'solicitante', 'agente', 'creado', 'cerrado', 'primera_respuesta_ok',
-            'sla_incumplido', 'satisfaccion',
+            'sla_incumplido', 'satisfaccion', 'motivo_satisfaccion',
         ])
         for t in qs.iterator(chunk_size=2000):
             yield writer.writerow([
@@ -1241,6 +1308,7 @@ def reporting_export_csv(request):
                 {True: 'si', False: 'no'}.get(t.first_response_met, ''),
                 'si' if t.sla_breached_at else 'no',
                 t.satisfaction or '',
+                t.satisfaction_reason or (t.satisfaction_reason_text or ''),
             ])
 
     brand_part = f'brand{brand_id}' if brand_id else 'todas'
@@ -2719,6 +2787,73 @@ def admin_response_templates_api(request):
     return json_error('method_not_allowed', 'Metodo no permitido', status=405)
 
 
+def _serialize_satisfaction_reason(reason):
+    return {
+        'id': reason.id,
+        'code': reason.code,
+        'label': reason.label,
+        'language': reason.language,
+        'position': reason.position,
+        'active': reason.active,
+    }
+
+
+@_admin_required
+def admin_satisfaction_reasons_api(request):
+    """Catalogo de motivos de voto negativo de la encuesta de satisfaccion."""
+    if request.method == 'GET':
+        reasons = SatisfactionReason.objects.order_by('language', 'position', 'label')
+        return JsonResponse({'ok': True, 'reasons': [_serialize_satisfaction_reason(r) for r in reasons]})
+
+    if request.method == 'DELETE':
+        # Desactivar, no borrar: las valoraciones ya emitidas apuntan al motivo y
+        # borrarlo dejaria el historico sin explicacion (FK con SET_NULL).
+        reason_id = _as_int_or_none(request.GET.get('id'))
+        reason = SatisfactionReason.objects.filter(id=reason_id).first()
+        if not reason:
+            return json_error('reason_not_found', 'Motivo no encontrado', status=404)
+        reason.active = False
+        reason.save(update_fields=['active'])
+        return JsonResponse({'ok': True, 'deactivated': True})
+
+    try:
+        data = parse_json_body(request)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+
+    if request.method in ('POST', 'PUT'):
+        reason = (SatisfactionReason.objects.filter(id=data.get('id')).first()
+                  if request.method == 'PUT' else SatisfactionReason())
+        if request.method == 'PUT' and not reason:
+            return json_error('reason_not_found', 'Motivo no encontrado', status=404)
+
+        label = (data.get('label') or '').strip()
+        if not label:
+            return json_error('label_required', 'label requerida', status=400)
+        language = (data.get('language') or 'es').strip().lower()
+        if language not in ('es', 'en'):
+            return json_error('invalid_language', "language debe ser 'es' o 'en'", status=400)
+        # El code identifica el motivo entre idiomas; si no lo dan, se deriva de la etiqueta.
+        code = slugify((data.get('code') or label).strip())[:64]
+        if not code:
+            return json_error('code_required', 'code requerido', status=400)
+        duplicate = SatisfactionReason.objects.filter(
+            code=code, language=language
+        ).exclude(id=reason.id or 0).exists()
+        if duplicate:
+            return json_error('duplicate_reason', 'Ya existe un motivo con ese code/idioma', status=400)
+
+        reason.code = code
+        reason.label = label[:255]
+        reason.language = language
+        reason.position = max(_as_int_or_none(data.get('position')) or 0, 0)
+        reason.active = bool(data.get('active', True))
+        reason.save()
+        return JsonResponse({'ok': True, 'reason': _serialize_satisfaction_reason(reason)})
+
+    return json_error('method_not_allowed', 'Metodo no permitido', status=405)
+
+
 def _serialize_automation_rule(rule):
     return {
         'id': rule.id,
@@ -2766,3 +2901,65 @@ def admin_automation_rules_api(request):
         return JsonResponse({'ok': True, 'deactivated': True})
 
     return json_error('method_not_allowed', 'Metodo no permitido', status=405)
+
+
+# ---------------------------------------------------------------------------
+# Encuesta de satisfaccion (publica, sin autenticacion)
+# ---------------------------------------------------------------------------
+
+@ensure_csrf_cookie
+def satisfaction_survey(request, token):
+    """Pagina publica de voto de la encuesta de satisfaccion.
+
+    SIN @login_required a proposito: el destinatario es un cliente final que no
+    tiene cuenta. La credencial es el token de 32 bytes del enlace. No hace falta
+    csrf_exempt: el formulario incluye {% csrf_token %} y la cookie se emite en el
+    GET, que funciona igual para un anonimo.
+    """
+    from app.services.email_templates import ResponseTemplateService
+
+    rating = SatisfactionService.rating_for_token(token)
+    ticket = rating.ticket if rating and rating.ticket_id else None
+
+    def _render(state, error=None, score=None):
+        language = ResponseTemplateService.pick_language(ticket) if ticket else 'es'
+        return render(request, 'tickets/satisfaction_survey.html', {
+            'state': state,
+            'error': error,
+            'rating': rating,
+            'ticket': ticket,
+            # Sin nombre de marca no se pone nada: el cliente final no conoce
+            # «TicketFlow», que es el nombre interno de la herramienta.
+            'brand_name': ticket.brand.name if ticket and ticket.brand_id and ticket.brand else '',
+            'reasons': SatisfactionService.reasons_for(language) if state == 'form' else [],
+            'selected_score': score,
+        }, status=404 if state == 'invalid' else 200)
+
+    # Token desconocido, o valoracion cuyo ticket se borro (ticket es SET_NULL).
+    if rating is None or ticket is None or ticket.is_deleted:
+        return _render('invalid')
+
+    if rating.is_expired:
+        # Si ya habia votado, darle las gracias es mejor que un error seco.
+        return _render('done' if rating.is_answered else 'expired')
+
+    if request.method == 'POST':
+        score = (request.POST.get('score') or '').strip().lower()
+        if score not in ('good', 'bad'):
+            return _render('form', error='Elige una de las dos opciones para continuar.')
+        reason = None
+        if score == 'bad':
+            reason_id = _as_int_or_none(request.POST.get('reason_id'))
+            if reason_id:
+                reason = SatisfactionReason.objects.filter(id=reason_id, active=True).first()
+        SatisfactionService.record_vote(
+            rating, score, comment=request.POST.get('comment'), reason=reason,
+        )
+        return _render('done')
+
+    # Un clic en el boton del email trae ?score=, que deja la opcion preseleccionada
+    # y reduce el voto a confirmar. Si ya voto, se preselecciona lo que voto.
+    requested = (request.GET.get('score') or '').strip().lower()
+    if requested not in ('good', 'bad'):
+        requested = rating.score if rating.is_answered else None
+    return _render('form', score=requested)

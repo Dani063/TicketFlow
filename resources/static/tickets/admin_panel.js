@@ -53,6 +53,7 @@
             if (btn.dataset.tab === 'roles')  loadRoles();
             if (btn.dataset.tab === 'groups') loadGroups();
             if (btn.dataset.tab === 'templates') loadTemplates();
+            if (btn.dataset.tab === 'reasons') loadReasons();
         });
     });
 
@@ -667,6 +668,108 @@
             const json = await res.json();
             if (!json.ok) { window.toast.error(json.error || 'Error'); return; }
             window.toast.success('Plantilla desactivada'); loadTemplates();
+        } catch(e) { window.toast.error('Error de red'); }
+    }
+
+    /* ================================================================
+       MOTIVOS DE VOTO NEGATIVO (CSAT)
+       ================================================================ */
+    const _reasonMap = new Map();
+
+    async function loadReasons() {
+        const tbody = document.getElementById('reasonsTbody');
+        tbody.innerHTML = emptyRow(7, 'Cargando…');
+        try {
+            const res  = await fetch('/api/admin/satisfaction-reasons/');
+            const json = await res.json();
+            _reasonMap.clear();
+            if (!json.reasons || !json.reasons.length) {
+                tbody.innerHTML = emptyRow(7, 'Sin motivos');
+                return;
+            }
+            const frag = document.createDocumentFragment();
+            json.reasons.forEach(r => {
+                _reasonMap.set(r.id, r);
+                const tr = document.createElement('tr');
+                tr.innerHTML =
+                    `<td class="col-id">${r.id}</td>
+                    <td><code>${esc(r.code)}</code></td>
+                    <td>${esc(r.label)}</td>
+                    <td>${esc((r.language || '').toUpperCase())}</td>
+                    <td>${r.position}</td>
+                    <td class="col-status">
+                        <span class="tf-pill ${r.active?'tf-pill--success':'tf-pill--danger'}">${r.active?'Activo':'Inactivo'}</span>
+                    </td>
+                    <td class="col-actions"><div class="tf-admin-table-actions">
+                        <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${r.id}" title="Editar"><i class="fas fa-pen"></i></button>
+                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${r.id}" ${r.active?'':'disabled'} title="Desactivar"><i class="fas fa-ban"></i></button>
+                    </div></td>`;
+                frag.appendChild(tr);
+            });
+            tbody.innerHTML = '';
+            tbody.appendChild(frag);
+        } catch(e) {
+            tbody.innerHTML = `<tr><td colspan="7"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message" style="color: var(--color-danger);">Error al cargar</span></div></td></tr>`;
+        }
+    }
+
+    document.getElementById('reasonsTbody').addEventListener('click', e => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn || btn.disabled) return;
+        const id = parseInt(btn.dataset.id, 10);
+        if (btn.dataset.action === 'edit') openReasonModal(_reasonMap.get(id));
+        if (btn.dataset.action === 'del')  deactivateReason(id);
+    });
+
+    document.getElementById('btnNewReason').addEventListener('click', () => openReasonModal(null));
+
+    function openReasonModal(r) {
+        hideErr('reasonModalError');
+        document.getElementById('reasonModalId').value       = r ? r.id : '';
+        document.getElementById('reasonModalTitle').textContent = r ? 'Editar motivo' : 'Nuevo motivo';
+        document.getElementById('reasonModalLabel').value     = r ? r.label : '';
+        document.getElementById('reasonModalCode').value      = r ? r.code : '';
+        document.getElementById('reasonModalLanguage').value  = r ? r.language : 'es';
+        document.getElementById('reasonModalPosition').value  = r ? r.position : 0;
+        document.getElementById('reasonModalActive').value    = r ? String(r.active) : 'true';
+        openModal('reasonModal');
+    }
+
+    document.getElementById('btnSaveReason').addEventListener('click', async () => {
+        hideErr('reasonModalError');
+        const id = document.getElementById('reasonModalId').value;
+        const payload = {
+            label:    document.getElementById('reasonModalLabel').value.trim(),
+            code:     document.getElementById('reasonModalCode').value.trim(),
+            language: document.getElementById('reasonModalLanguage').value,
+            position: parseInt(document.getElementById('reasonModalPosition').value, 10) || 0,
+            active:   document.getElementById('reasonModalActive').value === 'true',
+        };
+        if (id) payload.id = parseInt(id, 10);
+        try {
+            const res  = await fetch('/api/admin/satisfaction-reasons/', {
+                method: id ? 'PUT' : 'POST', headers: hdr(), body: JSON.stringify(payload),
+            });
+            const json = await res.json();
+            if (!json.ok) { showErr('reasonModalError', json.error || 'Error al guardar'); return; }
+            closeModal('reasonModal');
+            window.toast.success(id ? 'Motivo actualizado' : 'Motivo creado');
+            loadReasons();
+        } catch(e) { showErr('reasonModalError', 'Error de red'); }
+    });
+
+    async function deactivateReason(id) {
+        const ok = await window.dialog.confirm({
+            title: 'Desactivar motivo',
+            message: 'Dejará de ofrecerse en la encuesta (no se borra, para no dejar sin explicación las valoraciones que ya lo usan). ¿Continuar?',
+            confirmText: 'Desactivar', cancelText: 'Cancelar', variant: 'danger',
+        });
+        if (!ok) return;
+        try {
+            const res  = await fetch('/api/admin/satisfaction-reasons/?id=' + id, { method: 'DELETE', headers: hdr() });
+            const json = await res.json();
+            if (!json.ok) { window.toast.error(json.error || 'Error'); return; }
+            window.toast.success('Motivo desactivado'); loadReasons();
         } catch(e) { window.toast.error('Error de red'); }
     }
 

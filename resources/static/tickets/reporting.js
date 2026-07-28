@@ -205,6 +205,13 @@
             ['SLA incumplidos', k.sla_breached.toLocaleString(), ''],
             ['T. medio resolución', fmtHoursPdf(k.avg_resolution_hours), ''],
             ['Satisfacción', sat, satNote],
+            [
+                'Tasa de respuesta',
+                k.satisfaction_response_rate_pct === null ? '-' : k.satisfaction_response_rate_pct + '%',
+                k.satisfaction_offered
+                    ? `${k.satisfaction_answered} de ${k.satisfaction_offered} encuestas`
+                    : 'sin encuestas enviadas',
+            ],
         ];
         const cols = 4;
         const cellW = CW / cols;
@@ -381,6 +388,82 @@
         });
     }
 
+    // Barras horizontales: para etiquetas largas (nombres de agente, motivos) el
+    // eje Y las muestra completas en lugar de girarlas.
+    function hbars(key, canvasId, labels, values, colors, opts) {
+        const text = cssVar('--color-text', '#333');
+        const grid = cssVar('--color-border', '#ddd');
+        const cfg = opts || {};
+        makeChart(key, canvasId, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }],
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: cfg.tooltip || {},
+                },
+                scales: {
+                    x: {
+                        ticks: { color: text, precision: 0, callback: cfg.xTick || undefined },
+                        grid: { color: grid },
+                        beginAtZero: true,
+                        max: cfg.xMax,
+                    },
+                    y: { ticks: { color: text }, grid: { display: false } },
+                },
+            },
+        });
+    }
+
+    // Satisfacción por agente y motivos de insatisfacción. El backend ya oculta a
+    // los agentes que no llegan a la muestra mínima (min_sample).
+    function renderSatisfaction(json) {
+        const sat = json.satisfaction || {};
+        const k = json.kpis;
+
+        const note = $('repSatResponse');
+        if (note) {
+            note.textContent = k.satisfaction_response_rate_pct === null
+                ? 'Aún no hay encuestas enviadas en el periodo.'
+                : `Tasa de respuesta: ${k.satisfaction_response_rate_pct}% ` +
+                  `(${k.satisfaction_answered} de ${k.satisfaction_offered} encuestas)`;
+        }
+
+        const agents = sat.by_agent || [];
+        hbars(
+            'satAgent', 'chartSatAgent',
+            agents.map(a => a.agent),
+            agents.map(a => a.pct),
+            agents.map(a => (a.pct >= SATISFACTION_HAPPY_MIN ? '#98c379' : '#e06c75')),
+            {
+                xMax: 100,
+                xTick: (v) => v + '%',
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => {
+                            const a = agents[ctx.dataIndex];
+                            return `${a.pct}% · ${a.good} buenas / ${a.bad} malas`;
+                        },
+                    },
+                },
+            }
+        );
+
+        const reasons = sat.reasons || [];
+        hbars(
+            'satReasons', 'chartSatReasons',
+            reasons.map(r => r.label),
+            reasons.map(r => r.n),
+            palette()[4]
+        );
+    }
+
     function seriesBars(key, canvasId, labels, values, color) {
         const text = cssVar('--color-text', '#333');
         const grid = cssVar('--color-border', '#ddd');
@@ -477,6 +560,7 @@
             bars('priority', 'chartPriority', json.distributions.priority);
             doughnut('type', 'chartType', json.distributions.type);
             doughnut('channel', 'chartChannel', json.distributions.channel);
+            renderSatisfaction(json);
 
             // Tabla: tickets abiertos más antiguos (accionable).
             const oTbody = $('repOldestTbody');

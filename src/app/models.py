@@ -153,6 +153,10 @@ class Ticket(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     closed_at = models.DateTimeField(null=True, blank=True)
+    # Momento en que pasó a 'resolved'. Es el reloj del que cuelga la encuesta de
+    # satisfacción; los tickets resueltos antes de existir este campo se quedan a
+    # NULL a propósito, para que el barrido no los encueste retroactivamente.
+    resolved_at = models.DateTimeField(null=True, blank=True, db_index=True)
     due_at = models.DateTimeField(null=True, blank=True)
     first_response_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
     first_responded_at = models.DateTimeField(null=True, blank=True)
@@ -282,23 +286,70 @@ class Macro(models.Model):
         return self.name
 
 
+class SatisfactionReason(models.Model):
+    """Motivo de un voto negativo, gestionable desde el panel de administración.
+
+    Solo aplica a 'bad': igual que en Zendesk, un voto positivo no pide motivo.
+    El campo libre SatisfactionRating.reason se mantiene aparte porque el
+    histórico importado de Zendesk trae los motivos como texto.
+    """
+    code = models.SlugField(max_length=64, db_index=True)
+    label = models.CharField(max_length=255)
+    language = models.CharField(max_length=5, default='es',
+                                choices=[('es', 'Español'), ('en', 'English')])
+    active = models.BooleanField(default=True, db_index=True)
+    position = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('code', 'language')]
+        ordering = ['position', 'label']
+
+    def __str__(self):
+        return f"{self.label} [{self.language}]"
+
+
 class SatisfactionRating(models.Model):
+    """Valoración de satisfacción, con la semántica de Zendesk.
+
+    La OFERTA de encuesta es una fila con score='offered'; el voto del cliente
+    actualiza esa misma fila a 'good'/'bad'. Por eso todas las métricas filtran
+    por score__in=('good','bad'): las ofertas sin responder no entran en el
+    denominador del CSAT, igual que en Zendesk.
+    """
     SCORE_CHOICES = [
         ('offered',    'Offered'),
         ('unoffered',  'Unoffered'),
         ('good',       'Good'),
         ('bad',        'Bad'),
     ]
-    zendesk_id  = models.BigIntegerField(unique=True, db_index=True)
+    SOURCE_ZENDESK = 'zendesk'
+    SOURCE_NATIVE = 'native'
+    SOURCE_CHOICES = [
+        (SOURCE_ZENDESK, 'Zendesk'),
+        (SOURCE_NATIVE, 'TicketFlow'),
+    ]
+    # NULL en las valoraciones nativas: solo lo importado de Zendesk tiene id allí.
+    zendesk_id  = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
     ticket      = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True,
                                     related_name='satisfaction_ratings')
     score       = models.CharField(max_length=50, choices=SCORE_CHOICES)
     comment     = models.TextField(null=True, blank=True)
     reason      = models.CharField(max_length=255, null=True, blank=True)
+    reason_choice = models.ForeignKey('SatisfactionReason', on_delete=models.SET_NULL,
+                                      null=True, blank=True, related_name='ratings')
     requester   = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
                                     related_name='satisfaction_ratings_requester')
     assignee    = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
                                     related_name='satisfaction_ratings_assignee')
+    source      = models.CharField(max_length=16, choices=SOURCE_CHOICES,
+                                   default=SOURCE_NATIVE, db_index=True)
+    # Credencial del enlace público de voto. NULL en lo importado de Zendesk.
+    token       = models.CharField(max_length=64, unique=True, null=True, blank=True, db_index=True)
+    offered_at  = models.DateTimeField(null=True, blank=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    expires_at  = models.DateTimeField(null=True, blank=True)
     created_at  = models.DateTimeField()
     updated_at  = models.DateTimeField(null=True, blank=True)
 
@@ -306,7 +357,17 @@ class SatisfactionRating(models.Model):
         ordering = ['-created_at']
 
     def __str__(self):
-        return f"Rating #{self.zendesk_id}: {self.score}"
+        ref = self.zendesk_id or f"local:{self.pk}"
+        return f"Rating #{ref}: {self.score}"
+
+    @property
+    def is_expired(self):
+        from django.utils import timezone
+        return bool(self.expires_at and self.expires_at < timezone.now())
+
+    @property
+    def is_answered(self):
+        return self.score in ('good', 'bad')
 
 
 class AssignmentRule(models.Model):

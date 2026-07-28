@@ -22,6 +22,7 @@ NO_REPLY_RE = re.compile(r"(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bo
 
 class OutboundEmailService:
     TEMPLATE_TICKET_CREATED = "ticket_created"
+    TEMPLATE_SATISFACTION_SURVEY = "satisfaction_survey"
 
     @staticmethod
     def _own_mailboxes():
@@ -45,35 +46,83 @@ class OutboundEmailService:
         return log
 
     @staticmethod
+    def _recipient(ticket):
+        """(brand remitente, email del solicitante) — destinatario de toda plantilla."""
+        requester = ticket.requester if ticket.requester_id else None
+        return (
+            ticket.brand if ticket.brand_id else None,
+            (requester.email if requester else "") or "",
+        )
+
+    @staticmethod
+    def blocking_reason(ticket):
+        """Motivo por el que un envío a este ticket no saldría, o None.
+
+        Permite decidir ANTES de crear efectos secundarios (p.ej. la oferta de
+        encuesta) si merece la pena intentarlo.
+        """
+        brand, to_email = OutboundEmailService._recipient(ticket)
+        return OutboundEmailService._delivery_block(brand, to_email)
+
+    @staticmethod
+    def _delivery_block(brand, to_email):
+        """Motivo por el que NO se debe enviar, o None si se puede. Común a todas
+        las plantillas: el kill switch, destinatario válido, marca remitente y las
+        dos protecciones anti-bucle."""
+        if not getattr(settings, "OUTBOUND_EMAIL_ENABLED", False):
+            return "disabled"
+        if not to_email or "@" not in to_email:
+            return "no_recipient"
+        if brand is None or not brand.support_email:
+            return "no_brand"
+        if to_email.lower() in OutboundEmailService._own_mailboxes():
+            # Nunca auto-responder a un buzón propio: bucle garantizado.
+            return "own_mailbox"
+        if NO_REPLY_RE.search(to_email):
+            return "noreply_pattern"
+        return None
+
+    @staticmethod
     def queue_ticket_confirmation(ticket):
         """Encola la confirmación de creación al solicitante. Idempotente por
         (plantilla, ticket, destinatario); las supresiones quedan registradas."""
-        template_key = OutboundEmailService.TEMPLATE_TICKET_CREATED
-        requester = ticket.requester if ticket.requester_id else None
-        to_email = (requester.email if requester else "") or ""
-        brand = ticket.brand if ticket.brand_id else None
+        return OutboundEmailService._queue(
+            ticket,
+            OutboundEmailService.TEMPLATE_TICKET_CREATED,
+            dedup_suffix=str(ticket.id),
+            context_builder=ResponseTemplateService.context_for_ticket,
+        )
 
-        if not getattr(settings, "OUTBOUND_EMAIL_ENABLED", False):
-            return OutboundEmailService._suppress(ticket, brand, to_email, template_key, "disabled")
-        if not to_email or "@" not in to_email:
-            return OutboundEmailService._suppress(ticket, brand, to_email, template_key, "no_recipient")
-        if brand is None or not brand.support_email:
-            return OutboundEmailService._suppress(ticket, brand, to_email, template_key, "no_brand")
-        if to_email.lower() in OutboundEmailService._own_mailboxes():
-            # Nunca auto-responder a un buzón propio: bucle garantizado.
-            return OutboundEmailService._suppress(ticket, brand, to_email, template_key, "own_mailbox")
-        if NO_REPLY_RE.search(to_email):
-            return OutboundEmailService._suppress(ticket, brand, to_email, template_key, "noreply_pattern")
+    @staticmethod
+    def queue_satisfaction_survey(ticket, rating):
+        """Encola la encuesta de satisfacción al solicitante.
+
+        Idempotente por rating, no por ticket: un ticket reabierto y vuelto a
+        resolver genera una oferta nueva y por tanto puede encuestarse otra vez,
+        como hacía Zendesk.
+        """
+        return OutboundEmailService._queue(
+            ticket,
+            OutboundEmailService.TEMPLATE_SATISFACTION_SURVEY,
+            dedup_suffix=str(rating.id),
+            context_builder=lambda tkt: ResponseTemplateService.context_for_survey(tkt, rating),
+        )
+
+    @staticmethod
+    def _queue(ticket, template_key, dedup_suffix, context_builder):
+        brand, to_email = OutboundEmailService._recipient(ticket)
+
+        blocked = OutboundEmailService._delivery_block(brand, to_email)
+        if blocked:
+            return OutboundEmailService._suppress(ticket, brand, to_email, template_key, blocked)
 
         language = ResponseTemplateService.pick_language(ticket)
         template = ResponseTemplateService.resolve(template_key, brand=brand, language=language)
         if template is None:
             return OutboundEmailService._suppress(ticket, brand, to_email, template_key, "no_template")
 
-        rendered = ResponseTemplateService.render(
-            template, ResponseTemplateService.context_for_ticket(ticket)
-        )
-        dedup_key = f"{template_key}:{ticket.id}:{to_email.lower()}"[:190]
+        rendered = ResponseTemplateService.render(template, context_builder(ticket))
+        dedup_key = f"{template_key}:{dedup_suffix}:{to_email.lower()}"[:190]
         log, created = OutboundEmailLog.objects.get_or_create(
             dedup_key=dedup_key,
             defaults={
@@ -102,8 +151,9 @@ class OutboundEmailService:
                 from app.tasks import send_outbound_email  # import local: evita ciclo tasks->services
                 send_outbound_email.delay(log_id)
             except Exception:
-                # Broker caído => el ticket se crea igual; el log queda 'queued'
-                # y es re-procesable (resend manual o tarea de barrido futura).
+                # Broker caído => la operación de negocio (crear ticket, ofrecer
+                # encuesta) sigue adelante; el log queda 'queued' y es re-procesable
+                # (resend manual o tarea de barrido futura).
                 logger.exception("outbound_dispatch_failed", extra={"log_id": log_id, "ticket_id": ticket_id})
                 record_metric("email.outbound.dispatch_failed", labels={"log_id": log_id})
 

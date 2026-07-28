@@ -85,6 +85,11 @@
     color: #dc2626;
     border: 1px solid #fecaca;
 }
+/* Motivo del voto negativo, dentro del propio badge. */
+.sat-badge .sat-reason {
+    font-weight: 400;
+    opacity: .8;
+}
 
 /* Status badge in ticket header */
 .ticket-status-badge {

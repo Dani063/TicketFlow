@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import Brand, Comment, Group, OutboundEmailLog, ResponseTemplate, Role, SLAPolicy, Ticket, TicketAIAnalysis, User
+from .models import Brand, Comment, Group, OutboundEmailLog, ResponseTemplate, Role, SatisfactionRating, SatisfactionReason, SLAPolicy, Ticket, TicketAIAnalysis, User
 
 # ====== Ticket ======
 
@@ -77,6 +77,24 @@ class ResponseTemplateAdmin(admin.ModelAdmin):
     list_filter = ("active", "language", "brand")
     search_fields = ("key", "subject")
     list_select_related = ("brand",)
+
+
+@admin.register(SatisfactionReason)
+class SatisfactionReasonAdmin(admin.ModelAdmin):
+    list_display = ("code", "label", "language", "position", "active")
+    list_filter = ("active", "language")
+    search_fields = ("code", "label")
+
+
+@admin.register(SatisfactionRating)
+class SatisfactionRatingAdmin(admin.ModelAdmin):
+    list_display = ("id", "ticket", "score", "source", "assignee", "reason_choice",
+                    "offered_at", "responded_at", "expires_at")
+    list_filter = ("score", "source")
+    search_fields = ("ticket__subject", "comment", "reason")
+    list_select_related = ("ticket", "assignee", "reason_choice")
+    # El token es la credencial del enlace público: no debe editarse a mano.
+    readonly_fields = ("token", "zendesk_id")
 
 
 @admin.register(OutboundEmailLog)

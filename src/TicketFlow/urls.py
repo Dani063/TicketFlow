@@ -33,6 +33,8 @@ urlpatterns = [
     path("customers/filter/", views.filter_customers, name="filter_customers"),
     path('customers/', views.customers_list, name='customers_list'),
     path("customers/profile/", views.customer_profile, name="customer_profile"),
+    # Publica: el cliente final no tiene cuenta, la credencial es el token.
+    path('satisfaction/<str:token>/', views.satisfaction_survey, name='satisfaction_survey'),
     path('reporting/', views.reporting, name='reporting'),
     path('reporting/data/', views.reporting_data, name='reporting_data'),
     path('reporting/export.csv', views.reporting_export_csv, name='reporting_export_csv'),
@@ -47,6 +49,7 @@ urlpatterns = [
     path('api/admin/sla-policies/', views.admin_sla_policies_api, name='admin_sla_policies_api'),
     path('api/admin/automation-rules/', views.admin_automation_rules_api, name='admin_automation_rules_api'),
     path('api/admin/response-templates/', views.admin_response_templates_api, name='admin_response_templates_api'),
+    path('api/admin/satisfaction-reasons/', views.admin_satisfaction_reasons_api, name='admin_satisfaction_reasons_api'),
     path('profile/', views.profile, name='profile'),
     path('docs/', views.documentation, name='documentation'),
     path("api/users/<int:user_id>/notes/", views.update_user_notes, name="update_user_notes"),

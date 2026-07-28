@@ -6,6 +6,7 @@ from app.services.assignment import AssignmentService
 from app.services.email_ingestion import EmailIngestionService
 from app.services.metrics import record_metric
 from app.services.msgraph import GRAPH_BASE, get_graph_token
+from app.services.satisfaction import SatisfactionService
 from app.services.sla import SLAService
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,17 @@ def mark_sla_breaches():
 def notify_sla_at_risk():
     notified = SLAService.notify_at_risk()
     return f'at_risk_count: {len(notified)}'
+
+
+@shared_task(name='app.tasks.offer_satisfaction_surveys')
+def offer_satisfaction_surveys():
+    """Ofrece la encuesta de satisfacción de los tickets resueltos hace suficiente.
+
+    Equivalente a la automatización de Zendesk. No hace nada si
+    SATISFACTION_SURVEY_ENABLED está apagado (que es el default).
+    """
+    offered = SatisfactionService.offer_pending_surveys()
+    return f'offered_count: {offered}'
 
 
 @shared_task(
