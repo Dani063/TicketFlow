@@ -4,7 +4,7 @@
 {% block title %}Administración – TicketFlow{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'tickets/admin_panel.css' %}?v=s5.6">
+<link rel="stylesheet" href="{% static 'tickets/admin_panel.css' %}?v=s6.1">
 {% endblock %}
 
 {% block content %}
@@ -17,12 +17,17 @@
         <button class="tf-tab is-active" data-tab="users">Usuarios</button>
         <button class="tf-tab" data-tab="roles">Roles</button>
         <button class="tf-tab" data-tab="groups">Grupos</button>
+        <button class="tf-tab" data-tab="assignment">Asignación</button>
         <button class="tf-tab" data-tab="templates">Plantillas</button>
         <button class="tf-tab" data-tab="reasons">Motivos CSAT</button>
     </div>
 
     <!-- ======== USERS ======== -->
     <div id="tab-users" class="tf-admin-panel is-active">
+        <p class="tf-admin-intro">
+            Quién puede entrar en TicketFlow, con qué rol y en qué grupo. Desactivar una cuenta
+            le impide entrar sin borrar sus tickets; solo se elimina de verdad si no tiene ninguno.
+        </p>
         <div class="tf-toolbar">
             <input type="text" class="tf-input" id="usersSearch" placeholder="Buscar por nombre o email…">
             <select class="tf-select" id="usersRoleFilter">
@@ -82,6 +87,11 @@
 
     <!-- ======== ROLES ======== -->
     <div id="tab-roles" class="tf-admin-panel">
+        <p class="tf-admin-intro">
+            El rol decide qué ve cada usuario: los de soporte (agent, soporte, supervisor, manager,
+            lead…) ven todos los tickets; el resto, solo aquellos en los que son solicitante o CC.
+            Los marcados como «Sistema» no se pueden editar ni borrar.
+        </p>
         <div class="tf-toolbar">
             <div class="tf-toolbar-grow"></div>
             <button class="tf-btn tf-btn--primary" id="btnNewRole"><i class="fas fa-plus"></i> Nuevo rol</button>
@@ -103,6 +113,11 @@
 
     <!-- ======== GROUPS ======== -->
     <div id="tab-groups" class="tf-admin-panel">
+        <p class="tf-admin-intro">
+            Equipos a los que pertenecen los usuarios y a los que se pueden asignar tickets.
+            Sirven para acotar reglas de asignación y políticas de SLA. Al borrar un grupo, sus
+            usuarios se quedan sin grupo, no se eliminan.
+        </p>
         <div class="tf-toolbar">
             <div class="tf-toolbar-grow"></div>
             <button class="tf-btn tf-btn--primary" id="btnNewGroup"><i class="fas fa-plus"></i> Nuevo grupo</button>
@@ -122,8 +137,47 @@
         </div>
     </div>
 
+    <!-- ======== ASSIGNMENT RULES (reparto automático de tickets) ======== -->
+    <div id="tab-assignment" class="tf-admin-panel">
+        <p class="tf-admin-intro">
+            Quién entra en el reparto automático de tickets y con qué peso. Se lo lleva el agente
+            con menos tickets abiertos en proporción a su peso. Cada regla puede acotarse a unos
+            grupos, servicios o canales concretos.
+        </p>
+        <div class="tf-toolbar">
+            <div class="tf-toolbar-grow"></div>
+            <button class="tf-btn tf-btn--primary" id="btnNewRule"><i class="fas fa-plus"></i> Nueva regla</button>
+        </div>
+        <div class="tf-admin-table-area">
+            <table class="tf-admin-table">
+                <thead>
+                    <tr>
+                        <th class="col-id">ID</th>
+                        <th>Regla</th>
+                        <th>Ámbito</th>
+                        <th>Agentes en el reparto</th>
+                        <th class="col-status">Estado</th>
+                        <th class="col-actions">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="rulesTbody"><tr><td colspan="6"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message">Cargando…</span></div></td></tr></tbody>
+            </table>
+        </div>
+        <div class="tf-admin-pag">
+            <p class="tf-hint" style="padding: var(--space-2) 0;">
+                Si ninguna regla activa encaja con el ticket, se reparte entre todos los usuarios con rol de agente.
+                Para excluir a alguien del reparto por completo, quítale el rol de agente en la pestaña Usuarios.
+            </p>
+        </div>
+    </div>
+
     <!-- ======== RESPONSE TEMPLATES ======== -->
     <div id="tab-templates" class="tf-admin-panel">
+        <p class="tf-admin-intro">
+            Correos que TicketFlow envía al cliente. Se eligen por clave, marca e idioma, en cascada:
+            si no hay plantilla de la marca se usa la global, y si no hay en el idioma del ticket se
+            cae al español. Desactivar una la retira sin borrarla.
+        </p>
         <div class="tf-toolbar">
             <div class="tf-toolbar-grow"></div>
             <button class="tf-btn tf-btn--primary" id="btnNewTemplate"><i class="fas fa-plus"></i> Nueva plantilla</button>
@@ -148,8 +202,12 @@
 
     <!-- ======== MOTIVOS DE VOTO NEGATIVO (CSAT) ======== -->
     <div id="tab-reasons" class="tf-admin-panel">
+        <p class="tf-admin-intro">
+            Motivos que se ofrecen al cliente cuando valora negativamente un ticket. Se desactivan en
+            vez de borrarse, para no dejar sin explicación las valoraciones que ya los usan. Comparte
+            el código entre idiomas para que sea el mismo motivo traducido.
+        </p>
         <div class="tf-toolbar">
-            <span class="tf-muted">Motivos que se ofrecen al cliente cuando valora negativamente.</span>
             <div class="tf-toolbar-grow"></div>
             <button class="tf-btn tf-btn--primary" id="btnNewReason"><i class="fas fa-plus"></i> Nuevo motivo</button>
         </div>
@@ -338,6 +396,129 @@
     </div>
 </div>
 
+<!-- ======== ASSIGNMENT RULE MODAL ======== -->
+<div class="dialog-backdrop" id="ruleModal">
+    <div class="dialog dialog--lg dialog--form" role="dialog" aria-modal="true">
+        <div class="dialog__header">
+            <h3 class="dialog__title" id="ruleModalTitle">Nueva regla</h3>
+            <button type="button" class="dialog__close" data-close="ruleModal" aria-label="Cerrar">×</button>
+        </div>
+        <div class="dialog__body">
+            <div id="ruleModalError" class="tf-admin-alert tf-admin-alert--error" style="display:none;"></div>
+            <input type="hidden" id="ruleModalId">
+            <div class="tf-field">
+                <label>Nombre</label>
+                <input type="text" class="tf-input" id="ruleModalName" placeholder="Default inbound">
+            </div>
+            <div class="tf-field">
+                <label>Estado</label>
+                <select class="tf-select" id="ruleModalActive">
+                    <option value="true">Activa</option>
+                    <option value="false">Inactiva</option>
+                </select>
+            </div>
+
+            <div class="tf-field">
+                <label>Agentes en el reparto</label>
+                <div class="tf-assign-members" id="ruleMembers">
+                    {% for agent in agents %}
+                    <div class="tf-assign-member" data-user-id="{{ agent.id }}">
+                        <input type="checkbox" class="tf-assign-member-on" id="ruleMemberOn{{ agent.id }}">
+                        <label class="tf-assign-member-name" for="ruleMemberOn{{ agent.id }}">
+                            <span title="{{ agent.email }}">{{ agent.name|default:agent.email }}</span>
+                        </label>
+                        <label class="tf-assign-member-num">
+                            Peso
+                            <input type="number" class="tf-input tf-assign-member-weight" min="1" step="1" value="1" disabled>
+                        </label>
+                        <label class="tf-assign-member-num">
+                            Máx. abiertos
+                            <input type="number" class="tf-input tf-assign-member-capacity" min="0" step="1" placeholder="libre" disabled>
+                        </label>
+                    </div>
+                    {% empty %}
+                    <p class="tf-hint">No hay usuarios con rol de agente.</p>
+                    {% endfor %}
+                </div>
+                <small class="tf-hint">
+                    El peso reparte proporcionalmente: peso 2 recibe el doble que peso 1.
+                    «Máx. abiertos» deja de asignarle cuando alcanza ese número de tickets sin cerrar.
+                </small>
+            </div>
+
+            <div class="tf-field">
+                <label>Ámbito (opcional) — una dimensión sin marcar vale para cualquier ticket</label>
+
+                <div class="tf-scope-block">
+                    <span class="tf-scope-title">Grupos</span>
+                    <div class="tf-multi" data-multi="ruleGroups">
+                        <button type="button" class="tf-multi-toggle" aria-haspopup="true" aria-expanded="false">
+                            <span class="tf-multi-summary">Cualquiera</span>
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                        <div class="tf-multi-panel">
+                            <div class="tf-multi-options" id="ruleGroups">
+                                {% for group in groups %}
+                                <label class="tf-multi-opt"><input type="checkbox" value="{{ group.id }}"><span>{{ group.group_name }}</span></label>
+                                {% empty %}
+                                <span class="tf-hint">No hay grupos definidos.</span>
+                                {% endfor %}
+                            </div>
+                            <div class="tf-multi-foot">
+                                <button type="button" class="tf-multi-clear" data-scope-clear="ruleGroups">Cualquiera</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tf-scope-block">
+                    <span class="tf-scope-title">Servicios</span>
+                    <div class="tf-multi" data-multi="ruleServices">
+                        <button type="button" class="tf-multi-toggle" aria-haspopup="true" aria-expanded="false">
+                            <span class="tf-multi-summary">Cualquiera</span>
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                        <div class="tf-multi-panel">
+                            <div class="tf-multi-options" id="ruleServices">
+                                {% for opt in services %}
+                                <label class="tf-multi-opt"><input type="checkbox" value="{{ opt.value }}"><span>{{ opt.label }}</span></label>
+                                {% endfor %}
+                            </div>
+                            <div class="tf-multi-foot">
+                                <button type="button" class="tf-multi-clear" data-scope-clear="ruleServices">Cualquiera</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tf-scope-block">
+                    <span class="tf-scope-title">Canales</span>
+                    <div class="tf-multi" data-multi="ruleChannels">
+                        <button type="button" class="tf-multi-toggle" aria-haspopup="true" aria-expanded="false">
+                            <span class="tf-multi-summary">Cualquiera</span>
+                            <i class="fas fa-chevron-down"></i>
+                        </button>
+                        <div class="tf-multi-panel">
+                            <div class="tf-multi-options" id="ruleChannels">
+                                {% for opt in channels %}
+                                <label class="tf-multi-opt"><input type="checkbox" value="{{ opt.value }}"><span>{{ opt.label }}</span></label>
+                                {% endfor %}
+                            </div>
+                            <div class="tf-multi-foot">
+                                <button type="button" class="tf-multi-clear" data-scope-clear="ruleChannels">Cualquiera</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="dialog__footer">
+            <button class="tf-btn tf-btn--secondary" data-close="ruleModal">Cancelar</button>
+            <button class="tf-btn tf-btn--primary" id="btnSaveRule">Guardar</button>
+        </div>
+    </div>
+</div>
+
 <!-- ======== GROUP MODAL ======== -->
 <div class="dialog-backdrop" id="groupModal">
     <div class="dialog dialog--form" role="dialog" aria-modal="true">
@@ -360,8 +541,10 @@
 {% endblock %}
 
 {% block extra_js %}
+{{ services|json_script:"tfServiceOptions" }}
+{{ channels|json_script:"tfChannelOptions" }}
 <script>
 window.__adminPanelData = { currentUserId: {{ request.user.id }} };
 </script>
-<script src="{% static 'tickets/admin_panel.js' %}?v=s5.6"></script>
+<script src="{% static 'tickets/admin_panel.js' %}?v=s6.1"></script>
 {% endblock %}

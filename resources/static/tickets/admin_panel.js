@@ -52,6 +52,7 @@
             document.getElementById('tab-' + btn.dataset.tab).classList.add('is-active');
             if (btn.dataset.tab === 'roles')  loadRoles();
             if (btn.dataset.tab === 'groups') loadGroups();
+            if (btn.dataset.tab === 'assignment') loadRules();
             if (btn.dataset.tab === 'templates') loadTemplates();
             if (btn.dataset.tab === 'reasons') loadReasons();
         });
@@ -521,6 +522,281 @@
             const json = await res.json();
             if (!json.ok) { window.toast.error(json.error||'Error'); return; }
             window.toast.success('Grupo eliminado'); loadGroups();
+        } catch(e) { window.toast.error('Error de red'); }
+    }
+
+    /* ================================================================
+       ASSIGNMENT RULES (reparto automatico de tickets)
+       ================================================================ */
+    const _ruleMap = new Map();
+
+    /* Etiquetas legibles de servicio/canal: la API devuelve el valor crudo
+       ('cisco_telefonia', 'phone') y la tabla debe leerse como el desplegable. */
+    function optionLabels(elementId) {
+        const el = document.getElementById(elementId);
+        const map = new Map();
+        if (!el) return map;
+        try {
+            (JSON.parse(el.textContent) || []).forEach(o => map.set(o.value, o.label));
+        } catch(_) {}
+        return map;
+    }
+    const _serviceLabels = optionLabels('tfServiceOptions');
+    const _channelLabels = optionLabels('tfChannelOptions');
+
+    function scopePart(singular, plural, values, labels) {
+        if (!values || !values.length) return null;
+        const names = values.map(v => (labels ? (labels.get(v) || v) : v));
+        return (values.length === 1 ? singular : plural) + ': ' + names.join(', ');
+    }
+
+    function ruleScopeText(r) {
+        const parts = [
+            scopePart('Grupo', 'Grupos', r.group_names),
+            scopePart('Servicio', 'Servicios', r.services, _serviceLabels),
+            scopePart('Canal', 'Canales', r.channels, _channelLabels),
+        ].filter(Boolean);
+        return parts.length ? parts.join(' · ') : 'Cualquier ticket';
+    }
+
+    function ruleMembersText(r) {
+        const on = (r.members || []).filter(m => m.active);
+        if (!on.length) return '<span class="tf-muted">Nadie — la regla no asigna</span>';
+        return on.map(m => {
+            const bits = [];
+            if (m.weight && m.weight !== 1) bits.push('×' + m.weight);
+            if (m.capacity != null) bits.push('máx ' + m.capacity);
+            const suffix = bits.length ? ` <span class="tf-muted">(${esc(bits.join(', '))})</span>` : '';
+            return esc(m.user_name || ('#' + m.user_id)) + suffix;
+        }).join(', ');
+    }
+
+    async function loadRules() {
+        const tbody = document.getElementById('rulesTbody');
+        tbody.innerHTML = emptyRow(6, 'Cargando…');
+        try {
+            const res  = await fetch('/api/admin/assignment-rules/');
+            const json = await res.json();
+            _ruleMap.clear();
+            if (!json.rules || !json.rules.length) {
+                tbody.innerHTML = emptyRow(6, 'Sin reglas de asignación');
+                return;
+            }
+            const frag = document.createDocumentFragment();
+            json.rules.forEach(r => {
+                _ruleMap.set(r.id, r);
+                const tr = document.createElement('tr');
+                tr.innerHTML =
+                    `<td class="col-id">${r.id}</td>
+                    <td>${esc(r.name)}</td>
+                    <td>${esc(ruleScopeText(r))}</td>
+                    <td style="white-space:normal;">${ruleMembersText(r)}</td>
+                    <td class="col-status">
+                        <span class="tf-pill ${r.active?'tf-pill--success':'tf-pill--danger'}">${r.active?'Activa':'Inactiva'}</span>
+                    </td>
+                    <td class="col-actions"><div class="tf-admin-table-actions">
+                        <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${r.id}" title="Editar"><i class="fas fa-pen"></i></button>
+                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${r.id}" ${r.active?'':'disabled'} title="Desactivar"><i class="fas fa-ban"></i></button>
+                    </div></td>`;
+                frag.appendChild(tr);
+            });
+            tbody.innerHTML = '';
+            tbody.appendChild(frag);
+        } catch(e) {
+            tbody.innerHTML = `<tr><td colspan="6"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message" style="color: var(--color-danger);">Error al cargar</span></div></td></tr>`;
+        }
+    }
+
+    document.getElementById('rulesTbody').addEventListener('click', e => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn || btn.disabled) return;
+        const id = parseInt(btn.dataset.id, 10);
+        if (btn.dataset.action === 'edit') openRuleModal(_ruleMap.get(id));
+        if (btn.dataset.action === 'del')  deactivateRule(id);
+    });
+
+    document.getElementById('btnNewRule').addEventListener('click', () => openRuleModal(null));
+
+    /* peso y capacidad solo se editan si el agente participa */
+    document.getElementById('ruleMembers').addEventListener('change', e => {
+        const cb = e.target.closest('.tf-assign-member-on');
+        if (!cb) return;
+        syncMemberRow(cb.closest('.tf-assign-member'));
+    });
+
+    function syncMemberRow(row) {
+        const on = row.querySelector('.tf-assign-member-on').checked;
+        row.classList.toggle('is-on', on);
+        row.querySelector('.tf-assign-member-weight').disabled   = !on;
+        row.querySelector('.tf-assign-member-capacity').disabled = !on;
+    }
+
+    /* ---- ambito: desplegables de seleccion multiple ---- */
+    function scopeBoxes(containerId) {
+        return document.querySelectorAll('#' + containerId + ' input[type="checkbox"]');
+    }
+
+    function readScope(containerId) {
+        return Array.from(scopeBoxes(containerId)).filter(cb => cb.checked).map(cb => cb.value);
+    }
+
+    /* El boton resume lo elegido: nada = «Cualquiera», pocos = sus nombres,
+       muchos = recuento, para no desbordar el ancho del desplegable. */
+    function refreshScopeSummary(containerId) {
+        const wrap = document.querySelector('[data-multi="' + containerId + '"]');
+        if (!wrap) return;
+        const checked = Array.from(scopeBoxes(containerId)).filter(cb => cb.checked);
+        const summary = wrap.querySelector('.tf-multi-summary');
+        if (!checked.length) {
+            summary.textContent = 'Cualquiera';
+            summary.classList.add('is-empty');
+            return;
+        }
+        summary.classList.remove('is-empty');
+        const names = checked.map(cb => (cb.closest('.tf-multi-opt').querySelector('span').textContent || '').trim());
+        summary.textContent = names.length <= 2 ? names.join(', ') : `${names.length} seleccionados`;
+    }
+
+    function closeScopeMenus(except) {
+        document.querySelectorAll('.tf-multi.is-open').forEach(wrap => {
+            if (wrap === except) return;
+            wrap.classList.remove('is-open');
+            wrap.querySelector('.tf-multi-toggle').setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    document.querySelectorAll('.tf-multi').forEach(wrap => {
+        const toggle = wrap.querySelector('.tf-multi-toggle');
+        const panel  = wrap.querySelector('.tf-multi-panel');
+        toggle.addEventListener('click', () => {
+            const willOpen = !wrap.classList.contains('is-open');
+            closeScopeMenus(wrap);
+            wrap.classList.toggle('is-open', willOpen);
+            toggle.setAttribute('aria-expanded', String(willOpen));
+            // El cuerpo del modal tiene su propio scroll y recortaria el panel:
+            // lo acercamos lo justo para que se vea entero.
+            if (willOpen) {
+                requestAnimationFrame(() => panel.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+            }
+        });
+        // El panel sigue abierto mientras se marcan casillas.
+        panel.addEventListener('click', e => e.stopPropagation());
+        wrap.addEventListener('change', () => refreshScopeSummary(wrap.dataset.multi));
+    });
+
+    document.addEventListener('click', e => {
+        if (!e.target.closest('.tf-multi')) closeScopeMenus(null);
+    });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeScopeMenus(null);
+    });
+
+    /* Un valor guardado que no este entre las opciones (servicio heredado de
+       Zendesk, canal retirado de la taxonomia) se perderia en silencio al
+       guardar: le creamos su casilla para que se conserve. */
+    function writeScope(containerId, values) {
+        const wanted = new Set((values || []).map(String));
+        const seen = new Set();
+        scopeBoxes(containerId).forEach(cb => {
+            cb.checked = wanted.has(cb.value);
+            seen.add(cb.value);
+        });
+        wanted.forEach(value => {
+            if (seen.has(value)) return;
+            const label = document.createElement('label');
+            label.className = 'tf-multi-opt';
+            label.innerHTML = `<input type="checkbox" value="${esc(value)}" checked><span>${esc(value)} (fuera de la lista)</span>`;
+            document.getElementById(containerId).appendChild(label);
+        });
+        refreshScopeSummary(containerId);
+    }
+
+    document.querySelectorAll('[data-scope-clear]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            scopeBoxes(btn.dataset.scopeClear).forEach(cb => { cb.checked = false; });
+            refreshScopeSummary(btn.dataset.scopeClear);
+        });
+    });
+
+    function openRuleModal(r) {
+        hideErr('ruleModalError');
+        document.getElementById('ruleModalId').value      = r ? r.id : '';
+        document.getElementById('ruleModalTitle').textContent = r ? 'Editar regla' : 'Nueva regla';
+        document.getElementById('ruleModalName').value    = r ? r.name : '';
+        document.getElementById('ruleModalActive').value  = r ? String(r.active) : 'true';
+        closeScopeMenus(null);
+        writeScope('ruleGroups',   r ? r.group_ids : []);
+        writeScope('ruleServices', r ? r.services  : []);
+        writeScope('ruleChannels', r ? r.channels  : []);
+
+        const byUser = new Map();
+        (r ? r.members || [] : []).forEach(m => byUser.set(String(m.user_id), m));
+        document.querySelectorAll('#ruleMembers .tf-assign-member').forEach(row => {
+            const m = byUser.get(row.dataset.userId);
+            row.querySelector('.tf-assign-member-on').checked      = !!(m && m.active);
+            row.querySelector('.tf-assign-member-weight').value    = m && m.weight ? m.weight : 1;
+            row.querySelector('.tf-assign-member-capacity').value  = m && m.capacity != null ? m.capacity : '';
+            syncMemberRow(row);
+        });
+        openModal('ruleModal');
+    }
+
+    document.getElementById('btnSaveRule').addEventListener('click', async () => {
+        hideErr('ruleModalError');
+        const id = document.getElementById('ruleModalId').value;
+        const members = [];
+        document.querySelectorAll('#ruleMembers .tf-assign-member').forEach(row => {
+            if (!row.querySelector('.tf-assign-member-on').checked) return;
+            const cap = row.querySelector('.tf-assign-member-capacity').value.trim();
+            members.push({
+                user_id:  parseInt(row.dataset.userId, 10),
+                weight:   parseInt(row.querySelector('.tf-assign-member-weight').value, 10) || 1,
+                capacity: cap === '' ? null : (parseInt(cap, 10) || 0),
+                active:   true,
+            });
+        });
+        const payload = {
+            name:      document.getElementById('ruleModalName').value.trim(),
+            active:    document.getElementById('ruleModalActive').value === 'true',
+            group_ids: readScope('ruleGroups'),
+            services:  readScope('ruleServices'),
+            channels:  readScope('ruleChannels'),
+            members:   members,
+        };
+        if (!payload.name) { showErr('ruleModalError', 'El nombre es obligatorio'); return; }
+        if (payload.active && !members.length) {
+            const ok = await window.dialog.confirm({
+                title: 'Regla sin agentes',
+                message: 'Nadie recibirá tickets por esta regla y se repartirán entre todos los agentes. ¿Guardar así?',
+                confirmText: 'Guardar', cancelText: 'Cancelar', variant: 'danger',
+            });
+            if (!ok) return;
+        }
+        if (id) payload.id = parseInt(id, 10);
+        try {
+            const res  = await fetch('/api/admin/assignment-rules/', {
+                method: id ? 'PUT' : 'POST', headers: hdr(), body: JSON.stringify(payload),
+            });
+            const json = await res.json();
+            if (!json.ok) { showErr('ruleModalError', json.error || 'Error al guardar'); return; }
+            closeModal('ruleModal');
+            window.toast.success(id ? 'Regla actualizada' : 'Regla creada');
+            loadRules();
+        } catch(e) { showErr('ruleModalError', 'Error de red'); }
+    });
+
+    async function deactivateRule(id) {
+        const ok = await window.dialog.confirm({
+            title: 'Desactivar regla',
+            message: 'La regla deja de aplicarse (no se borra). Si no queda ninguna otra regla, el reparto pasará a todos los agentes. ¿Continuar?',
+            confirmText: 'Desactivar', cancelText: 'Cancelar', variant: 'danger',
+        });
+        if (!ok) return;
+        try {
+            const res  = await fetch('/api/admin/assignment-rules/?id=' + id, { method: 'DELETE', headers: hdr() });
+            const json = await res.json();
+            if (!json.ok) { window.toast.error(json.error || 'Error'); return; }
+            window.toast.success('Regla desactivada'); loadRules();
         } catch(e) { window.toast.error('Error de red'); }
     }
 

@@ -373,9 +373,12 @@ class SatisfactionRating(models.Model):
 class AssignmentRule(models.Model):
     name = models.CharField(max_length=255)
     active = models.BooleanField(default=True, db_index=True)
-    group = models.ForeignKey('Group', on_delete=models.SET_NULL, null=True, blank=True, related_name='assignment_rules')
-    service = models.CharField(max_length=255, null=True, blank=True)
-    channel = models.CharField(max_length=255, null=True, blank=True)
+    # Ambito: cada dimension vacia significa «cualquiera». Con varios valores la
+    # regla casa si el ticket coincide con alguno (OR dentro de la dimension,
+    # AND entre dimensiones). Antes era un solo grupo/servicio/canal por regla.
+    groups = models.ManyToManyField('Group', blank=True, related_name='assignment_rules')
+    services = models.JSONField(default=list, blank=True)
+    channels = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

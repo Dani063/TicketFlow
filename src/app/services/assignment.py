@@ -16,17 +16,30 @@ class AssignmentService:
         return User.objects.filter(is_active=True).filter(agent_user_filter())
 
     @staticmethod
+    def _scope_matches(allowed, value):
+        """Una dimension de ambito vacia vale para cualquier ticket."""
+        if not allowed:
+            return True
+        return value in {str(item) for item in allowed if item not in (None, "")}
+
+    @staticmethod
     def matching_rules(group_id=None, service=None, channel=None):
-        rules = AssignmentRule.objects.filter(active=True).prefetch_related("members__user").order_by("name")
+        rules = (
+            AssignmentRule.objects.filter(active=True)
+            .prefetch_related("members__user", "groups")
+            .order_by("name")
+        )
         matches = []
         for rule in rules:
-            if rule.group_id and str(rule.group_id) != str(group_id or ""):
+            group_ids = [group.id for group in rule.groups.all()]
+            if not AssignmentService._scope_matches(group_ids, str(group_id or "")):
                 continue
-            if rule.service and rule.service != service:
+            if not AssignmentService._scope_matches(rule.services, service):
                 continue
-            if rule.channel and rule.channel != channel:
+            if not AssignmentService._scope_matches(rule.channels, channel):
                 continue
-            score = int(bool(rule.group_id)) + int(bool(rule.service)) + int(bool(rule.channel))
+            # Mas dimensiones acotadas = regla mas especifica, se prueba antes.
+            score = int(bool(group_ids)) + int(bool(rule.services)) + int(bool(rule.channels))
             matches.append((score, rule))
         matches.sort(key=lambda item: (-item[0], item[1].name))
         return [rule for _, rule in matches]

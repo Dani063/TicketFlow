@@ -63,6 +63,26 @@ LEGACY_CHANNEL_MAP = {
     "interno": "internal",
 }
 
+# --- Servicio -----------------------------------------------------------------
+# Ticket.service es CharField libre (arrastra valores de Zendesk), pero la UI
+# solo ofrece esta lista. Es la misma del <select id="servicio"> del detalle de
+# ticket (`_ticket_pane.html`), traida aqui para que el panel de admin no la
+# duplique otra vez. Pendiente: que esa plantilla la consuma desde aqui.
+SERVICE_CHOICES = [
+    ("ecomfax", "EcomFax"),
+    ("ecomfaxpro", "EcomFaxPro"),
+    ("recordia", "Recordia"),
+    ("aplicateca", "Aplicateca"),
+    ("audiolog", "Audiolog"),
+    ("cisco_telefonia", "Cisco Telefonia"),
+    ("rightfax", "Rightfax"),
+    ("internocomuny", "InternoComuny"),
+    ("rts", "RTS"),
+    ("cognitia", "Cognitia"),
+    ("otros", "Otros"),
+]
+SERVICE_VALUES = {value for value, _ in SERVICE_CHOICES}
+
 # --- Idioma (Ticket.language guarda valores libres heredados de Zendesk) ------
 LANGUAGE_CHOICES = [("es", "Español"), ("en", "Inglés")]
 

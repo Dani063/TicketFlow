@@ -32,7 +32,7 @@ from django.views import View
 from django.views.decorators.http import require_GET
 from django.core.cache import cache
 from .api import APIValidationError, api_login_required, json_error, json_ok, parse_json_body
-from .constants import SLA_AT_RISK_WINDOW_MINUTES
+from .constants import CHANNEL_CHOICES, SERVICE_CHOICES, SLA_AT_RISK_WINDOW_MINUTES
 from .permissions import can_manage_users, can_update_ticket, can_view_ticket, is_admin as permission_is_admin, is_agent as permission_is_agent
 from .sanitizers import sanitize_email_html
 from .services.assignment import AssignmentService
@@ -2192,6 +2192,28 @@ def _admin_required(view_func):
     return _wrapped
 
 
+def _admin_field_options(field, choices):
+    """Opciones para los selects de ambito de una regla de asignacion.
+
+    La taxonomia de `choices` mas los valores que de hecho existen en tickets y
+    no estan en ella (Ticket.service arrastra texto libre de Zendesk): sin esto
+    una regla no podria acotarse a un servicio heredado, o peor, editar la regla
+    perderia en silencio el valor que ya tenia por no estar entre las opciones.
+    """
+    options = [{'value': value, 'label': label} for value, label in choices]
+    known = {value for value, _ in choices}
+    extras = (
+        Ticket.objects.filter(is_deleted=False)
+        .exclude(**{f'{field}__isnull': True})
+        .exclude(**{field: ''})
+        .values_list(field, flat=True)
+        .distinct()
+        .order_by(field)
+    )
+    options.extend({'value': extra, 'label': extra} for extra in extras if extra not in known)
+    return options
+
+
 @_admin_required
 def admin_panel(request):
     users = (
@@ -2202,11 +2224,17 @@ def admin_panel(request):
     roles = Role.objects.order_by('role_name')
     groups = Group.objects.order_by('group_name')
     brands = Brand.objects.exclude(name='').order_by('name')
+    # Candidatos del reparto: los mismos que usa AssignmentService de fallback,
+    # para que el selector de la pestana «Asignacion» no ofrezca end users.
+    agents = AssignmentService.agent_queryset().order_by('name')
     return render(request, 'admin_panel.html', {
+        'services': _admin_field_options('service', SERVICE_CHOICES),
+        'channels': _admin_field_options('channel', CHANNEL_CHOICES),
         'users': users,
         'roles': roles,
         'groups': groups,
         'brands': brands,
+        'agents': agents,
         'username': request.user.name,
         'email': request.user.email,
     })
@@ -2556,14 +2584,28 @@ def _as_int_or_none(value):
         return None
 
 
+def _as_scope_list(value):
+    """Normaliza una dimension de ambito a lista de cadenas sin vacios ni duplicados."""
+    if value in (None, ''):
+        return []
+    items = value if isinstance(value, (list, tuple)) else [value]
+    cleaned = []
+    for item in items:
+        text = str(item).strip()
+        if text and text not in cleaned:
+            cleaned.append(text)
+    return cleaned
+
+
 def _serialize_assignment_rule(rule):
     return {
         'id': rule.id,
         'name': rule.name,
         'active': rule.active,
-        'group_id': rule.group_id,
-        'service': rule.service or '',
-        'channel': rule.channel or '',
+        'group_ids': [group.id for group in rule.groups.all()],
+        'group_names': [group.group_name for group in rule.groups.all()],
+        'services': list(rule.services or []),
+        'channels': list(rule.channels or []),
         'members': [
             {
                 'id': member.id,
@@ -2581,7 +2623,7 @@ def _serialize_assignment_rule(rule):
 @_admin_required
 def admin_assignment_rules_api(request):
     if request.method == 'GET':
-        rules = AssignmentRule.objects.prefetch_related('members__user').order_by('name')
+        rules = AssignmentRule.objects.prefetch_related('members__user', 'groups').order_by('name')
         return JsonResponse({'ok': True, 'rules': [_serialize_assignment_rule(rule) for rule in rules]})
 
     try:
@@ -2598,10 +2640,16 @@ def admin_assignment_rules_api(request):
             return json_error('name_required', 'name requerido', status=400)
         rule.name = name
         rule.active = bool(data.get('active', True))
-        rule.group_id = _as_int_or_none(data.get('group_id'))
-        rule.service = (data.get('service') or '').strip() or None
-        rule.channel = (data.get('channel') or '').strip() or None
+        rule.services = _as_scope_list(data.get('services'))
+        rule.channels = _as_scope_list(data.get('channels'))
         rule.save()
+
+        group_ids = [
+            group_id
+            for group_id in (_as_int_or_none(item) for item in _as_scope_list(data.get('group_ids')))
+            if group_id is not None
+        ]
+        rule.groups.set(Group.objects.filter(id__in=group_ids))
 
         if 'members' in data:
             rule.members.all().delete()

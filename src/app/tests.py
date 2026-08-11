@@ -12,6 +12,7 @@ from app.models import (
     AutomationRule,
     Brand,
     Comment,
+    Group,
     InboundEmailLog,
     Notification,
     OperationalMetric,
@@ -310,6 +311,115 @@ class TicketFlowBackendTests(TestCase):
         ticket = Ticket.objects.get(subject="Automation ticket")
         self.assertEqual(ticket.priority, "high")
         self.assertTrue(ticket.tags.filter(name="escalated").exists())
+
+    def test_admin_panel_exposes_assignment_tab_with_agents_only(self):
+        """La pestana «Asignacion» solo debe ofrecer agentes, no end users."""
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("admin_panel"))
+        self.assertEqual(response.status_code, 200)
+
+        agents = list(response.context["agents"])
+        self.assertIn(self.agent, agents)
+        self.assertIn(self.agent2, agents)
+        self.assertNotIn(self.customer, agents)
+
+        html = response.content.decode()
+        self.assertIn('data-tab="assignment"', html)
+        self.assertIn('id="ruleMembers"', html)
+
+    def test_admin_panel_scope_options_include_legacy_values(self):
+        """Un servicio heredado de Zendesk debe poder elegirse aunque no este en la taxonomia."""
+        self.make_ticket(service="servicio_viejo_zendesk", channel="email")
+
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("admin_panel"))
+
+        services = {opt["value"]: opt["label"] for opt in response.context["services"]}
+        self.assertEqual(services["recordia"], "Recordia")
+        self.assertIn("servicio_viejo_zendesk", services)
+
+        channels = {opt["value"]: opt["label"] for opt in response.context["channels"]}
+        self.assertEqual(channels["phone"], "Teléfono")
+        # Un canal ya presente en la taxonomia no debe duplicarse.
+        self.assertEqual(len([o for o in response.context["channels"] if o["value"] == "email"]), 1)
+
+    def test_assignment_rules_api_lists_rule_scope_and_members(self):
+        group = Group.objects.create(group_name="Soporte N1")
+        rule = AssignmentRule.objects.create(
+            name="Solo N1",
+            services=["recordia", "ecomfax"],
+            channels=["email"],
+        )
+        rule.groups.add(group)
+        AssignmentRuleMember.objects.create(rule=rule, user=self.agent, weight=2, capacity=40, active=True)
+        AssignmentRuleMember.objects.create(rule=rule, user=self.agent2, weight=1, active=False)
+
+        self.client.force_login(self.admin)
+        response = self.client.get("/api/admin/assignment-rules/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()["rules"]
+        data = next(item for item in payload if item["id"] == rule.id)
+
+        self.assertEqual(data["group_names"], ["Soporte N1"])
+        self.assertEqual(data["group_ids"], [group.id])
+        self.assertEqual(data["services"], ["recordia", "ecomfax"])
+        self.assertEqual(data["channels"], ["email"])
+        members = {member["user_name"]: member for member in data["members"]}
+        self.assertEqual(members["Agent"]["weight"], 2)
+        self.assertEqual(members["Agent"]["capacity"], 40)
+        self.assertTrue(members["Agent"]["active"])
+        self.assertFalse(members["Agent Two"]["active"])
+
+    def test_assignment_rule_scope_matches_any_value_of_each_dimension(self):
+        """Ambito multivalor: OR dentro de cada dimension, AND entre dimensiones."""
+        from app.services.assignment import AssignmentService
+
+        rule = AssignmentRule.objects.create(
+            name="Fax y grabacion por email",
+            services=["ecomfax", "recordia"],
+            channels=["email", "web"],
+        )
+        AssignmentRuleMember.objects.create(rule=rule, user=self.agent2, weight=1, active=True)
+
+        # Coincide con el segundo valor de cada lista.
+        self.assertEqual(
+            AssignmentService.choose_assignee(service="recordia", channel="web"),
+            self.agent2,
+        )
+        # Servicio dentro de la lista pero canal fuera: la regla no aplica.
+        self.assertNotIn(
+            rule,
+            AssignmentService.matching_rules(service="recordia", channel="phone"),
+        )
+        # Una dimension vacia no restringe.
+        rule.channels = []
+        rule.save(update_fields=["channels"])
+        self.assertIn(rule, AssignmentService.matching_rules(service="ecomfax", channel="phone"))
+
+    def test_assignment_rules_api_saves_multiple_scope_values(self):
+        group_a = Group.objects.create(group_name="N1")
+        group_b = Group.objects.create(group_name="N2")
+
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            "/api/admin/assignment-rules/",
+            data={
+                "name": "Multiambito",
+                "active": True,
+                "group_ids": [group_a.id, group_b.id],
+                "services": ["recordia", "recordia", "", "otros"],
+                "channels": ["email"],
+                "members": [{"user_id": self.agent.id, "weight": 1}],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        rule = AssignmentRule.objects.get(name="Multiambito")
+        self.assertEqual(sorted(rule.groups.values_list("id", flat=True)), sorted([group_a.id, group_b.id]))
+        # Duplicados y vacios se descartan al normalizar.
+        self.assertEqual(rule.services, ["recordia", "otros"])
+        self.assertEqual(rule.channels, ["email"])
 
     def test_assignment_rule_replaces_hardcoded_assignees(self):
         rule = AssignmentRule.objects.create(name="Default")
