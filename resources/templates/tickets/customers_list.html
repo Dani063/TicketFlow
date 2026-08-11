@@ -6,10 +6,14 @@
 {% block content %}
 <div class="title-bar">
     <h1>Lista de Clientes</h1>
+    <button type="button" class="tf-btn tf-btn--secondary tf-btn--sm mobile-filters-toggle" id="customerFiltersToggle" aria-expanded="false" aria-controls="customerFiltersPanel">
+        <i class="fas fa-filter"></i> Filtros
+    </button>
 </div>
 
+<div class="tf-split-layout">
 <!-- Columna izquierda: filtros -->
-<div class="left-column">
+<aside class="left-column customer-filters-panel" id="customerFiltersPanel">
     <h2>Filtros</h2>
     <ul id="customerFilters">
         <li data-view="all" class="active">
@@ -21,12 +25,18 @@
             <span class="filter-count">{{ filtros.suspended }}</span>
         </li>
     </ul>
-</div>
+</aside>
 
 <!-- Columna derecha: tabla -->
-<div class="profile-content">
+<main class="profile-content customers-list-content">
     <div class="stats-group with-pagination" style="width: 100%;">
-        <h2>Usuarios</h2>
+        <div class="list-section-heading">
+            <div>
+                <span class="list-section-eyebrow">Directorio</span>
+                <h2>Clientes</h2>
+            </div>
+            <span class="list-section-hint"><i class="fas fa-external-link-alt"></i> Selecciona una fila para abrir el perfil</span>
+        </div>
         <div class="tf-toolbar">
             <input type="text" class="tf-input tf-input--search" id="customersSearch" placeholder="Buscar por nombre o email…">
             <select class="tf-select" id="customersRoleFilter">
@@ -38,9 +48,9 @@
                 {% for group in groups %}<option value="{{ group.id }}">{{ group.group_name }}</option>{% endfor %}
             </select>
         </div>
-        <div class="tabla">
+        <div class="tabla tf-table-scroll">
             <div id="loadingSpinner" class="tf-spinner tf-spinner--overlay" style="display:none;"></div>
-            <table>
+            <table class="customers-table">
                 <thead>
                     <tr>
                         <th class="sortable" data-sort="id" onclick="toggleSort('id')">ID <i class="sort-icon fas fa-sort"></i></th>
@@ -50,16 +60,17 @@
                         <th class="sortable" data-sort="role" onclick="toggleSort('role')">Rol <i class="sort-icon fas fa-sort"></i></th>
                         <th class="sortable" data-sort="group" onclick="toggleSort('group')">Grupo <i class="sort-icon fas fa-sort"></i></th>
                         <th class="sortable" data-sort="created_at" onclick="toggleSort('created_at')">Fecha creación <i class="sort-icon fas fa-sort"></i></th>
+                        <th class="customer-open-col"><span class="sr-only">Abrir perfil</span></th>
                     </tr>
                 </thead>
                 <tbody id="customersTableBody">
-                    <tr><td colspan="7"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message">Cargando...</span></div></td></tr>
+                    <tr><td colspan="8"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message">Cargando...</span></div></td></tr>
                 </tbody>
             </table>
         </div>
         <div id="paginationBar" class="pagination-bar" style="display:none;">
             <div class="page-numbers" id="pageNumbers"></div>
-            <span class="page-size-sep">| Ver</span>
+            <span class="page-size-sep">Por página</span>
             <div class="page-size-wrapper">
                 <select id="pageSizeSelect" onchange="changePageSize(this.value)">
                     <option value="10">10</option>
@@ -72,6 +83,7 @@
             <span id="registrosInfo" class="registros-info"></span>
         </div>
     </div>
+</main>
 </div>
 {% endblock %}
 
@@ -79,5 +91,5 @@
 <script>
 window.__customersData = { customerProfileUrl: "{% url 'customer_profile' %}" };
 </script>
-<script src="{% static 'tickets/customers_list.js' %}?v=s4.7"></script>
+<script src="{% static 'tickets/customers_list.js' %}?v=s6.1"></script>
 {% endblock %}

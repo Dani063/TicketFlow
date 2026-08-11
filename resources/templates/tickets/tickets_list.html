@@ -57,17 +57,23 @@
     </div>
 </div>
 <div class="title-bar">
-    <h1>Lista de Tickets</h1>
+    <h1>Vistas de tickets</h1>
+    <button type="button" class="tf-btn tf-btn--secondary tf-btn--sm mobile-filters-toggle" id="ticketFiltersToggle" aria-expanded="false" aria-controls="ticketFiltersPanel">
+        <i class="fas fa-filter"></i> Filtros
+    </button>
 </div>
 
+<div class="tf-split-layout">
 <!-- Columna izquierda: filtros -->
-<div class="left-column">
+<aside class="left-column ticket-filters-panel" id="ticketFiltersPanel">
     <h2 class="filters-header">
         Filtros
-        <button id="refreshFilters" title="Actualizar filtros">
+        <button type="button" id="refreshFilters" title="Actualizar filtros" aria-label="Actualizar contadores de filtros">
             <i id="refreshIcon" class="fas fa-sync-alt"></i>
         </button>
     </h2>
+    <label class="filter-search-label" for="filterViewsSearch">Buscar una vista</label>
+    <input type="search" class="tf-input tf-input--search filter-views-search" id="filterViewsSearch" placeholder="Buscar vista…" autocomplete="off">
     <ul id="filters">
         {% if user.role and user.role.role_name|lower in 'end user,end-user,cliente,customer' %}
             {# Filtros simplificados para end users #}
@@ -76,15 +82,16 @@
                 <span class="filter-count">–</span>
             </li>
             <li data-view="unsolved_no_tareas">
-                <span class="filter-name">Abiertos</span>
+                <span class="filter-name">Open</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="resueltos">
-                <span class="filter-name">Resueltos</span>
+                <span class="filter-name">Resolved</span>
                 <span class="filter-count">–</span>
             </li>
         {% else %}
             {# Filtros completos para agentes #}
+            <li class="filter-section-label" aria-hidden="true">Prioridad y asignación</li>
             <li data-view="telefonica_mes" class="active">
                 <span class="filter-name">Tickets Telefónica último mes</span>
                 <span class="filter-count">–</span>
@@ -109,6 +116,7 @@
                 <span class="filter-name">Todos los tickets no resueltos (sin tareas)</span>
                 <span class="filter-count">–</span>
             </li>
+            <li class="filter-section-label" aria-hidden="true">Actividad reciente</li>
             <li data-view="recently_updated">
                 <span class="filter-name">Tickets actualizados recientemente</span>
                 <span class="filter-count">–</span>
@@ -118,7 +126,7 @@
                 <span class="filter-count">–</span>
             </li>
             <li data-view="pendientes">
-                <span class="filter-name">Todos los Tickets pendientes</span>
+                <span class="filter-name">Tickets en estado pending</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="tareas">
@@ -126,47 +134,49 @@
                 <span class="filter-count">–</span>
             </li>
             <li data-view="unsolved_groups">
-                <span class="filter-name">Unsolved tickets in your groups</span>
+                <span class="filter-name">Tickets no resueltos de tus grupos</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="rated_last7">
-                <span class="filter-name">Rated tickets from the last 7 days</span>
+                <span class="filter-name">Tickets valorados en los últimos 7 días</span>
                 <span class="filter-count">–</span>
             </li>
+            <li class="filter-section-label" aria-hidden="true">Servicios y canales</li>
             <li data-view="internos_comuny">
-                <span class="filter-name">Tickets INTERNOS abiertos de Comunycarse</span>
+                <span class="filter-name">Tickets internos open de Comunycarse</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="abiertos_ecomfax">
-                <span class="filter-name">Abiertos eComFax</span>
+                <span class="filter-name">Tickets open de eComFax</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="recordia_sgsd">
                 <span class="filter-name">Recordia SGSD</span>
                 <span class="filter-count">–</span>
             </li>
+            <li class="filter-section-label" aria-hidden="true">Histórico y otras vistas</li>
             <li data-view="closed">
-                <span class="filter-name">Todos Tickets Cerrados</span>
+                <span class="filter-name">Tickets en estado closed</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="sus_pendientes">
-                <span class="filter-name">Sus tickets pendientes</span>
+                <span class="filter-name">Sus tickets en estado pending</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="espera">
-                <span class="filter-name">Todos Tickets ESPERA</span>
+                <span class="filter-name">Tickets en estado espera</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="abiertos">
-                <span class="filter-name">Todos Tickets ABIERTO</span>
+                <span class="filter-name">Tickets en estado open</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="sus_no_cerrados">
-                <span class="filter-name">Sus Tickets (NO CERRADOS)</span>
+                <span class="filter-name">Sus tickets no closed</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="ultimos_cerrados">
-                <span class="filter-name">Ultimos Tickets Cerrados</span>
+                <span class="filter-name">Últimos tickets closed</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="no_resueltos">
@@ -190,15 +200,15 @@
                 <span class="filter-count">–</span>
             </li>
             <li data-view="resueltos">
-                <span class="filter-name">Todos Tickets Resueltos</span>
+                <span class="filter-name">Tickets en estado resolved</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="new_in_groups">
-                <span class="filter-name">New tickets in your groups</span>
+                <span class="filter-name">Tickets nuevos de tus grupos</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="open">
-                <span class="filter-name">Tickets Abiertos (Open)</span>
+                <span class="filter-name">Tickets en estado open</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="no_update_48h">
@@ -207,11 +217,16 @@
             </li>
         {% endif %}
     </ul>
-</div>
+</aside>
 
-<div class="profile-content">
+<main class="profile-content tickets-list-content">
     <div class="stats-group with-pagination" style="width: 100%;">
-        <h2>Tickets</h2>
+        <div class="list-section-heading">
+            <div>
+                <span class="list-section-eyebrow">Vista activa</span>
+                <h2 id="ticketsViewTitle">Tickets</h2>
+            </div>
+        </div>
         {% if brands %}
         <div class="brand-filter-bar">
             <select id="brandFilter" class="tf-select">
@@ -222,9 +237,9 @@
             </select>
         </div>
         {% endif %}
-        <div class="tabla">
+        <div class="tabla tf-table-scroll">
             <div id="loadingSpinner" class="tf-spinner tf-spinner--overlay" style="display:none;"></div>
-            <table>
+            <table class="tickets-table">
                 <thead>
                     <tr>
                         <th class="th-checkbox"><input type="checkbox" id="selectAllCheckbox" title="Seleccionar todos los no-cerrados"></th>
@@ -246,7 +261,7 @@
         </div>
         <div id="paginationBar" class="pagination-bar" style="display:none;">
             <div class="page-numbers" id="pageNumbers"></div>
-            <span class="page-size-sep">| Ver</span>
+            <span class="page-size-sep">Por página</span>
             <div class="page-size-wrapper">
                 <select id="pageSizeSelect" onchange="changePageSize(this.value)">
                     <option value="10">10</option>
@@ -259,6 +274,7 @@
             <span id="registrosInfo" class="registros-info"></span>
         </div>
     </div>
+</main>
 </div>
 {% endblock %}
 
@@ -266,5 +282,5 @@
 <script>
 window.__ticketsData = { createTicketUrl: "{% url 'create_ticket' %}" };
 </script>
-<script src="{% static 'tickets/tickets_list.js' %}?v=s4.9"></script>
+<script src="{% static 'tickets/tickets_list.js' %}?v=s6.1"></script>
 {% endblock %}

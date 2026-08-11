@@ -7,6 +7,7 @@
 {% endblock %}
 
 {% block content %}
+<div class="profile-pane" data-pane-type="profile" data-tab-title="{{ customer.name|default:'Perfil de cliente' }}">
 <div id="ticket-preview-card">
     <div class="tpc-header">
         <span class="tpc-status"></span>
@@ -24,11 +25,12 @@
     </div>
 </div>
 <div class="title-bar">
-    <h1>Perfil de Cliente</h1>
+    <h1>{{ customer.name|default:"Perfil de cliente" }}</h1>
 </div>
+<div class="profile-layout">
 <!-- Columna izquierda -->
 <div class="left-column">
-    <h2>Opciones de perfil</h2>
+    <span class="profile-menu-heading">Secciones</span>
     <ul id="profileMenu">
         <li data-section="info-section" class="active">
             <span class="filter-name">Información general</span>
@@ -41,16 +43,16 @@
 
 <!-- Columna derecha -->
 <div class="tabla profile-content">
-    <div class="stats-group" style="width: 100%; text-align: left;">
+    <div class="stats-group profile-surface">
 
         <!-- Sección Información -->
         <div id="info-section" class="profile-section">
-            <h2>Información general</h2>
-            <div class="profile-header" style="display:flex; align-items:center; margin-bottom:20px;">
+            <h2>Ficha de cliente</h2>
+            <div class="profile-header">
                 <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
                 <div>
-                    <h3 style="margin:0;">{{ customer.name }}</h3>
-                    <p style="margin:5px 0 0; color:#666;">{{ customer.email }}</p>
+                    <h3>{{ customer.name }}</h3>
+                    <p class="profile-email">{{ customer.email }}</p>
                 </div>
             </div>
 
@@ -81,6 +83,7 @@
         </div>
 
     </div>
+</div>
 </div>
 
 <script>
@@ -165,4 +168,5 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 });
 </script>
+</div>
 {% endblock %}

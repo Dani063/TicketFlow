@@ -1,23 +1,24 @@
 ﻿{% load static %}
 <nav class="navbar">
     <div class="navbar-left">
-        <button class="add-tab">+ Añadir</button>
+        <button class="add-tab" type="button" aria-label="Añadir ticket">+ Añadir</button>
         <button class="tabs-overflow-btn" type="button" hidden
                 aria-haspopup="menu" aria-expanded="false" title="Más pestañas">
             <i class="fas fa-ellipsis-h"></i><span class="badge">0</span>
         </button>
     </div>
     <div class="navbar-center">
-        <input type="text" class="search-bar" placeholder="Buscar...">
-        <div id="search-results" class="search-results" style="display:none;">
-            <ul id="results-list"></ul>
+        <input id="global-search-input" type="search" class="search-bar" placeholder="Buscar..." aria-label="Buscar en TicketFlow"
+               aria-controls="results-list" aria-expanded="false" aria-autocomplete="list" autocomplete="off">
+        <div id="search-results" class="search-results" style="display:none;" aria-label="Resultados de búsqueda">
+            <ul id="results-list" role="listbox"></ul>
         </div>
     </div>
     <div class="navbar-right">
-        <button class="notifications">
+        <button class="notifications" type="button" aria-label="Abrir notificaciones" aria-haspopup="dialog" aria-expanded="false">
             <span class="icon">🔔</span><span class="badge" style="display:none">0</span>
         </button>
-        <div class="user-profile">
+        <div class="user-profile" role="button" tabindex="0" aria-label="Abrir menú de perfil" aria-haspopup="menu" aria-expanded="false">
             <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="profile-picture">
             <span class="username">{{ request.user.name|default:'Usuario' }}</span>
         </div>

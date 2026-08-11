@@ -55,7 +55,12 @@
 .tf-admin-tabs {
     padding: var(--space-2) var(--space-6) 0;
     flex-shrink: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scroll-snap-type: x proximity;
 }
+.tf-admin-tabs .tf-tab { flex: 0 0 auto; scroll-snap-align: start; }
 
 /* Panel container per tab */
 .tf-admin-panel { display: none; flex: 1 1 0; min-height: 0; flex-direction: column; }
@@ -155,9 +160,28 @@
 .tf-admin-table .col-role,
 .tf-admin-table .col-group { width: 110px; }
 .tf-admin-table .col-status  { width: 80px; }
-.tf-admin-table .col-actions { width: 100px; text-align: right; }
+.tf-admin-table .col-actions { width: 132px; min-width: 132px; text-align: right; }
 
 .tf-admin-table-actions { display: inline-flex; gap: var(--space-1); justify-content: flex-end; }
+
+/* Las acciones permanecen disponibles aunque la tabla necesite scroll. */
+.tf-admin-table th.col-actions,
+.tf-admin-table td.col-actions {
+    position: sticky;
+    right: 0;
+    background: var(--color-surface);
+    box-shadow: -8px 0 10px -10px rgba(15, 23, 42, .45);
+}
+.tf-admin-table th.col-actions { z-index: 2; }
+.tf-admin-table td.col-actions { z-index: 1; }
+.tf-admin-table tbody tr:hover td.col-actions { background: var(--color-row-hover); }
+
+#tab-users .tf-admin-table { min-width: 920px; }
+#tab-roles .tf-admin-table,
+#tab-groups .tf-admin-table { min-width: 520px; }
+#tab-assignment .tf-admin-table { min-width: 820px; }
+#tab-templates .tf-admin-table,
+#tab-reasons .tf-admin-table { min-width: 760px; }
 
 /* Pagination padding reused from home.css .pagination-bar */
 .tf-admin-pag { flex-shrink: 0; padding: 0 var(--space-6); }
@@ -320,4 +344,62 @@
 .tf-muted {
     font-size: var(--font-size-sm);
     color: var(--color-text-muted);
+}
+
+@media (max-width: 1100px) {
+    .tf-admin-panel .tf-toolbar {
+        align-items: stretch;
+        flex-wrap: wrap;
+    }
+
+    .tf-admin-panel .tf-toolbar .tf-input,
+    .tf-admin-panel .tf-toolbar .tf-select {
+        flex: 1 1 220px;
+        max-width: none;
+    }
+}
+
+@media (max-width: 768px) {
+    .tf-admin-wrap {
+        margin-left: 0;
+        height: calc(100dvh - 159px - env(safe-area-inset-bottom));
+        min-height: 0;
+    }
+
+    .tf-admin-tabs {
+        padding: var(--space-2) var(--space-3) 0;
+        gap: 0;
+        scrollbar-color: var(--color-border-strong) transparent;
+    }
+
+    .tf-admin-intro {
+        padding: var(--space-3) var(--space-3) 0;
+    }
+
+    .tf-admin-panel .tf-toolbar {
+        padding: var(--space-3);
+    }
+
+    .tf-admin-panel .tf-toolbar .tf-input,
+    .tf-admin-panel .tf-toolbar .tf-select,
+    .tf-admin-panel .tf-toolbar .tf-btn {
+        flex: 1 1 100%;
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        margin-left: 0;
+    }
+
+    .tf-admin-table-area {
+        padding: 0 var(--space-3);
+        scrollbar-gutter: auto;
+    }
+
+    .tf-admin-pag { padding: 0 var(--space-3); }
+    .tf-admin-bulk-bar { padding-inline: var(--space-3); }
+}
+
+@media (max-width: 480px) {
+    .dialog__footer .tf-btn { width: 100%; }
+    .tf-admin-table-actions .tf-btn { min-width: 32px; min-height: 32px; }
 }

@@ -24,12 +24,13 @@
     </div>
 </div>
 <div class="title-bar">
-    <h1>Perfil de Usuario</h1>
+    <h1>{{ request.user.name|default:"Perfil de usuario" }}</h1>
 </div>
+<div class="profile-layout">
 
 <!-- Columna izquierda -->
 <div class="left-column">
-    <h2>Opciones de perfil</h2>
+    <span class="profile-menu-heading">Secciones</span>
     <ul id="profileMenu">
         <li data-section="info-section" class="active">
             <span class="filter-name">Información general</span>
@@ -42,17 +43,17 @@
 
 <!-- Columna derecha -->
 <div class="tabla profile-content">
-    <div class="stats-group" style="width: 100%; text-align: left;">
+    <div class="stats-group profile-surface">
 
         <!-- 🔹 Información general -->
         <div id="info-section" class="profile-section">
-            <h2>Información general</h2>
+            <h2>Tu cuenta</h2>
 
-            <div class="profile-header" style="display:flex; align-items:center; margin-bottom:20px;">
+            <div class="profile-header">
                 <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
                 <div>
-                    <h3 style="margin:0;">{{ request.user.name }}</h3>
-                    <p style="margin:5px 0 0; color:#666;">{{ request.user.email }}</p>
+                    <h3>{{ request.user.name }}</h3>
+                    <p class="profile-email">{{ request.user.email }}</p>
                 </div>
             </div>
 
@@ -75,18 +76,19 @@
                 </div>
             </div>
 
-            <div style="margin-top:20px; text-align:right;">
+            <div class="profile-actions">
                 <a href="{% url 'logout' %}" class="logout-link">Cerrar sesión</a>
             </div>
         </div>
 
         <!-- 🔹 Tickets asociados -->
         <div id="tickets-section" class="profile-section" style="display:none;">
-            <h2>Mis Tickets</h2>
+            <h2>Tickets asociados</h2>
             {% include 'tickets/_profile_tickets.html' %}
         </div>
 
     </div>
+</div>
 </div>
 
 <script>

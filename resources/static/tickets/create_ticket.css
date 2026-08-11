@@ -422,16 +422,24 @@ input[type="radio"] {
 .form-row {
     display: flex;
     justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
 }
 
     .form-row .form-group {
-        flex: 1;
-        margin-right: 10px;
+        flex: 1 1 0;
+        min-width: 0;
+        margin-right: 0;
     }
 
         .form-row .form-group:last-child {
             margin-right: 0;
         }
+
+    .form-row .select2-container {
+        min-width: 0;
+        max-width: 100%;
+    }
 .margin-bottom-large {
     margin-bottom: 300px;
 }
@@ -1826,9 +1834,9 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 :root[data-theme="dark"] .status-badge-closed   { background: var(--status-closed-bg); color: var(--status-closed-fg); border-color: transparent; }
 :root[data-theme="dark"] .sat-badge.sat-good { background: var(--color-success-bg); color: var(--color-success); border-color: transparent; }
 :root[data-theme="dark"] .sat-badge.sat-bad  { background: var(--color-danger-bg);  color: var(--color-danger);  border-color: transparent; }
-:root[data-theme="dark"] .take-it-btn { border-color: var(--color-primary); color: var(--color-primary); }
+:root[data-theme="dark"] .take-it-btn { border-color: var(--color-primary); color: #fff; }
 :root[data-theme="dark"] .take-it-btn:hover:not(:disabled) { background: var(--color-primary); color: #fff; }
-:root[data-theme="dark"] .merge-btn { border-color: var(--color-primary); color: var(--color-primary); background: transparent; }
+:root[data-theme="dark"] .merge-btn { border-color: var(--color-primary); color: #fff; background: transparent; }
 :root[data-theme="dark"] .merge-btn:hover { background: var(--color-primary); color: #fff; }
 :root[data-theme="dark"] label { color: var(--color-text); }
 :root[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]),
@@ -1974,6 +1982,58 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 }
 .ai-reply-btn:hover { background: var(--color-primary, #4f46e5); color: #fff; }
 .ai-reply-btn i { font-size: .9rem; }
+:root[data-theme="dark"] .ai-reply-btn { color: #fff; }
+
+@media (max-width: 720px) {
+    .ticket-form {
+        --compose-h: 170px;
+        width: 100%;
+        min-width: 0;
+        height: 100%;
+        padding: 2px;
+    }
+
+    .column2 {
+        min-width: 0;
+        padding: 10px;
+    }
+
+    .title-bar {
+        min-width: 0;
+        padding: 10px 12px;
+        flex-wrap: wrap;
+        row-gap: 6px;
+    }
+
+    .title-bar h1 {
+        flex-basis: 100%;
+    }
+
+    .ticket-meta-dates {
+        white-space: normal;
+        flex-wrap: wrap;
+    }
+
+    .subject-bar {
+        margin-bottom: 8px;
+    }
+
+    .subject-bar input {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .compose-toolbar {
+        flex-wrap: wrap;
+        min-height: 42px;
+        height: auto;
+    }
+
+    .compose-toolbar .pending-attachments {
+        order: 4;
+        flex-basis: 100%;
+    }
+}
 
 /* Tarjeta flotante centrada, por ENCIMA del footer fijo: así nunca queda tapada
    ni la recorta el overflow de las columnas. Scroll interno para alcanzar todos

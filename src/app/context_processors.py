@@ -1,5 +1,7 @@
 """Custom template context processors."""
 
+from django.conf import settings
+
 
 def fragment_base(request):
     """
@@ -19,4 +21,5 @@ def fragment_base(request):
     is_fragment = request.GET.get('fragment') == '1'
     return {
         'base_template': 'base_fragment.html' if is_fragment else 'base.html',
+        'app_version': settings.TICKETFLOW_VERSION,
     }

@@ -100,6 +100,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = 'app.User'
 
+# Versión visible del producto. Es la única fuente usada por las plantillas;
+# puede sobrescribirse en despliegue sin duplicar el valor en el frontend.
+TICKETFLOW_VERSION = os.getenv('TICKETFLOW_VERSION', '2.2.0')
+
 AUTHENTICATION_BACKENDS = [
     'app.backends.EmailBackend',  # Backend personalizado
       # Backend por defecto de Django

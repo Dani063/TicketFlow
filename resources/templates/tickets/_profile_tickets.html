@@ -6,12 +6,12 @@ Optional: extra_param + extra_value (carried in every link, e.g. customer id).
 
 <form method="get" class="tf-toolbar" id="profileTicketsToolbar" action="#tickets">
     {% if extra_param %}<input type="hidden" name="{{ extra_param }}" value="{{ extra_value }}">{% endif %}
-    <div class="tf-status-pills" role="tablist" aria-label="Filtro por estado">
+    <div class="tf-status-pills" role="group" aria-label="Filtro por estado">
         {% with current=filters.status %}
         <button type="button" class="tf-status-pill {% if current == 'all' %}is-active{% endif %}"     data-status="all">Todos</button>
-        <button type="button" class="tf-status-pill {% if current == 'open' %}is-active{% endif %}"    data-status="open">Abiertos</button>
-        <button type="button" class="tf-status-pill {% if current == 'pending' %}is-active{% endif %}" data-status="pending">Pendientes</button>
-        <button type="button" class="tf-status-pill {% if current == 'solved' %}is-active{% endif %}"  data-status="solved">Resueltos</button>
+        <button type="button" class="tf-status-pill {% if current == 'open' %}is-active{% endif %}"    data-status="open">open</button>
+        <button type="button" class="tf-status-pill {% if current == 'pending' %}is-active{% endif %}" data-status="pending">pending</button>
+        <button type="button" class="tf-status-pill {% if current == 'solved' %}is-active{% endif %}"  data-status="solved">resolved</button>
         <input type="hidden" name="status" value="{{ current }}" id="profileTicketsStatus">
         {% endwith %}
     </div>
@@ -23,7 +23,7 @@ Optional: extra_param + extra_value (carried in every link, e.g. customer id).
     <input type="hidden" name="page_size" value="{{ pagination.page_size }}" id="profileTicketsPageSize">
 </form>
 
-<div class="tabla">
+<div class="tabla tf-table-scroll profile-tickets-table-wrap">
     <table>
         <thead>
             <tr>
@@ -39,7 +39,7 @@ Optional: extra_param + extra_value (carried in every link, e.g. customer id).
             <tr onclick="openTicket('{{ ticket.id }}', '{{ ticket.subject|escapejs }}')">
                 <td>{{ ticket.id }}</td>
                 <td>
-                    <span class="status-dot status-{{ ticket.status|lower }}"></span><span class="subject-text"
+                    <span class="status-dot status-{{ ticket.status|lower }}"></span><span class="subject-text" title="{{ ticket.subject }}"
                         data-status="{{ ticket.status }}"
                         data-subject="{{ ticket.subject }}"
                         data-description="{{ ticket.description|default:''|truncatechars:200 }}"
@@ -49,15 +49,15 @@ Optional: extra_param + extra_value (carried in every link, e.g. customer id).
                         data-lc-body="{{ ticket.lc_body|default:'' }}">{{ ticket.subject }}</span>
                 </td>
                 <td>{{ ticket.status }}</td>
-                <td>{{ ticket.priority }}</td>
+                <td>{{ ticket.priority|default:"—" }}</td>
                 <td>{{ ticket.updated_at|date:"d/m/Y H:i" }}</td>
             </tr>
             {% empty %}
             <tr><td colspan="5">
-                <div class="empty-state">
-                    <span class="empty-state-icon"><i class="fas fa-{% if filters.q or filters.status != 'all' %}filter{% else %}folder-open{% endif %}"></i></span>
-                    <h4>{% if filters.q or filters.status != 'all' %}Sin resultados{% else %}Sin tickets asociados{% endif %}</h4>
-                    <p>{% if filters.q or filters.status != 'all' %}Prueba con otro filtro o búsqueda.{% else %}Cuando este usuario tenga tickets aparecerán aquí.{% endif %}</p>
+                <div class="tf-empty">
+                    <i class="fas fa-{% if filters.q or filters.status != 'all' %}filter{% else %}folder-open{% endif %} tf-empty-icon" aria-hidden="true"></i>
+                    <span class="tf-empty-title">{% if filters.q or filters.status != 'all' %}Sin resultados{% else %}Sin tickets asociados{% endif %}</span>
+                    <span class="tf-empty-message">{% if filters.q or filters.status != 'all' %}Prueba con otro filtro o búsqueda.{% else %}Cuando este usuario tenga tickets aparecerán aquí.{% endif %}</span>
                 </div>
             </td></tr>
             {% endfor %}

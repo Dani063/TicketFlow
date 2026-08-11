@@ -51,6 +51,11 @@
     transition: var(--btn-transition);
 }
 .tf-tab:hover { color: var(--color-text); }
+.tf-tab:focus-visible {
+    outline: none;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    box-shadow: var(--focus-ring);
+}
 .tf-tab.is-active {
     color: var(--color-primary);
     border-bottom-color: var(--color-primary);
@@ -298,6 +303,19 @@
     justify-content: flex-end;
 }
 
+.tf-table-scroll {
+    width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: visible;
+    overscroll-behavior-inline: contain;
+    scrollbar-gutter: stable;
+}
+
+.tf-table-scroll > table {
+    margin-bottom: 0;
+}
+
 /* ----- Empty state ----- */
 .tf-empty {
     display: flex;
@@ -448,4 +466,86 @@
     flex: 0 0 auto;
     width: 220px;
     max-width: 100%;
+}
+
+@media (max-width: 768px) {
+    .tf-page-wrap {
+        gap: var(--space-3);
+        padding: var(--space-4);
+    }
+
+    .tf-page-header {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .tf-page-header > * {
+        min-width: 0;
+    }
+
+    .tf-tabs {
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: thin;
+    }
+
+    .tf-tab {
+        flex: 0 0 auto;
+        min-height: 40px;
+    }
+
+    .tf-toolbar {
+        align-items: stretch;
+        flex-wrap: wrap;
+        padding: var(--space-2) 0;
+    }
+
+    .tf-toolbar > .tf-input,
+    .tf-toolbar > .tf-select,
+    .tf-toolbar .tf-input[type="search"],
+    .tf-toolbar .tf-input.tf-input--search {
+        flex: 1 1 200px;
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .tf-toolbar .tf-toolbar-grow {
+        display: none;
+    }
+
+    .tf-table th,
+    .tf-table td {
+        padding: var(--space-2) var(--space-3);
+    }
+
+    .tf-card,
+    .tf-card--padded {
+        padding: var(--space-4);
+    }
+
+    .brand-filter-bar {
+        align-items: stretch;
+        flex-wrap: wrap;
+    }
+
+    .brand-filter-bar .tf-select {
+        width: 100%;
+        flex: 1 1 220px;
+    }
+}
+
+@media (max-width: 480px) {
+    .tf-page-wrap {
+        padding: var(--space-3);
+    }
+
+    .tf-page-header h1,
+    .tf-page-header h2 {
+        font-size: 18px;
+    }
+
+    .tf-empty {
+        padding: var(--space-6) var(--space-3);
+    }
 }

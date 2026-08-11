@@ -3,20 +3,20 @@
     <img src="{% static 'tickets/logo.png' %}" alt="Logo">
     <ul>
         <li class="{% if request.resolver_match.url_name == 'home' %}active{% endif %}">
-            <a href="{% url 'home' %}"><i class="fas fa-home"></i><span class="tooltip">Dashboard</span></a>
+            <a href="{% url 'home' %}" aria-label="Dashboard" {% if request.resolver_match.url_name == 'home' %}aria-current="page"{% endif %}><i class="fas fa-home"></i><span class="tooltip">Dashboard</span></a>
         </li>
         <li class="{% if request.resolver_match.url_name == 'tickets_list' %}active{% endif %}">
-            <a href="{% url 'tickets_list' %}"><i class="fas fa-list"></i><span class="tooltip">Vistas</span></a>
+            <a href="{% url 'tickets_list' %}" aria-label="Vistas de tickets" {% if request.resolver_match.url_name == 'tickets_list' %}aria-current="page"{% endif %}><i class="fas fa-list"></i><span class="tooltip">Vistas</span></a>
         </li>
         {% if user.role and user.role.role_name|lower != 'end user' and user.role.role_name|lower != 'end-user' and user.role.role_name|lower != 'cliente' and user.role.role_name|lower != 'customer' and user.role.role_name|lower != 'None' %}
-        <li><a href="{% url 'customers_list' %}"><i class="fas fa-users"></i><span class="tooltip">Clientes</span></a></li>
+        <li class="{% if request.resolver_match.url_name == 'customers_list' or request.resolver_match.url_name == 'customer_profile' %}active{% endif %}"><a href="{% url 'customers_list' %}" aria-label="Clientes" {% if request.resolver_match.url_name == 'customers_list' or request.resolver_match.url_name == 'customer_profile' %}aria-current="page"{% endif %}><i class="fas fa-users"></i><span class="tooltip">Clientes</span></a></li>
         <li class="{% if request.resolver_match.url_name == 'reporting' %}active{% endif %}">
-            <a href="{% url 'reporting' %}"><i class="fas fa-chart-bar"></i><span class="tooltip">Reporting</span></a>
+            <a href="{% url 'reporting' %}" aria-label="Reporting" {% if request.resolver_match.url_name == 'reporting' %}aria-current="page"{% endif %}><i class="fas fa-chart-bar"></i><span class="tooltip">Reporting</span></a>
         </li>
         {% endif %}
         {% if user.role and user.role.role_name|lower in 'admin,administrator,administrador' %}
         <li class="{% if request.resolver_match.url_name == 'admin_panel' %}active{% endif %}">
-            <a href="{% url 'admin_panel' %}"><i class="fas fa-shield-alt"></i><span class="tooltip">Administración</span></a>
+            <a href="{% url 'admin_panel' %}" aria-label="Administración" {% if request.resolver_match.url_name == 'admin_panel' %}aria-current="page"{% endif %}><i class="fas fa-shield-alt"></i><span class="tooltip">Administración</span></a>
         </li>
         {% endif %}
     </ul>

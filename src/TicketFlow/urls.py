@@ -38,7 +38,6 @@ urlpatterns = [
     path('reporting/', views.reporting, name='reporting'),
     path('reporting/data/', views.reporting_data, name='reporting_data'),
     path('reporting/export.csv', views.reporting_export_csv, name='reporting_export_csv'),
-    path('settings/', views.settings, name='settings'),
     # Admin panel (solo accesible para usuarios con rol admin)
     path('admin-panel/', views.admin_panel, name='admin_panel'),
     path('api/admin/users/', views.admin_users_api, name='admin_users_api'),
@@ -51,6 +50,7 @@ urlpatterns = [
     path('api/admin/response-templates/', views.admin_response_templates_api, name='admin_response_templates_api'),
     path('api/admin/satisfaction-reasons/', views.admin_satisfaction_reasons_api, name='admin_satisfaction_reasons_api'),
     path('profile/', views.profile, name='profile'),
+    path('settings/', views.legacy_settings_redirect, name='legacy_settings_redirect'),
     path('docs/', views.documentation, name='documentation'),
     path("api/users/<int:user_id>/notes/", views.update_user_notes, name="update_user_notes"),
     path("api/notifications/", views.notifications_api, name="notifications_api"),

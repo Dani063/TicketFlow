@@ -53,6 +53,8 @@
     function emptyRow(text, color) {
         const style = color ? ` style="color: ${color};"` : '';
         return `<tr><td colspan="${COLSPAN}"><div class="tf-empty tf-empty--compact">` +
+            `<span class="tf-empty-icon"><i class="fas fa-inbox"></i></span>` +
+            `<span class="tf-empty-title"${style}>Sin tickets que requieran atención</span>` +
             `<span class="tf-empty-message"${style}>${text}</span></div></td></tr>`;
     }
 
@@ -474,6 +476,8 @@
         // Botones de estadísticas: cada uno es una vista de servidor. Volver a
         // pulsar el que ya está activo quita el filtro.
         document.querySelectorAll('.stat[data-view]').forEach(stat => {
+            stat.setAttribute('role', 'button');
+            stat.setAttribute('tabindex', '0');
             stat.addEventListener('click', () => {
                 const target = stat.dataset.view;
                 const isActive = stat.classList.contains('is-active');
@@ -483,6 +487,12 @@
                 } else {
                     stat.classList.add('is-active');
                     load(target, 1);
+                }
+            });
+            stat.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    stat.click();
                 }
             });
         });

@@ -62,7 +62,8 @@
     <h1>Dashboard</h1>
 </div>
 
-<div class="left-column">
+<div class="dashboard-layout">
+<aside class="left-column dashboard-sidebar" aria-label="Actualizaciones recientes">
     <div class="updates">
         <h3>Actualizaciones recientes</h3>
         <ul id="updates-list">
@@ -90,7 +91,9 @@
             </li>
         </ul>
     </div>
-</div>
+</aside>
+
+<main class="dashboard-main">
 
 <div class="stats-bar">
     <div class="stats-group">
@@ -99,13 +102,13 @@
             <div class="stat" data-filter="you" data-view="home_you">
                 <div class="stat-content">
                     <span class="stat-number">{{ stats.abiertos_you }}</span>
-                    <span class="stat-label">YOU</span>
+                    <span class="stat-label">Tú</span>
                 </div>
             </div>
             <div class="stat" data-filter="groups" data-view="home_groups">
                 <div class="stat-content">
                     <span class="stat-number">{{ stats.abiertos_groups }}</span>
-                    <span class="stat-label">GROUPS</span>
+                    <span class="stat-label">Grupos</span>
                 </div>
             </div>
         </div>
@@ -117,19 +120,19 @@
             <div class="stat" data-filter="bien" data-view="home_bien">
                 <div class="stat-content">
                     <span class="stat-number sat-good-num">{{ stats.bien }}</span>
-                    <span class="stat-label">BIEN</span>
+                    <span class="stat-label">Positivos</span>
                 </div>
             </div>
             <div class="stat" data-filter="mal" data-view="home_mal">
                 <div class="stat-content">
                     <span class="stat-number sat-bad-num">{{ stats.mal }}</span>
-                    <span class="stat-label">MAL</span>
+                    <span class="stat-label">Negativos</span>
                 </div>
             </div>
             <div class="stat" data-filter="solventado" data-view="home_solventado">
                 <div class="stat-content">
                     <span class="stat-number">{{ stats.solventado }}</span>
-                    <span class="stat-label">SOLVENTADO</span>
+                    <span class="stat-label">Resueltos</span>
                 </div>
             </div>
         </div>
@@ -141,7 +144,7 @@
             <div class="stat" data-filter="satisfaccion" data-view="home_satisfaccion">
                 <div class="stat-content">
                     <span class="stat-number">{% if stats.total_rated %}{{ stats.satisfaccion_pct }}%{% else %}—{% endif %}</span>
-                    <span class="stat-label">SATISFACCIÓN</span>
+                    <span class="stat-label">Satisfacción</span>
                     {% if stats.total_rated %}<span class="stat-sub">{{ stats.total_rated }} valorados</span>{% endif %}
                 </div>
             </div>
@@ -159,7 +162,7 @@
     </h2>
 </div>
 
-<div class="tabla">
+<div class="tabla tf-table-scroll">
     <div id="homeLoadingSpinner" class="tf-spinner tf-spinner--overlay" style="display:none;"></div>
     <table>
         <thead>
@@ -170,7 +173,7 @@
                 <th class="sortable" data-sort="id">ID <i class="sort-icon fas fa-sort"></i></th>
                 <th class="sortable" data-sort="subject">Asunto <i class="sort-icon fas fa-sort"></i></th>
                 <th class="sortable" data-sort="requester">Solicitante <i class="sort-icon fas fa-sort"></i></th>
-                <th class="sortable" data-sort="updated_at">Solicitante actualizado <i class="sort-icon fas fa-sort"></i></th>
+                <th class="sortable" data-sort="updated_at">Actualizado <i class="sort-icon fas fa-sort"></i></th>
                 <th class="sortable" data-sort="service">Servicio <i class="sort-icon fas fa-sort"></i></th>
                 <th class="sortable" data-sort="assignee">Asignado <i class="sort-icon fas fa-sort"></i></th>
                 <th>Val.</th>
@@ -181,7 +184,7 @@
 </div>
 <div id="homePaginationBar" class="pagination-bar" style="display:none;">
     <div class="page-numbers" id="homePageNumbers"></div>
-    <span class="page-size-sep">| Ver</span>
+    <span class="page-size-sep">Por página</span>
     <div class="page-size-wrapper">
         <select id="homePageSizeSelect">
             <option value="10">10</option>
@@ -192,6 +195,8 @@
         </select>
     </div>
     <span id="homeRegistrosInfo" class="registros-info"></span>
+</div>
+</main>
 </div>
 
 {% endblock %}
@@ -206,5 +211,5 @@ window.__homeData = {
     currentUserGroupId: {% if current_user_group_id %}{{ current_user_group_id }}{% else %}null{% endif %}
 };
 </script>
-<script src="{% static 'tickets/home_tickets.js' %}?v=s5.5"></script>
+<script src="{% static 'tickets/home_tickets.js' %}?v=s6.1"></script>
 {% endblock %}

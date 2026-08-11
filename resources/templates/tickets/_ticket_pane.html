@@ -21,12 +21,12 @@
         <span title="Última actualización">Actualizado: <strong>{{ ticket.updated_at|date:"d/m/Y H:i" }}</strong></span>
     </span>
     {% if can_use_internal and ticket.assignee_id != current_user_id %}
-    <button type="button" id="take-it-btn" class="take-it-btn" data-ticket-id="{{ ticket.id }}">
+    <button type="button" id="take-it-btn" class="take-it-btn" data-ticket-id="{{ ticket.id }}" aria-label="Asignarme este ticket">
         <i class="fas fa-hand-point-right"></i> Asignarme
     </button>
     {% endif %}
     {% if can_use_internal and not ticket.merged_into %}
-    <button type="button" id="merge-btn" class="merge-btn" data-ticket-id="{{ ticket.id }}">
+    <button type="button" id="merge-btn" class="merge-btn" data-ticket-id="{{ ticket.id }}" aria-label="Fusionar este ticket">
         <i class="fas fa-code-branch"></i> Fusionar
     </button>
     {% endif %}
@@ -47,7 +47,7 @@
     {% csrf_token %}
     <div class="ticket-form" id="ticketLayout">
         <div class="column" id="panelLeft">
-            <button type="button" class="panel-tab" id="toggleLeft">
+            <button type="button" class="panel-tab" id="toggleLeft" aria-label="Mostrar u ocultar metadatos del ticket">
                 <span class="panel-tab-label" id="labelLeft">Ocultar panel</span>
                 <span class="panel-tab-arrow"><i class="fas fa-chevron-left" id="iconLeft"></i></span>
             </button>
@@ -185,26 +185,26 @@
                 <label for="categoria">Categoría</label>
                 <select id="categoria" name="categoria" class="select2">
                     <option value="" selected>-</option>
-                    <option value="communication">Communication</option>
+                    <option value="communication">Comunicación</option>
                     <option value="hardware">Hardware</option>
-                    <option value="base_software">Base software</option>
-                    <option value="app_functionality">App Functionality</option>
-                    <option value="database">Database</option>
-                    <option value="api">App Program Interface (API)</option>
+                    <option value="base_software">Software base</option>
+                    <option value="app_functionality">Funcionalidad de la aplicación</option>
+                    <option value="database">Base de datos</option>
+                    <option value="api">Interfaz de programación (API)</option>
                     <option value="webservice">WebService</option>
-                    <option value="configuration">Configuration</option>
-                    <option value="others">Others</option>
-                    <option value="information">Information</option>
+                    <option value="configuration">Configuración</option>
+                    <option value="others">Otros</option>
+                    <option value="information">Información</option>
                 </select>
             </div>
             <div class="form-group form-checkbox">
-                <label><input type="checkbox" id="security_related" name="security_related" value="1"> Security related</label>
+                <label><input type="checkbox" id="security_related" name="security_related" value="1"> Relacionado con seguridad</label>
             </div>
             <div class="form-group form-checkbox">
-                <label><input type="checkbox" id="monitoring" name="monitoring" value="1"> Monitoring</label>
+                <label><input type="checkbox" id="monitoring" name="monitoring" value="1"> Monitorización</label>
             </div>
             <div class="form-group">
-                <label for="approval_status">Approval status</label>
+                <label for="approval_status">Estado de aprobación</label>
                 <input type="text" id="approval_status" name="approval_status" placeholder="-">
             </div>
             <hr class="margin-bottom-large">
@@ -213,9 +213,9 @@
         <div class="resize-handle" id="resizerLeft"></div>
 
         <div class="column2">
-            <!-- Barra de Subject -->
+            <!-- Barra de asunto -->
             <div class="subject-bar">
-                <input type="text" id="subject" name="subject" placeholder="Subject">
+                <input type="text" id="subject" name="subject" placeholder="Asunto" aria-label="Asunto del ticket">
             </div>
 
             <!-- Cuadro de Mensajes -->
@@ -353,7 +353,7 @@
                     </div>
                     {% endif %}
                     <!-- Botón y input de adjuntos -->
-                    <button type="button" class="attach-btn" id="attach-btn" title="Adjuntar">
+                    <button type="button" class="attach-btn" id="attach-btn" title="Adjuntar" aria-label="Adjuntar archivos">
                         <i class="fas fa-paperclip"></i>
                     </button>
                     <input type="file" id="attach-input"
@@ -364,12 +364,12 @@
                     {% if can_use_internal %}
                     <!-- Asistencia de respuesta IA -->
                     <button type="button" id="ai-reply-btn" class="ai-reply-btn"
-                            data-ticket-id="{{ ticket.id }}" title="Sugerir respuesta con IA">
+                            data-ticket-id="{{ ticket.id }}" title="Sugerir respuesta con IA" aria-label="Sugerir respuesta con IA">
                         <i class="fas fa-robot"></i> <span>IA</span>
                     </button>
                     {% endif %}
                     <!-- Enviar -->
-                    <button type="button" id="send-message-btn" title="Enviar">
+                    <button type="button" id="send-message-btn" title="Enviar" aria-label="Enviar mensaje">
                         <i class="fas fa-paper-plane"></i>
                     </button>
                 </div>
@@ -379,9 +379,9 @@
             {% if ticket and ticket.requester %}
         <div class="resize-handle" id="resizerRight"></div>
         <div class="column3 requester-info" id="panelRight">
-            <button type="button" class="panel-tab panel-tab-right" id="toggleRight">
+            <button type="button" class="panel-tab panel-tab-right" id="toggleRight" aria-label="Mostrar u ocultar datos del solicitante">
                 <span class="panel-tab-arrow"><i class="fas fa-chevron-right" id="iconRight"></i></span>
-                <span class="panel-tab-label" id="labelRight">Hide panel</span>
+                <span class="panel-tab-label" id="labelRight">Ocultar panel</span>
             </button>
             <div class="panel-inner" id="panelRightInner">
             {% with u=ticket.requester %}

@@ -3,6 +3,7 @@
 <html lang="es">
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>{% block title %}TicketFlow{% endblock %}</title>
     <link rel="icon" type="image/png" href="{% static 'tickets/logo.png' %}">
 
@@ -24,8 +25,8 @@
 
     {# Bump ?v= on each Sprint deploy to bust browser cache on legacy clients. #}
     <!-- CSS globales -->
-    <link rel="stylesheet" href="{% static 'tickets/style.css' %}?v=s4.7">
-    <link rel="stylesheet" href="{% static 'tickets/ui.css' %}?v=s5.0">
+    <link rel="stylesheet" href="{% static 'tickets/style.css' %}?v=s6.2">
+    <link rel="stylesheet" href="{% static 'tickets/ui.css' %}?v=s6.0">
     <link rel="stylesheet" href="{% static 'tickets/toast.css' %}?v=s4.7">
     <link rel="stylesheet" href="{% static 'tickets/dialog.css' %}?v=s4.7">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
@@ -34,10 +35,10 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css">
     <!-- create_ticket.css loaded globally so ticket panes are styled even when
          the user navigates to a non-ticket page first (e.g. Home → ticket). -->
-    <link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s5.6">
+    <link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s6.3">
     <!-- home.css is the shared sidebar-page stylesheet; load globally so
          SPA fragment swaps don't lose styling. -->
-    <link rel="stylesheet" href="{% static 'tickets/home.css' %}?v=s5.5">
+    <link rel="stylesheet" href="{% static 'tickets/home.css' %}?v=s6.2">
 
     {% block extra_css %}{% endblock %}
 </head>
@@ -77,6 +78,7 @@
       search: "/search/"
     };
     window.static_urls = { logo: "{% static 'tickets/logo.png' %}" };
+    window.ticketFlowVersion = "{{ app_version|escapejs }}";
     window.currentUserId = {{ request.user.id|default:'null' }};
     // Enable SPA-style fragment tab switching. Set to false in console to fall
     // back to full-page navigation if needed.
@@ -92,7 +94,7 @@
     <script src="{% static 'tickets/filters.js' %}?v=s4.7"></script>
     <script src="{% static 'tickets/toast.js' %}?v=s4.7"></script>
     <script src="{% static 'tickets/dialog.js' %}?v=s4.7"></script>
-    <script src="{% static 'tickets/tabs.js' %}?v=s4.7"></script>
+    <script src="{% static 'tickets/tabs.js' %}?v=s6.2"></script>
     <script src="{% static 'tickets/theme.js' %}?v=s5.4"></script>
     <!-- create_ticket.js loaded globally so initTicketPane is available even
          when the user navigates Home → ticket via SPA (no full page reload). -->

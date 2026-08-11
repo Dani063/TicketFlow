@@ -4,7 +4,7 @@
 {% block title %}Administración – TicketFlow{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'tickets/admin_panel.css' %}?v=s6.1">
+<link rel="stylesheet" href="{% static 'tickets/admin_panel.css' %}?v=s6.2">
 {% endblock %}
 
 {% block content %}
@@ -13,17 +13,17 @@
 </div>
 
 <div class="tf-admin-wrap">
-    <div class="tf-tabs tf-admin-tabs">
-        <button class="tf-tab is-active" data-tab="users">Usuarios</button>
-        <button class="tf-tab" data-tab="roles">Roles</button>
-        <button class="tf-tab" data-tab="groups">Grupos</button>
-        <button class="tf-tab" data-tab="assignment">Asignación</button>
-        <button class="tf-tab" data-tab="templates">Plantillas</button>
-        <button class="tf-tab" data-tab="reasons">Motivos CSAT</button>
+    <div class="tf-tabs tf-admin-tabs" role="tablist" aria-label="Secciones de administración">
+        <button class="tf-tab is-active" id="adminTabUsers" role="tab" aria-selected="true" aria-controls="tab-users" data-tab="users">Usuarios</button>
+        <button class="tf-tab" id="adminTabRoles" role="tab" aria-selected="false" aria-controls="tab-roles" data-tab="roles">Roles</button>
+        <button class="tf-tab" id="adminTabGroups" role="tab" aria-selected="false" aria-controls="tab-groups" data-tab="groups">Grupos</button>
+        <button class="tf-tab" id="adminTabAssignment" role="tab" aria-selected="false" aria-controls="tab-assignment" data-tab="assignment">Asignación</button>
+        <button class="tf-tab" id="adminTabTemplates" role="tab" aria-selected="false" aria-controls="tab-templates" data-tab="templates">Plantillas</button>
+        <button class="tf-tab" id="adminTabReasons" role="tab" aria-selected="false" aria-controls="tab-reasons" data-tab="reasons">Motivos CSAT</button>
     </div>
 
     <!-- ======== USERS ======== -->
-    <div id="tab-users" class="tf-admin-panel is-active">
+    <div id="tab-users" class="tf-admin-panel is-active" role="tabpanel" aria-labelledby="adminTabUsers">
         <p class="tf-admin-intro">
             Quién puede entrar en TicketFlow, con qué rol y en qué grupo. Desactivar una cuenta
             le impide entrar sin borrar sus tickets; solo se elimina de verdad si no tiene ninguno.
@@ -71,7 +71,7 @@
         <div class="tf-admin-pag">
             <div class="pagination-bar" id="usersPagBar" style="display:none;">
                 <div class="page-numbers" id="usersPageNums"></div>
-                <span class="page-size-sep">| Ver</span>
+                <span class="page-size-sep">Por página</span>
                 <div class="page-size-wrapper">
                     <select id="usersPageSize">
                         <option value="25">25</option>
@@ -86,7 +86,7 @@
     </div>
 
     <!-- ======== ROLES ======== -->
-    <div id="tab-roles" class="tf-admin-panel">
+    <div id="tab-roles" class="tf-admin-panel" role="tabpanel" aria-labelledby="adminTabRoles">
         <p class="tf-admin-intro">
             El rol decide qué ve cada usuario: los de soporte (agent, soporte, supervisor, manager,
             lead…) ven todos los tickets; el resto, solo aquellos en los que son solicitante o CC.
@@ -112,7 +112,7 @@
     </div>
 
     <!-- ======== GROUPS ======== -->
-    <div id="tab-groups" class="tf-admin-panel">
+    <div id="tab-groups" class="tf-admin-panel" role="tabpanel" aria-labelledby="adminTabGroups">
         <p class="tf-admin-intro">
             Equipos a los que pertenecen los usuarios y a los que se pueden asignar tickets.
             Sirven para acotar reglas de asignación y políticas de SLA. Al borrar un grupo, sus
@@ -138,7 +138,7 @@
     </div>
 
     <!-- ======== ASSIGNMENT RULES (reparto automático de tickets) ======== -->
-    <div id="tab-assignment" class="tf-admin-panel">
+    <div id="tab-assignment" class="tf-admin-panel" role="tabpanel" aria-labelledby="adminTabAssignment">
         <p class="tf-admin-intro">
             Quién entra en el reparto automático de tickets y con qué peso. Se lo lleva el agente
             con menos tickets abiertos en proporción a su peso. Cada regla puede acotarse a unos
@@ -172,7 +172,7 @@
     </div>
 
     <!-- ======== RESPONSE TEMPLATES ======== -->
-    <div id="tab-templates" class="tf-admin-panel">
+    <div id="tab-templates" class="tf-admin-panel" role="tabpanel" aria-labelledby="adminTabTemplates">
         <p class="tf-admin-intro">
             Correos que TicketFlow envía al cliente. Se eligen por clave, marca e idioma, en cascada:
             si no hay plantilla de la marca se usa la global, y si no hay en el idioma del ticket se
@@ -201,7 +201,7 @@
     </div>
 
     <!-- ======== MOTIVOS DE VOTO NEGATIVO (CSAT) ======== -->
-    <div id="tab-reasons" class="tf-admin-panel">
+    <div id="tab-reasons" class="tf-admin-panel" role="tabpanel" aria-labelledby="adminTabReasons">
         <p class="tf-admin-intro">
             Motivos que se ofrecen al cliente cuando valora negativamente un ticket. Se desactivan en
             vez de borrarse, para no dejar sin explicación las valoraciones que ya los usan. Comparte
@@ -546,5 +546,5 @@
 <script>
 window.__adminPanelData = { currentUserId: {{ request.user.id }} };
 </script>
-<script src="{% static 'tickets/admin_panel.js' %}?v=s6.1"></script>
+<script src="{% static 'tickets/admin_panel.js' %}?v=s6.2"></script>
 {% endblock %}

@@ -44,17 +44,36 @@
     document.querySelectorAll('.dialog-backdrop').forEach(o => o.addEventListener('click', e => { if(e.target===o) closeModal(o.id); }));
 
     /* ---- tabs ---- */
-    document.querySelectorAll('.tf-tab[data-tab]').forEach(btn => {
+    const adminTabs = [...document.querySelectorAll('.tf-tab[data-tab]')];
+    adminTabs.forEach((btn, index) => {
+        btn.tabIndex = btn.classList.contains('is-active') ? 0 : -1;
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.tf-tab[data-tab]').forEach(b => b.classList.remove('is-active'));
+            adminTabs.forEach(b => {
+                b.classList.remove('is-active');
+                b.setAttribute('aria-selected', 'false');
+                b.tabIndex = -1;
+            });
             document.querySelectorAll('.tf-admin-panel').forEach(p => p.classList.remove('is-active'));
             btn.classList.add('is-active');
+            btn.setAttribute('aria-selected', 'true');
+            btn.tabIndex = 0;
             document.getElementById('tab-' + btn.dataset.tab).classList.add('is-active');
             if (btn.dataset.tab === 'roles')  loadRoles();
             if (btn.dataset.tab === 'groups') loadGroups();
             if (btn.dataset.tab === 'assignment') loadRules();
             if (btn.dataset.tab === 'templates') loadTemplates();
             if (btn.dataset.tab === 'reasons') loadReasons();
+        });
+        btn.addEventListener('keydown', e => {
+            let next = null;
+            if (e.key === 'ArrowRight') next = adminTabs[(index + 1) % adminTabs.length];
+            if (e.key === 'ArrowLeft') next = adminTabs[(index - 1 + adminTabs.length) % adminTabs.length];
+            if (e.key === 'Home') next = adminTabs[0];
+            if (e.key === 'End') next = adminTabs[adminTabs.length - 1];
+            if (!next) return;
+            e.preventDefault();
+            next.focus();
+            next.click();
         });
     });
 
@@ -79,6 +98,7 @@
         const prev = document.createElement('button');
         prev.className = 'page-num-btn page-arrow';
         prev.innerHTML = '&#8249;';
+        prev.setAttribute('aria-label', 'Página anterior');
         prev.disabled = cur <= 1;
         prev.onclick = () => usersGo(cur - 1);
         container.appendChild(prev);
@@ -100,6 +120,7 @@
         const next = document.createElement('button');
         next.className = 'page-num-btn page-arrow';
         next.innerHTML = '&#8250;';
+        next.setAttribute('aria-label', 'Página siguiente');
         next.disabled = cur >= tot;
         next.onclick = () => usersGo(cur + 1);
         container.appendChild(next);
@@ -184,9 +205,9 @@
                         </td>
                         <td class="col-actions">
                             <div class="tf-admin-table-actions">
-                                <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${u.id}" title="Editar"><i class="fas fa-pen"></i></button>
-                                <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="pwd"  data-id="${u.id}" title="Contraseña"><i class="fas fa-key"></i></button>
-                                <button class="tf-btn tf-btn--danger tf-btn--sm"    data-action="del"  data-id="${u.id}" title="Eliminar"><i class="fas fa-trash"></i></button>
+                                <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${u.id}" title="Editar" aria-label="Editar ${esc(u.name)}"><i class="fas fa-pen"></i></button>
+                                <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="pwd"  data-id="${u.id}" title="Contraseña" aria-label="Cambiar contraseña de ${esc(u.name)}"><i class="fas fa-key"></i></button>
+                                <button class="tf-btn tf-btn--danger tf-btn--sm"    data-action="del"  data-id="${u.id}" title="Eliminar" aria-label="Eliminar ${esc(u.name)}"><i class="fas fa-trash"></i></button>
                             </div>
                         </td>`;
                     frag.appendChild(tr);
@@ -384,8 +405,8 @@
                     <td>${esc(r.role_name)} ${r.protected?'<span class="tf-pill tf-pill--warning">Sistema</span>':''}</td>
                     <td>${r.user_count.toLocaleString()}</td>
                     <td class="col-actions"><div class="tf-admin-table-actions">
-                        <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${r.id}" ${r.protected?'disabled':''} title="Editar"><i class="fas fa-pen"></i></button>
-                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${r.id}" ${r.protected||r.user_count>0?'disabled':''} title="Eliminar"><i class="fas fa-trash"></i></button>
+                        <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${r.id}" ${r.protected?'disabled':''} title="Editar" aria-label="Editar rol ${esc(r.role_name)}"><i class="fas fa-pen"></i></button>
+                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${r.id}" ${r.protected||r.user_count>0?'disabled':''} title="Eliminar" aria-label="Eliminar rol ${esc(r.role_name)}"><i class="fas fa-trash"></i></button>
                     </div></td>`;
                 frag.appendChild(tr);
             });
@@ -464,8 +485,8 @@
                     <td>${esc(g.group_name)}</td>
                     <td>${g.user_count.toLocaleString()}</td>
                     <td class="col-actions"><div class="tf-admin-table-actions">
-                        <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${g.id}" title="Editar"><i class="fas fa-pen"></i></button>
-                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${g.id}" title="Eliminar"><i class="fas fa-trash"></i></button>
+                        <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${g.id}" title="Editar" aria-label="Editar grupo ${esc(g.group_name)}"><i class="fas fa-pen"></i></button>
+                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${g.id}" title="Eliminar" aria-label="Eliminar grupo ${esc(g.group_name)}"><i class="fas fa-trash"></i></button>
                     </div></td>`;
                 frag.appendChild(tr);
             });
@@ -595,8 +616,8 @@
                         <span class="tf-pill ${r.active?'tf-pill--success':'tf-pill--danger'}">${r.active?'Activa':'Inactiva'}</span>
                     </td>
                     <td class="col-actions"><div class="tf-admin-table-actions">
-                        <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${r.id}" title="Editar"><i class="fas fa-pen"></i></button>
-                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${r.id}" ${r.active?'':'disabled'} title="Desactivar"><i class="fas fa-ban"></i></button>
+                        <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${r.id}" title="Editar" aria-label="Editar regla ${esc(r.name)}"><i class="fas fa-pen"></i></button>
+                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${r.id}" ${r.active?'':'disabled'} title="Desactivar" aria-label="Desactivar regla ${esc(r.name)}"><i class="fas fa-ban"></i></button>
                     </div></td>`;
                 frag.appendChild(tr);
             });
@@ -848,8 +869,8 @@
                         <span class="tf-pill ${t.active?'tf-pill--success':'tf-pill--danger'}">${t.active?'Activa':'Inactiva'}</span>
                     </td>
                     <td class="col-actions"><div class="tf-admin-table-actions">
-                        <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${t.id}" title="Editar"><i class="fas fa-pen"></i></button>
-                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${t.id}" ${t.active?'':'disabled'} title="Desactivar"><i class="fas fa-ban"></i></button>
+                        <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${t.id}" title="Editar" aria-label="Editar plantilla ${esc(t.key)}"><i class="fas fa-pen"></i></button>
+                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${t.id}" ${t.active?'':'disabled'} title="Desactivar" aria-label="Desactivar plantilla ${esc(t.key)}"><i class="fas fa-ban"></i></button>
                     </div></td>`;
                 frag.appendChild(tr);
             });
@@ -977,8 +998,8 @@
                         <span class="tf-pill ${r.active?'tf-pill--success':'tf-pill--danger'}">${r.active?'Activo':'Inactivo'}</span>
                     </td>
                     <td class="col-actions"><div class="tf-admin-table-actions">
-                        <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${r.id}" title="Editar"><i class="fas fa-pen"></i></button>
-                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${r.id}" ${r.active?'':'disabled'} title="Desactivar"><i class="fas fa-ban"></i></button>
+                        <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${r.id}" title="Editar" aria-label="Editar motivo ${esc(r.label)}"><i class="fas fa-pen"></i></button>
+                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${r.id}" ${r.active?'':'disabled'} title="Desactivar" aria-label="Desactivar motivo ${esc(r.label)}"><i class="fas fa-ban"></i></button>
                     </div></td>`;
                 frag.appendChild(tr);
             });

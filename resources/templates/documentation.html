@@ -5,6 +5,16 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>TicketFlow - Documentación</title>
+    <link rel="icon" type="image/png" href="{% static 'tickets/logo.png' %}">
+    <script>
+        (function () {
+            try {
+                var pref = localStorage.getItem('tf.theme') || 'system';
+                var dark = pref === 'dark' || (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+            } catch (_) { /* no-op */ }
+        })();
+    </script>
     <style>
         * {
             margin: 0;
@@ -13,18 +23,27 @@
         }
 
         :root {
-            --color-primary: #5b67ca;
-            --color-bg: #ffffff;
-            --color-text: #1a1a1a;
-            --color-border: #e0e0e0;
-            --color-bg-alt: #f9f9f9;
+            --color-primary: #7c3aed;
+            --color-primary-hover: #6d28d9;
+            --color-accent: #58d8f7;
+            --color-bg: #f5f6f8;
+            --color-surface: #ffffff;
+            --color-text: #1e293b;
+            --color-text-muted: #475569;
+            --color-border: #e2e8f0;
+            --color-bg-alt: #f8fafc;
+            --shadow-card: 0 4px 12px rgba(15, 23, 42, .08);
         }
 
         [data-theme="dark"] {
-            --color-bg: #1e1e1e;
-            --color-text: #f0f0f0;
-            --color-border: #333;
-            --color-bg-alt: #2a2a2a;
+            --color-bg: #0f172a;
+            --color-surface: #1e293b;
+            --color-text: #e2e8f0;
+            --color-text-muted: #cbd5e1;
+            --color-border: #334155;
+            --color-bg-alt: #111827;
+            --shadow-card: 0 4px 16px rgba(0, 0, 0, .35);
+            color-scheme: dark;
         }
 
         html {
@@ -39,10 +58,19 @@
         }
 
         .doc-container {
-            max-width: 900px;
+            max-width: 1280px;
             margin: 0 auto;
             padding: 40px 20px;
         }
+
+        .doc-layout {
+            display: grid;
+            grid-template-columns: 250px minmax(0, 1fr);
+            gap: 32px;
+            align-items: start;
+        }
+
+        .doc-content { min-width: 0; }
 
         .doc-header {
             text-align: center;
@@ -59,8 +87,19 @@
 
         .doc-header p {
             font-size: 1.1em;
+            color: var(--color-text-muted);
+        }
+
+        .doc-version {
+            display: inline-flex;
+            margin-top: 12px;
+            padding: 4px 10px;
+            border: 1px solid var(--color-border);
+            border-radius: 999px;
+            background: var(--color-bg-alt);
             color: var(--color-text);
-            opacity: 0.8;
+            font-size: .85rem;
+            font-weight: 600;
         }
 
         .doc-toc {
@@ -68,13 +107,18 @@
             border: 1px solid var(--color-border);
             border-radius: 8px;
             padding: 25px;
+            position: sticky;
+            top: 20px;
             margin-bottom: 40px;
+            box-shadow: var(--shadow-card);
         }
 
-        .doc-toc h2 {
+        .doc-toc summary {
             font-size: 1.3em;
             margin-bottom: 15px;
             color: var(--color-primary);
+            font-weight: 700;
+            cursor: pointer;
         }
 
         .doc-toc ul {
@@ -95,11 +139,20 @@
             text-decoration: underline;
         }
 
+        .doc-toc a:focus-visible,
+        .back-button:focus-visible,
+        .print-button:focus-visible {
+            outline: 2px solid var(--color-accent);
+            outline-offset: 3px;
+        }
+
         .doc-section {
             margin-bottom: 50px;
             padding: 30px;
-            background-color: var(--color-bg);
+            background-color: var(--color-surface);
             border-left: 4px solid var(--color-primary);
+            border-radius: 0 10px 10px 0;
+            box-shadow: var(--shadow-card);
         }
 
         .doc-section h2 {
@@ -120,6 +173,9 @@
             margin-bottom: 12px;
             line-height: 1.8;
         }
+
+        .doc-section p,
+        .doc-section li { color: var(--color-text-muted); }
 
         .doc-section ul, .doc-section ol {
             margin-left: 20px;
@@ -247,7 +303,7 @@
         }
 
         .back-button:hover {
-            opacity: 0.9;
+            background: var(--color-primary-hover);
         }
 
         @media print {
@@ -280,6 +336,19 @@
                 font-size: 1.8em;
             }
 
+            .doc-header { margin-bottom: 28px; }
+
+            .doc-layout { display: block; }
+
+            .doc-toc {
+                position: static;
+                padding: 16px;
+                margin-bottom: 24px;
+            }
+
+            .doc-toc summary { margin-bottom: 0; }
+            .doc-toc[open] summary { margin-bottom: 12px; }
+
             .doc-section {
                 padding: 20px;
             }
@@ -287,9 +356,14 @@
             .print-button {
                 bottom: 15px;
                 right: 15px;
-                padding: 10px 16px;
-                font-size: 0.9em;
+                width: 44px;
+                height: 44px;
+                padding: 0;
+                border-radius: 50%;
+                font-size: 0;
             }
+
+            .print-button::before { content: '🖨️'; font-size: 18px; }
         }
     </style>
 </head>
@@ -300,10 +374,12 @@
         <div class="doc-header">
             <h1>TicketFlow</h1>
             <p>Sistema de gestión de tickets tipo Zendesk</p>
+            <span class="doc-version">Versión {{ app_version }}</span>
         </div>
 
-        <div class="doc-toc">
-            <h2>Tabla de contenidos</h2>
+        <div class="doc-layout">
+        <details class="doc-toc" open>
+            <summary>Tabla de contenidos</summary>
             <ul>
                 <li><a href="#que-es">¿Qué es TicketFlow?</a></li>
                 <li><a href="#empezar">Empezar</a></li>
@@ -316,7 +392,9 @@
                 <li><a href="#tema">Cambiar tema</a></li>
                 <li><a href="#soporte">Soporte</a></li>
             </ul>
-        </div>
+        </details>
+
+        <main class="doc-content">
 
         <div class="doc-section" id="que-es">
             <h2>¿Qué es TicketFlow?</h2>
@@ -367,8 +445,8 @@
                 <li><strong>Dashboard:</strong> Vista general de estadísticas</li>
                 <li><strong>Tickets:</strong> Lista completa de tickets</li>
                 <li><strong>Clientes:</strong> Directorio de clientes</li>
-                <li><strong>Reportes:</strong> Análisis y estadísticas</li>
-                <li><strong>Configuración:</strong> Ajustes de cuenta</li>
+                <li><strong>Reporting:</strong> Análisis, exportaciones y estadísticas</li>
+                <li><strong>Administración:</strong> Usuarios, roles, grupos, asignación y plantillas, si tu rol tiene acceso</li>
             </ul>
         </div>
 
@@ -376,12 +454,12 @@
             <h2>Crear un ticket</h2>
             <h3>Pasos para crear un nuevo ticket</h3>
             <ol>
-                <li>Haz clic en el botón <strong>"Nuevo ticket"</strong> o presiona <kbd>c</kbd></li>
+                <li>Haz clic en <strong>"+ Añadir"</strong> o presiona <kbd>c</kbd></li>
                 <li>Completa los campos obligatorios:
                     <ul>
-                        <li><strong>Asunto:</strong> Titulo corto del problema</li>
-                        <li><strong>Descripción:</strong> Detalles completos de la solicitud</li>
-                        <li><strong>Cliente:</strong> Selecciona o crea un nuevo cliente</li>
+                        <li><strong>Asunto:</strong> Título corto del problema</li>
+                        <li><strong>Solicitante:</strong> Persona que comunica la incidencia</li>
+                        <li><strong>Empresa:</strong> Entidad a la que pertenece el ticket</li>
                         <li><strong>Servicio:</strong> Categoría del ticket</li>
                     </ul>
                 </li>
@@ -393,7 +471,7 @@
                         <li>Adjunta archivos relevantes</li>
                     </ul>
                 </li>
-                <li>Haz clic en <strong>"Crear ticket"</strong> para guardar</li>
+                <li>Escribe el mensaje inicial y utiliza el botón de envío para guardar/publicar el ticket</li>
             </ol>
 
             <h3>Editor de contenido</h3>
@@ -439,10 +517,10 @@
             <h3>Cambiar estado</h3>
             <p>Los tickets pueden estar en los siguientes estados:</p>
             <ul>
-                <li><strong>Abierto:</strong> Nuevo ticket sin procesar</li>
-                <li><strong>Pendiente:</strong> Esperando respuesta del cliente</li>
-                <li><strong>Resuelto:</strong> Problema solucionado</li>
-                <li><strong>Cerrado:</strong> Ticket finalizado</li>
+                <li><strong>open:</strong> Ticket abierto que requiere seguimiento</li>
+                <li><strong>pending:</strong> En espera de información o respuesta</li>
+                <li><strong>resolved:</strong> Problema solucionado</li>
+                <li><strong>closed:</strong> Ticket finalizado</li>
             </ul>
 
             <h3>Asignar tickets</h3>
@@ -457,7 +535,7 @@
             <p>Si hay tickets duplicados o relacionados, puedes fusionarlos:</p>
             <ol>
                 <li>Selecciona múltiples tickets con el checkbox</li>
-                <li>Haz clic en "Acciones masivas" → "Fusionar"</li>
+                <li>En la barra de selección que aparece, haz clic en <strong>"Fusionar"</strong></li>
                 <li>Elige el ticket destino</li>
                 <li>Los comentarios se consolidarán en uno solo</li>
             </ol>
@@ -466,7 +544,7 @@
             <p>Para eliminar tickets (acción irreversible):</p>
             <ol>
                 <li>Selecciona los tickets a eliminar</li>
-                <li>Haz clic en "Acciones masivas" → "Eliminar"</li>
+                <li>En la barra de selección que aparece, haz clic en <strong>"Eliminar"</strong></li>
                 <li>Confirma la acción</li>
             </ol>
         </div>
@@ -481,28 +559,16 @@
                 <li>Ordena por diferentes criterios</li>
             </ul>
 
-            <h3>Crear un nuevo cliente</h3>
-            <ol>
-                <li>Ve a "Clientes"</li>
-                <li>Haz clic en "Nuevo cliente"</li>
-                <li>Completa la información:
-                    <ul>
-                        <li>Nombre completo</li>
-                        <li>Email principal</li>
-                        <li>Teléfono (opcional)</li>
-                        <li>Rol y grupo</li>
-                    </ul>
-                </li>
-                <li>Guarda el cliente</li>
-            </ol>
+            <h3>Alta y edición de usuarios</h3>
+            <p>La pantalla Clientes funciona como directorio. Si tienes permisos de administración, crea o edita cuentas desde <strong>Administración → Usuarios</strong>, donde puedes definir nombre, email, rol, grupo y estado.</p>
 
             <h3>Perfil de cliente</h3>
             <p>En el perfil de cliente puedes:</p>
             <ul>
                 <li>Ver todos sus tickets</li>
-                <li>Agregar notas internas</li>
-                <li>Ver historial de interacciones</li>
-                <li>Actualizar información de contacto</li>
+                <li>Filtrar los tickets asociados por estado</li>
+                <li>Buscar por asunto o ID</li>
+                <li>Volver a la pestaña del perfil sin recargarla</li>
             </ul>
         </div>
 
@@ -512,19 +578,19 @@
             <p>Haz clic en "Reportes" en la barra lateral para ver analíticas detalladas sobre:</p>
             <ul>
                 <li><strong>Volumen de tickets:</strong> Número de tickets por período</li>
-                <li><strong>Tiempo de respuesta:</strong> Promedio de respuestas</li>
+                <li><strong>Tiempos:</strong> Media de resolución y antigüedad del backlog</li>
                 <li><strong>Satisfacción:</strong> Calificaciones de clientes</li>
                 <li><strong>Desempeño por agente:</strong> Productividad del equipo</li>
-                <li><strong>Problemas frecuentes:</strong> Categorías más comunes</li>
+                <li><strong>Distribuciones:</strong> Estado, prioridad, tipo y canal</li>
             </ul>
 
             <h3>Filtrar datos</h3>
             <p>Los reportes permiten filtrar por:</p>
             <ul>
-                <li>Rango de fechas</li>
-                <li>Agente o equipo</li>
-                <li>Servicio o categoría</li>
-                <li>Estado del ticket</li>
+                <li>Empresa</li>
+                <li>Presets de 7, 30, 90 días o un año</li>
+                <li>Rango de fechas personalizado</li>
+                <li>Exportación del resultado actual a CSV o PDF</li>
             </ul>
         </div>
 
@@ -588,7 +654,7 @@
             <h3>Cambiar el tema</h3>
             <ol>
                 <li>Haz clic en tu avatar en la esquina superior derecha</li>
-                <li>Ve a "Appearance"</li>
+                <li>Ve a "Apariencia"</li>
                 <li>Selecciona tu tema preferido</li>
                 <li>Los cambios se guardan automáticamente</li>
             </ol>
@@ -617,8 +683,16 @@
             <p>Para cualquier pregunta, comentario o reporte de problemas:</p>
             <div class="code-block">Email: molqueda@cloudwws.com</div>
         </div>
+        </main>
+        </div>
     </div>
 
     <button class="print-button" onclick="window.print()">🖨️ Imprimir / PDF</button>
+    <script>
+        if (window.matchMedia('(max-width: 768px)').matches) {
+            var mobileToc = document.querySelector('.doc-toc');
+            if (mobileToc) mobileToc.removeAttribute('open');
+        }
+    </script>
 </body>
 </html>

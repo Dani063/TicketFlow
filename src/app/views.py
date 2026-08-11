@@ -6,6 +6,7 @@ from django.db import transaction
 from django.db.models import Q, OuterRef, Subquery, Count, Max, Case, When, IntegerField, F
 from django.utils.dateparse import parse_datetime
 from datetime import datetime, timedelta
+from collections import deque
 from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
@@ -271,6 +272,72 @@ def _parse_page_size(raw):
         return _DEFAULT_PAGE_SIZE
 
 
+def _active_assignment_agents():
+    """Agentes seleccionados en miembros activos de reglas de reparto activas."""
+    return list(
+        AssignmentService.agent_queryset()
+        .filter(
+            assignment_rule_memberships__active=True,
+            assignment_rule_memberships__rule__active=True,
+        )
+        .distinct()
+        .order_by('name', 'id')
+        .values('id', 'name', 'email')
+    )
+
+
+def _active_assignment_agent_ids():
+    return (
+        AssignmentService.agent_queryset()
+        .filter(
+            assignment_rule_memberships__active=True,
+            assignment_rule_memberships__rule__active=True,
+        )
+        .order_by()
+        .values_list('id', flat=True)
+        .distinct()
+    )
+
+
+def _balanced_agent_page(agent_counts, page, page_size):
+    """
+    Calcula el tramo de cada agente mediante round-robin estable.
+
+    El cursor continúa entre páginas: los restos rotan, un agente agotado deja
+    su hueco a los demás y, si hay más agentes que filas, la página siguiente
+    continúa por el siguiente agente en vez de favorecer siempre a los primeros.
+    """
+    counts = [(agent_id, max(0, int(total))) for agent_id, total in agent_counts if total]
+    total = sum(total for _, total in counts)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = min(max(1, page), total_pages)
+    if not counts:
+        return page, total_pages, total, {}, {}
+
+    remaining = {agent_id: count for agent_id, count in counts}
+    consumed = {agent_id: 0 for agent_id, _ in counts}
+    queue = deque(agent_id for agent_id, _ in counts)
+    target_offsets = {}
+    target_allocations = {}
+
+    for current_page in range(1, page + 1):
+        if current_page == page:
+            target_offsets = consumed.copy()
+        allocation = {agent_id: 0 for agent_id, _ in counts}
+        slots = min(page_size, sum(remaining.values()))
+        for _ in range(slots):
+            agent_id = queue.popleft()
+            remaining[agent_id] -= 1
+            consumed[agent_id] += 1
+            allocation[agent_id] += 1
+            if remaining[agent_id] > 0:
+                queue.append(agent_id)
+        if current_page == page:
+            target_allocations = {agent_id: amount for agent_id, amount in allocation.items() if amount}
+
+    return page, total_pages, total, target_offsets, target_allocations
+
+
 def _ticket_filter_counts_cache_key(user, brand_id=None):
     role_name = (getattr(getattr(user, 'role', None), 'role_name', '') or '').lower()
     return (
@@ -348,7 +415,11 @@ def _tickets_for_view(base_qs, view, user):
     if view == "unassigned":
         return base_qs.filter(assignee__isnull=True)
     if view == "all_unsolved_no_tareas":
-        return base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="task"))
+        return base_qs.filter(
+            ~Q(status__in=["closed", "resolved"]),
+            ~Q(type="task"),
+            assignee_id__in=_active_assignment_agent_ids(),
+        )
     if view == "recently_updated":
         return base_qs.filter(updated_at__gte=now - timedelta(hours=24))
     if view == "recently_solved":
@@ -648,6 +719,16 @@ def filter_tickets(request):
             "sla_at_risk":        n_sla_at_risk,
         }
 
+    # Este contador depende de la selección viva del panel de Asignación, no
+    # del conjunto global de tickets no resueltos. Se recalcula incluso cuando
+    # el resto de contadores procede de la caché (TTL 15 s) para que activar o
+    # desactivar una regla/agente se refleje de inmediato.
+    if filtros:
+        filtros = dict(filtros)
+        filtros['all_unsolved_no_tareas'] = _tickets_for_view(
+            base_qs, 'all_unsolved_no_tareas', request.user
+        ).count()
+
     if _counts_cache_key and filtros and not _counts_loaded_from_cache:
         cache.set(_counts_cache_key, filtros, _TICKET_FILTER_COUNTS_TTL)
 
@@ -655,13 +736,19 @@ def filter_tickets(request):
         return JsonResponse({"filtros": filtros})
 
     tickets = _tickets_for_view(base_qs, view, request.user)
+    balanced_assignment_view = view == 'all_unsolved_no_tareas'
 
     db_sort = _TICKET_SORT_FIELDS.get(sort_by)
     db_sort_signed = (f'-{db_sort}' if sort_dir == 'desc' else db_sort) if db_sort else None
 
+    # La vista equilibrada conserva siempre sus bloques por agente: la columna
+    # elegida ordena dentro del tramo de cada agente, no rompe el reparto.
+    if balanced_assignment_view:
+        group_by = 'assignee'
+        group_sort = None
     # Si el usuario ha pedido ordenar por una columna, desactivamos la agrupación
-    # para mostrar la tabla plana ordenada por su criterio.
-    if db_sort_signed:
+    # para mostrar la tabla plana ordenada por su criterio en el resto de vistas.
+    elif db_sort_signed:
         group_by = None
         group_sort = None
     elif fast_pagination:
@@ -674,7 +761,7 @@ def filter_tickets(request):
 
     if group_sort:
         tickets = tickets.order_by(group_sort, '-updated_at')
-    elif db_sort_signed:
+    elif db_sort_signed and not balanced_assignment_view:
         if sort_by == 'sla':
             # Orden por urgencia de SLA: el próximo vencimiento primero, sin SLA al final.
             tickets = _ensure_urgency(tickets)
@@ -704,7 +791,71 @@ def filter_tickets(request):
     exact_total = True
     has_next = False
 
-    if fast_pagination:
+    balanced_distribution = None
+
+    if balanced_assignment_view:
+        assignment_agents = _active_assignment_agents()
+        ticket_counts = dict(
+            tickets.order_by()
+            .values('assignee_id')
+            .annotate(total=Count('id'))
+            .values_list('assignee_id', 'total')
+        )
+        agent_counts = [
+            (agent['id'], ticket_counts[agent['id']])
+            for agent in assignment_agents
+            if ticket_counts.get(agent['id'], 0) > 0
+        ]
+        page, total_pages, total, agent_offsets, agent_allocations = _balanced_agent_page(
+            agent_counts, page, page_size
+        )
+
+        ordered_page_qs = page_qs
+        if db_sort_signed:
+            if sort_by == 'sla':
+                ordered_page_qs = _ensure_urgency(ordered_page_qs)
+                ticket_ordering = [
+                    F('sla_next_due').desc(nulls_last=True) if sort_dir == 'desc'
+                    else F('sla_next_due').asc(nulls_last=True),
+                    '-updated_at',
+                    '-id',
+                ]
+            elif sort_by == 'assignee':
+                # El agente define el bloque y se mantiene alfabético; dentro
+                # del bloque usamos el orden operativo habitual.
+                ticket_ordering = ['-updated_at', '-id']
+            else:
+                ticket_ordering = [db_sort_signed]
+                if db_sort != 'id':
+                    ticket_ordering.append('id' if sort_dir == 'asc' else '-id')
+        else:
+            ticket_ordering = ['-updated_at', '-id']
+
+        tickets_page = []
+        balanced_distribution = []
+        for agent in assignment_agents:
+            agent_id = agent['id']
+            amount = agent_allocations.get(agent_id, 0)
+            if not amount:
+                continue
+            start = agent_offsets.get(agent_id, 0)
+            rows = list(
+                ordered_page_qs
+                .filter(assignee_id=agent_id)
+                .order_by(*ticket_ordering)[start:start + amount]
+            )
+            tickets_page.extend(rows)
+            balanced_distribution.append({
+                'agent_id': agent_id,
+                'agent': agent['name'] or agent['email'],
+                'total': ticket_counts.get(agent_id, 0),
+                'offset': start,
+                'returned': len(rows),
+            })
+
+        exact_total = True
+        has_next = page < total_pages
+    elif fast_pagination:
         tickets_page = list(page_qs[offset:offset + page_size + 1])
 
         # If the URL points past the end, fall back to one exact COUNT so the UI
@@ -819,6 +970,10 @@ def filter_tickets(request):
         },
         "sort": {"sort_by": sort_by if db_sort else "", "sort_dir": sort_dir},
         "group_by": group_by,
+        "balanced_assignment": {
+            "enabled": True,
+            "agents": balanced_distribution,
+        } if balanced_distribution is not None else {"enabled": False, "agents": []},
     })
 
 @api_login_required
@@ -1319,16 +1474,6 @@ def reporting_export_csv(request):
     return response
 
 @login_required
-def settings(request):
-    if not _is_agent(request.user) and not _is_admin(request.user):
-        return render(request, "tickets/403.html", {"error": "No tienes permisos para acceder a la configuración."}, status=403)
-    context = {
-        'username': request.user.name,
-        'email': request.user.email,
-    }
-    return render(request, "tickets/settings.html", context)
-   
-@login_required
 def profile(request):
     user = request.user
     base_qs = Ticket.objects.filter(
@@ -1546,6 +1691,14 @@ def _is_agent(user):
 
 def _is_admin(user):
     return permission_is_admin(user)
+
+
+@login_required
+def legacy_settings_redirect(request):
+    """Keep old bookmarks useful without restoring the removed settings screen."""
+    destination = 'admin_panel' if _is_admin(request.user) else 'profile'
+    return redirect(destination)
+
 
 @login_required
 def create_ticket(request):

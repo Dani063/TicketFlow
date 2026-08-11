@@ -69,7 +69,7 @@
 
         renderPageNumbers(p.page, p.total_pages);
 
-        const from = (p.page - 1) * p.page_size + 1;
+        const from = p.total ? (p.page - 1) * p.page_size + 1 : 0;
         const to   = Math.min(p.page * p.page_size, p.total);
         document.getElementById("registrosInfo").textContent =
             `registros (mostrando ${from}–${to} de ${p.total})`;
@@ -138,12 +138,24 @@
             const json = await response.json();
 
             if (!json.customers || json.customers.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="7"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message">No hay usuarios.</span></div></td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="8"><div class="tf-empty tf-empty--compact">` +
+                    `<span class="tf-empty-icon"><i class="fas fa-user-search"></i></span>` +
+                    `<span class="tf-empty-title">Sin clientes</span>` +
+                    `<span class="tf-empty-message">Prueba otra búsqueda o cambia los filtros.</span>` +
+                    `</div></td></tr>`;
             } else {
                 const fragment = document.createDocumentFragment();
                 json.customers.forEach(u => {
                     const row = document.createElement("tr");
-                    row.onclick = () => openCustomer(u.id);
+                    row.onclick = () => openCustomer(u.id, u.name);
+                    row.tabIndex = 0;
+                    row.setAttribute('aria-label', `Abrir perfil de ${u.name}`);
+                    row.addEventListener('keydown', (event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            openCustomer(u.id, u.name);
+                        }
+                    });
                     row.innerHTML = `
                         <td>${u.id}</td>
                         <td>${u.name}</td>
@@ -152,6 +164,7 @@
                         <td>${u.role}</td>
                         <td>${u.group}</td>
                         <td>${u.created_at}</td>
+                        <td class="customer-open-cell" aria-hidden="true"><i class="fas fa-chevron-right"></i></td>
                     `;
                     fragment.appendChild(row);
                 });
@@ -182,15 +195,15 @@
             }
         } catch (err) {
             console.error("Error cargando usuarios:", err);
-            tbody.innerHTML = `<tr><td colspan="7"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message" style="color: var(--color-danger);">Error al cargar usuarios.</span></div></td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8"><div class="tf-empty tf-empty--compact"><span class="tf-empty-title" style="color: var(--color-danger);">No se pudieron cargar los clientes</span><span class="tf-empty-message">Vuelve a intentarlo.</span></div></td></tr>`;
         } finally {
             spinner.style.display = "none";
         }
     }
     window.loadCustomers = loadCustomers;
 
-    function openCustomer(customerId) {
-        const tabText = "Cliente " + customerId;
+    function openCustomer(customerId, customerName) {
+        const tabText = customerName || ("Cliente " + customerId);
         const tabUrl = CUSTOMER_PROFILE_URL + "?id=" + customerId;
         if (window.Tabs && typeof window.Tabs.addTab === 'function') {
             window.Tabs.addTab(tabText, tabUrl);
@@ -201,6 +214,8 @@
 
     function init() {
         const filters = document.querySelectorAll("#customerFilters li");
+        const filtersPanel = document.getElementById('customerFiltersPanel');
+        const filtersToggle = document.getElementById('customerFiltersToggle');
         let activeView = getUrlParam("view");
         let activePage = parseInt(getUrlParam("page") || "1", 10) || 1;
         let savedSize  = parseInt(getUrlParam("page_size") || "50", 10);
@@ -215,13 +230,31 @@
 
         if (!activeView && filters.length > 0) activeView = filters[0].dataset.view;
 
+        if (filtersToggle && filtersPanel) {
+            filtersToggle.addEventListener('click', () => {
+                const open = filtersPanel.classList.toggle('is-open');
+                filtersToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+        }
+
         filters.forEach(f => {
             f.addEventListener("click", () => {
-                filters.forEach(x => x.classList.remove("active"));
+                filters.forEach(x => {
+                    x.classList.remove("active");
+                    x.removeAttribute('aria-current');
+                });
                 f.classList.add("active");
+                f.setAttribute('aria-current', 'true');
                 loadCustomers(f.dataset.view, 1);
+                if (window.matchMedia('(max-width: 768px)').matches && filtersPanel) {
+                    filtersPanel.classList.remove('is-open');
+                    if (filtersToggle) filtersToggle.setAttribute('aria-expanded', 'false');
+                }
             });
-            if (f.dataset.view === activeView) f.classList.add("active");
+            if (f.dataset.view === activeView) {
+                f.classList.add("active");
+                f.setAttribute('aria-current', 'true');
+            }
         });
 
         // Wire search/selects via shared helper — restores from URL + debounces.

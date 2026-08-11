@@ -327,6 +327,15 @@ class TicketFlowBackendTests(TestCase):
         self.assertIn('data-tab="assignment"', html)
         self.assertIn('id="ruleMembers"', html)
 
+    def test_legacy_settings_url_redirects_without_restoring_the_removed_screen(self):
+        self.client.force_login(self.admin)
+        response = self.client.get(reverse("legacy_settings_redirect"))
+        self.assertRedirects(response, reverse("admin_panel"), fetch_redirect_response=False)
+
+        self.client.force_login(self.agent)
+        response = self.client.get(reverse("legacy_settings_redirect"))
+        self.assertRedirects(response, reverse("profile"), fetch_redirect_response=False)
+
     def test_admin_panel_scope_options_include_legacy_values(self):
         """Un servicio heredado de Zendesk debe poder elegirse aunque no este en la taxonomia."""
         self.make_ticket(service="servicio_viejo_zendesk", channel="email")
@@ -623,6 +632,109 @@ class EntityTaxonomyTests(_BaseFixture):
         self.assertEqual(subjects, {"A1", "A2"})
         self.assertEqual(data["filtros"]["mis_tickets"], 2)
         self.assertTrue(all(t["brand"] == "Comuny" for t in data["tickets"]))
+
+
+class BalancedUnresolvedTicketPaginationTests(_BaseFixture):
+    def _make_agent(self, name, email):
+        agent = User.objects.create_user(email, name, "secret")
+        agent.role = self.agent_role
+        agent.save(update_fields=["role"])
+        return agent
+
+    def test_active_assignment_members_receive_equal_per_agent_pages(self):
+        agent_b = self._make_agent("Agent B", "agent-b@example.com")
+        agent_c = self._make_agent("Agent C", "agent-c@example.com")
+        outsider = self._make_agent("Agent Outside", "outside@example.com")
+        inactive_member = self._make_agent("Agent Inactive", "inactive@example.com")
+
+        rule = AssignmentRule.objects.create(name="Default inbound", active=True)
+        for agent in (self.agent, agent_b, agent_c):
+            AssignmentRuleMember.objects.create(rule=rule, user=agent, active=True)
+        AssignmentRuleMember.objects.create(rule=rule, user=inactive_member, active=False)
+
+        expected_ids = {self.agent.name: [], agent_b.name: [], agent_c.name: []}
+        for agent, amount in ((self.agent, 8), (agent_b, 8), (agent_c, 1)):
+            for index in range(amount):
+                ticket = self.make_ticket(subject=f"{agent.name} {index}", assignee=agent)
+                expected_ids[agent.name].append(ticket.id)
+
+        # Ninguno de estos tickets debe consumir filas del filtro balanceado.
+        self.make_ticket(subject="Fuera de regla 1", assignee=outsider)
+        self.make_ticket(subject="Fuera de regla 2", assignee=outsider)
+        self.make_ticket(subject="Miembro desactivado", assignee=inactive_member)
+        self.make_ticket(subject="Sin asignar", assignee=None)
+        self.make_ticket(subject="Tarea", assignee=self.agent, type="task")
+        self.make_ticket(subject="Resolved", assignee=self.agent, status="resolved")
+        self.make_ticket(subject="Closed", assignee=self.agent, status="closed")
+
+        self.client.force_login(self.agent)
+        endpoint = reverse("filter_tickets")
+        query = "view=all_unsolved_no_tareas&page_size=10&fast=1&sort_by=id&sort_dir=asc"
+
+        first = self.client.get(f"{endpoint}?{query}&page=1").json()
+        second = self.client.get(f"{endpoint}?{query}&page=2").json()
+
+        self.assertEqual(first["pagination"]["total"], 17)
+        self.assertEqual(first["pagination"]["total_pages"], 2)
+        self.assertTrue(first["pagination"]["exact"])
+        self.assertEqual(first["group_by"], "assignee")
+        self.assertTrue(first["balanced_assignment"]["enabled"])
+
+        first_by_agent = {}
+        second_by_agent = {}
+        for row in first["tickets"]:
+            first_by_agent.setdefault(row["assignee"], []).append(row["id"])
+        for row in second["tickets"]:
+            second_by_agent.setdefault(row["assignee"], []).append(row["id"])
+
+        # C solo tiene un ticket; el resto de su cupo se redistribuye A/B.
+        self.assertEqual({name: len(ids) for name, ids in first_by_agent.items()}, {
+            "Agent": 5, "Agent B": 4, "Agent C": 1,
+        })
+        self.assertEqual({name: len(ids) for name, ids in second_by_agent.items()}, {
+            "Agent": 3, "Agent B": 4,
+        })
+        self.assertEqual(first_by_agent["Agent"], expected_ids["Agent"][:5])
+        self.assertEqual(second_by_agent["Agent"], expected_ids["Agent"][5:])
+        self.assertEqual(first_by_agent["Agent B"], expected_ids["Agent B"][:4])
+        self.assertEqual(second_by_agent["Agent B"], expected_ids["Agent B"][4:])
+
+        exact_total = self.client.get(
+            f"{endpoint}?view=all_unsolved_no_tareas&page_size=10&total_only=1"
+        ).json()
+        self.assertEqual(exact_total["pagination"]["total"], 17)
+
+        counts = self.client.get(
+            f"{endpoint}?counts=1&counts_only=1&force_counts=1&page_size=10"
+        ).json()["filtros"]
+        self.assertEqual(counts["all_unsolved_no_tareas"], 17)
+
+        # El cambio está encapsulado: la otra vista no resuelta sigue usando su
+        # conjunto global y conserva los tickets fuera de las reglas.
+        global_unsolved = self.client.get(
+            f"{endpoint}?view=unsolved_no_tareas&page_size=10&total_only=1"
+        ).json()
+        self.assertEqual(global_unsolved["pagination"]["total"], 21)
+
+    def test_more_agents_than_rows_continue_on_the_next_page(self):
+        rule = AssignmentRule.objects.create(name="Many agents", active=True)
+        agents = []
+        for index in range(12):
+            agent = self._make_agent(f"Pool {index:02d}", f"pool-{index:02d}@example.com")
+            agents.append(agent)
+            AssignmentRuleMember.objects.create(rule=rule, user=agent, active=True)
+            self.make_ticket(subject=f"Pool ticket {index:02d}", assignee=agent)
+
+        self.client.force_login(self.agent)
+        endpoint = reverse("filter_tickets")
+        query = "view=all_unsolved_no_tareas&page_size=10&fast=1&sort_by=id&sort_dir=asc"
+        first = self.client.get(f"{endpoint}?{query}&page=1").json()
+        second = self.client.get(f"{endpoint}?{query}&page=2").json()
+
+        self.assertEqual([row["assignee"] for row in first["tickets"]], [a.name for a in agents[:10]])
+        self.assertEqual([row["assignee"] for row in second["tickets"]], [a.name for a in agents[10:]])
+        self.assertEqual(second["pagination"]["page"], 2)
+        self.assertEqual(second["pagination"]["total"], 12)
 
 
 class SLAEnhancementTests(_BaseFixture):

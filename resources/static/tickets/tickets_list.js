@@ -248,9 +248,12 @@
         }
     }
 
-    function emptyRow(colspan, text, color) {
+    function emptyRow(colspan, text, color, title) {
         const style = color ? ` style="color: ${color};"` : '';
-        return `<tr><td colspan="${colspan}"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message"${style}>${text}</span></div></td></tr>`;
+        return `<tr><td colspan="${colspan}"><div class="tf-empty tf-empty--compact">` +
+            `<span class="tf-empty-icon"><i class="fas fa-filter"></i></span>` +
+            `<span class="tf-empty-title"${style}>${title || 'Sin tickets en esta vista'}</span>` +
+            `<span class="tf-empty-message"${style}>${text}</span></div></td></tr>`;
     }
 
     async function loadTickets(view, page, updateUrl) {
@@ -276,7 +279,7 @@
             _lastRenderedCount = Array.isArray(json.tickets) ? json.tickets.length : 0;
 
             if (!json.tickets || json.tickets.length === 0) {
-                tbody.innerHTML = emptyRow(COLSPAN, 'No hay tickets.');
+                tbody.innerHTML = emptyRow(COLSPAN, 'Prueba otra vista, empresa o combinación de filtros.');
             } else {
                 const fragment = document.createDocumentFragment();
                 const groupBy = json.group_by;
@@ -388,6 +391,11 @@
         document.getElementById("refreshFilters").addEventListener("click", () => refreshFilterCounts(true));
 
         const filters = document.querySelectorAll("#filters li");
+        const viewFilters = document.querySelectorAll("#filters li[data-view]");
+        const filtersPanel = document.getElementById('ticketFiltersPanel');
+        const filtersToggle = document.getElementById('ticketFiltersToggle');
+        const viewTitle = document.getElementById('ticketsViewTitle');
+        const filterSearch = document.getElementById('filterViewsSearch');
         let activeView = getUrlParam("view");
         let activePage = parseInt(getUrlParam("page") || "1", 10) || 1;
         let savedSize  = parseInt(getUrlParam("page_size") || "50", 10);
@@ -412,16 +420,57 @@
             });
         }
 
-        if (!activeView && filters.length > 0) activeView = filters[0].dataset.view;
+        if (!activeView && viewFilters.length > 0) activeView = viewFilters[0].dataset.view;
 
-        filters.forEach(f => {
+        function setActiveView(filter) {
+            viewFilters.forEach(x => {
+                x.classList.remove('active');
+                x.removeAttribute('aria-current');
+            });
+            if (!filter) return;
+            filter.classList.add('active');
+            filter.setAttribute('aria-current', 'true');
+            const label = filter.querySelector('.filter-name')?.textContent?.trim();
+            if (viewTitle && label) viewTitle.textContent = label;
+        }
+
+        if (filtersToggle && filtersPanel) {
+            filtersToggle.addEventListener('click', () => {
+                const open = filtersPanel.classList.toggle('is-open');
+                filtersToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+        }
+
+        if (filterSearch) {
+            filterSearch.addEventListener('input', () => {
+                const term = filterSearch.value.trim().toLocaleLowerCase('es');
+                viewFilters.forEach(item => {
+                    const label = item.textContent.toLocaleLowerCase('es');
+                    item.hidden = !!term && !label.includes(term);
+                });
+                document.querySelectorAll('#filters .filter-section-label').forEach(section => {
+                    let sibling = section.nextElementSibling;
+                    let hasVisible = false;
+                    while (sibling && !sibling.classList.contains('filter-section-label')) {
+                        if (sibling.dataset.view && !sibling.hidden) hasVisible = true;
+                        sibling = sibling.nextElementSibling;
+                    }
+                    section.hidden = !hasVisible;
+                });
+            });
+        }
+
+        viewFilters.forEach(f => {
             f.addEventListener("click", () => {
-                filters.forEach(x => x.classList.remove("active"));
-                f.classList.add("active");
+                setActiveView(f);
                 clearSelection();
                 loadTickets(f.dataset.view, 1);
+                if (window.matchMedia('(max-width: 768px)').matches && filtersPanel) {
+                    filtersPanel.classList.remove('is-open');
+                    if (filtersToggle) filtersToggle.setAttribute('aria-expanded', 'false');
+                }
             });
-            if (f.dataset.view === activeView) f.classList.add("active");
+            if (f.dataset.view === activeView) setActiveView(f);
         });
 
         if (activeView) loadTickets(activeView, activePage, false);

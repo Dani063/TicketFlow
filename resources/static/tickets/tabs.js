@@ -72,6 +72,22 @@
         return '(function(){\n' + text + '\n;' + exports + '\n})();';
     }
 
+    function _runFragmentScripts(scripts, label) {
+        console.debug('[tabs] re-executing', scripts.length, 'scripts for', label);
+        scripts.forEach((s, idx) => {
+            try {
+                const ns = document.createElement('script');
+                if (s.src) ns.src = s.src;
+                else ns.textContent = _wrapScriptInIIFE(s.textContent);
+                document.head.appendChild(ns);
+                document.head.removeChild(ns);
+                console.debug('[tabs]   script', idx, 'executed OK');
+            } catch (e) {
+                console.error('[tabs]   script', idx, 'threw:', e);
+            }
+        });
+    }
+
     async function _navigateAppContent(url) {
         const ac = _getAppContent();
         if (!ac) {
@@ -114,22 +130,7 @@
             //
             // We auto-expose top-level `function` declarations to window so inline
             // event handlers like onclick="toggleSort('id')" still work.
-            console.debug('[tabs] re-executing', scripts.length, 'scripts for', url);
-            scripts.forEach((s, idx) => {
-                try {
-                    const ns = document.createElement('script');
-                    if (s.src) {
-                        ns.src = s.src;
-                    } else {
-                        ns.textContent = _wrapScriptInIIFE(s.textContent);
-                    }
-                    document.head.appendChild(ns);
-                    document.head.removeChild(ns);
-                    console.debug('[tabs]   script', idx, 'executed OK', s.src ? '(' + s.src + ')' : '(inline ' + s.textContent.length + ' chars)');
-                } catch (e) {
-                    console.error('[tabs]   script', idx, 'threw:', e);
-                }
-            });
+            _runFragmentScripts(scripts, url);
 
             // Highlight active sidebar item
             document.querySelectorAll('.sidebar-navigation li').forEach(li => li.classList.remove('active'));
@@ -172,7 +173,7 @@
     function _getWorkspace() { return document.getElementById('workspace'); }
 
     // Detach (preserve in JS, remove from DOM) all panes in the workspace that
-    // are NOT paneEl. This is critical because every pane shares the same set
+    // are NOT paneEl. This is critical because panes can share the same set
     // of IDs (#empresa, #solicitante, #tags, ...) — keeping multiple panes
     // mounted simultaneously creates duplicate-ID collisions that break
     // Select2 widget anchoring on the second pane onwards.
@@ -183,7 +184,7 @@
     function _detachInactivePanes(activePane) {
         const ws = _getWorkspace();
         if (!ws || !window.jQuery) return;
-        ws.querySelectorAll(':scope > .ticket-pane').forEach(p => {
+        ws.querySelectorAll(':scope > .ticket-pane, :scope > .profile-pane').forEach(p => {
             if (p !== activePane) {
                 // Keep the cache entry — only remove from DOM. The reference
                 // in _paneCache.$pane is still valid; appendChild re-mounts it.
@@ -208,13 +209,13 @@
         // does not always render correctly after re-attach. Force a destroy +
         // re-init so the widget repaints from scratch. Cheap (~5ms) and
         // guaranteed-correct.
-        if (wasDetached && typeof window.tfApplyPaneSelect2 === 'function') {
+        if (paneEl.classList.contains('ticket-pane') && wasDetached && typeof window.tfApplyPaneSelect2 === 'function') {
             try { window.tfApplyPaneSelect2(paneEl, { force: true }); }
             catch (e) { console.error('[tabs] Select2 re-init failed on re-attach', e); }
         }
         // Rebind window.QuillComposer to this pane's instance (idempotent;
         // if the pane never had Quill it inits now, otherwise it's a no-op).
-        if (window.QuillComposer && typeof window.QuillComposer.initFor === 'function') {
+        if (paneEl.classList.contains('ticket-pane') && window.QuillComposer && typeof window.QuillComposer.initFor === 'function') {
             try { window.QuillComposer.initFor(paneEl); }
             catch (e) { console.error('[tabs] Quill re-bind failed on re-attach', e); }
         }
@@ -255,20 +256,48 @@
 
             const tpl = document.createElement('template');
             tpl.innerHTML = html.trim();
-            const paneEl = tpl.content.querySelector('.ticket-pane');
-            if (!paneEl) throw new Error('No .ticket-pane in fragment response');
+            const paneEl = tpl.content.querySelector('.ticket-pane, .profile-pane');
+            if (!paneEl) throw new Error('No compatible pane in fragment response');
+            const isTicketPane = paneEl.classList.contains('ticket-pane');
+            const scripts = isTicketPane ? [] : [...tpl.content.querySelectorAll('script')];
 
-            // Strip inline scripts from the pane. They were used in the legacy
+            // Ticket scripts are legacy globals and ticket initialization is
+            // handled explicitly below. Profile scripts are re-entrant and do
+            // need to run after their fragment has been mounted.
             // path to set window.ticketId / window.urls — both now passed via
             // ctx parameter to initTicketPane. Re-executing them was causing
             // global state thrash that broke widget init across panes.
-            paneEl.querySelectorAll('script').forEach(s => s.remove());
+            if (isTicketPane) paneEl.querySelectorAll('script').forEach(s => s.remove());
+            else scripts.forEach(s => s.remove());
 
             ws.appendChild(paneEl);
 
             const rawTid = paneEl.getAttribute('data-ticket-id');
             const ticketId = rawTid && rawTid !== 'null' ? (parseInt(rawTid, 10) || rawTid) : null;
-            _paneCache.set(normUrl, { $pane: paneEl, ticketId, lastUsed: Date.now() });
+            _paneCache.set(normUrl, {
+                $pane: paneEl,
+                ticketId,
+                paneType: isTicketPane ? 'ticket' : 'profile',
+                lastUsed: Date.now(),
+            });
+
+            const paneTitle = (paneEl.dataset.tabTitle || '').trim();
+            const tab = findTabByNorm(normUrl);
+            if (paneTitle && tab) {
+                const text = tab.querySelector('.tab-text');
+                if (text) {
+                    text.textContent = paneTitle;
+                    text.title = paneTitle;
+                }
+                saveTabs();
+                _layoutTabs();
+            }
+
+            if (!isTicketPane) {
+                paneEl.dataset.tfInitialized = '1';
+                _runFragmentScripts(scripts, rawUrl);
+                return paneEl;
+            }
 
             // Mark as initialized to prevent the auto-bootstrap in create_ticket.js
             // from re-initializing this pane on a future DOMContentLoaded event.
@@ -651,8 +680,10 @@
         tabText.innerText = text;
 
         const closeButton = document.createElement('button');
-        closeButton.innerText = 'X';
+        closeButton.type = 'button';
+        closeButton.innerText = '×';
         closeButton.className = 'close-tab';
+        closeButton.setAttribute('aria-label', 'Cerrar pestaña ' + text);
 
         closeButton.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -899,7 +930,7 @@
 
     let updHideTimer = null;
 
-    const STATUS_LABELS = { open:'Abierto', pending:'Pendiente', resolved:'Resuelto', closed:'Cerrado' };
+    const STATUS_LABELS = { open:'open', pending:'pending', resolved:'resolved', closed:'closed' };
     const PRIORITY_LABELS = { low:'Baja', normal:'Normal', high:'Alta', urgent:'Urgente' };
 
     function showUpdPopup(item) {
@@ -1001,8 +1032,14 @@
         function toggleActive(which) {
             const notifIcon = document.querySelector('.navbar-right .notifications');
             const userIcon = document.querySelector('.navbar-right .user-profile');
-            if (notifIcon) notifIcon.classList.toggle('active', which === 'notif');
-            if (userIcon) userIcon.classList.toggle('active', which === 'user');
+            if (notifIcon) {
+                notifIcon.classList.toggle('active', which === 'notif');
+                notifIcon.setAttribute('aria-expanded', which === 'notif' ? 'true' : 'false');
+            }
+            if (userIcon) {
+                userIcon.classList.toggle('active', which === 'user');
+                userIcon.setAttribute('aria-expanded', which === 'user' ? 'true' : 'false');
+            }
         }
 
         async function loadNotifications() {
@@ -1016,7 +1053,8 @@
                 const badge = document.querySelector(".notifications .badge");
 
                 if (!data.notifications.length) {
-                    notifList.innerHTML = "<li class='notif-empty'>No hay notificaciones</li>";
+                    notifList.innerHTML = "<li class='notif-empty'><i class='far fa-bell' aria-hidden='true'></i>" +
+                        "<strong>Estás al día</strong><span>No hay notificaciones nuevas.</span></li>";
                     if (badge) { badge.textContent = "0"; badge.style.display = "none"; }
                     return;
                 }
@@ -1025,8 +1063,16 @@
 
                 data.notifications.forEach(n => {
                     const li = document.createElement("li");
-                    li.innerHTML = `<strong>${n.message}</strong><br><small>${n.created_at}</small>`;
-                    li.onclick = async () => {
+                    li.className = 'notif-item';
+                    li.tabIndex = 0;
+                    li.setAttribute('role', 'button');
+                    li.setAttribute('aria-label', `${n.message}. ${n.created_at}`);
+                    const message = document.createElement('strong');
+                    message.textContent = n.message;
+                    const created = document.createElement('small');
+                    created.textContent = n.created_at;
+                    li.append(message, created);
+                    const activate = async () => {
                         await fetch(`/api/notifications/${n.id}/read/`, {
                             method: "POST",
                             headers: { 'X-CSRFToken': getCsrfToken() }
@@ -1035,10 +1081,18 @@
                         loadNotifications();
                         refreshUpdates();
                     };
+                    li.addEventListener('click', activate);
+                    li.addEventListener('keydown', e => {
+                        if (e.key !== 'Enter' && e.key !== ' ') return;
+                        e.preventDefault();
+                        activate();
+                    });
                     notifList.appendChild(li);
                 });
             } catch (err) {
                 console.error("Error cargando notificaciones", err);
+                notifList.innerHTML = "<li class='notif-empty notif-empty--error'><i class='fas fa-exclamation-circle' aria-hidden='true'></i>" +
+                    "<strong>No se pudieron cargar</strong><span>Vuelve a abrir el panel para reintentarlo.</span></li>";
             }
         }
 
@@ -1082,6 +1136,15 @@
             if (!withinNotif && !withinUser) hideAll();
         });
 
+        document.addEventListener('keydown', (e) => {
+            const trigger = e.target.closest('.user-profile[role="button"]');
+            if (trigger && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault();
+                trigger.click();
+            }
+            if (e.key === 'Escape') hideAll();
+        });
+
         const logoutBtn = document.getElementById('logoutButton');
         logoutBtn && logoutBtn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -1099,14 +1162,70 @@
         if (!searchInput || !resultsBox || !resultsList) return;
 
         let timer = null;
+        let activeIndex = -1;
+
+        function setResultsOpen(open) {
+            resultsBox.style.display = open ? 'block' : 'none';
+            searchInput.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (!open) {
+                activeIndex = -1;
+                searchInput.removeAttribute('aria-activedescendant');
+                resultItems().forEach((item) => {
+                    item.classList.remove('is-keyboard-active');
+                    item.setAttribute('aria-selected', 'false');
+                });
+            }
+        }
+
+        function resultItems() {
+            return [...resultsList.querySelectorAll('.search-result-item')];
+        }
+
+        function setActiveResult(index) {
+            const items = resultItems();
+            if (!items.length) return;
+            activeIndex = (index + items.length) % items.length;
+            items.forEach((item, i) => {
+                const selected = i === activeIndex;
+                item.classList.toggle('is-keyboard-active', selected);
+                item.setAttribute('aria-selected', selected ? 'true' : 'false');
+            });
+            const active = items[activeIndex];
+            searchInput.setAttribute('aria-activedescendant', active.id);
+            active.scrollIntoView({ block: 'nearest' });
+        }
+
+        function appendEmpty(kind, title, hint) {
+            const li = document.createElement('li');
+            li.className = `search-empty search-empty--${kind}`;
+            li.innerHTML = `<i class="fas fa-${kind === 'error' ? 'exclamation-circle' : 'search'}" aria-hidden="true"></i>` +
+                `<strong>${title}</strong><span>${hint}</span>`;
+            resultsList.appendChild(li);
+        }
+
+        function appendResult(contentBuilder, onActivate) {
+            const li = document.createElement('li');
+            li.className = 'search-result-item';
+            li.id = `search-result-${resultsList.querySelectorAll('.search-result-item').length}`;
+            li.setAttribute('role', 'option');
+            li.setAttribute('aria-selected', 'false');
+            contentBuilder(li);
+            li.addEventListener('click', onActivate);
+            li.addEventListener('mousemove', () => {
+                const index = resultItems().indexOf(li);
+                if (index >= 0) setActiveResult(index);
+            });
+            resultsList.appendChild(li);
+        }
 
         function renderResults(data) {
             resultsList.innerHTML = "";
+            activeIndex = -1;
 
             if ((!data.tickets || !data.tickets.length) &&
                 (!data.users || !data.users.length)) {
-                resultsList.innerHTML = "<li>No hay resultados</li>";
-                resultsBox.style.display = "block";
+                appendEmpty('empty', 'Sin resultados', 'Prueba con otro asunto, ID, nombre o email.');
+                setResultsOpen(true);
                 return;
             }
 
@@ -1114,14 +1233,17 @@
                 const header = document.createElement("li");
                 header.textContent = "Tickets";
                 header.classList.add("result-header");
+                header.setAttribute('role', 'presentation');
                 resultsList.appendChild(header);
 
                 data.tickets.forEach(t => {
-                    const li = document.createElement("li");
-                    li.innerHTML = `<strong>#${t.id}</strong> ${t.subject} 
-                                <small>(${t.status} – ${t.requester})</small>`;
-                    li.onclick = () => openTicket(t.id);
-                    resultsList.appendChild(li);
+                    appendResult(li => {
+                        const title = document.createElement('strong');
+                        title.textContent = `#${t.id} ${t.subject || ''}`;
+                        const meta = document.createElement('small');
+                        meta.textContent = `${t.status || ''} · ${t.requester || 'Sin solicitante'}`;
+                        li.append(title, meta);
+                    }, () => openTicket(t.id));
                 });
             }
 
@@ -1129,43 +1251,63 @@
                 const header = document.createElement("li");
                 header.textContent = "Usuarios";
                 header.classList.add("result-header");
+                header.setAttribute('role', 'presentation');
                 resultsList.appendChild(header);
 
                 data.users.forEach(u => {
-                    const li = document.createElement("li");
-                    li.innerHTML = `<strong>${u.name}</strong> (${u.email}) 
-                                <small>${u.role} / ${u.group}</small>`;
-                    li.onclick = () => openCustomer(u.id);
-                    resultsList.appendChild(li);
+                    appendResult(li => {
+                        const title = document.createElement('strong');
+                        title.textContent = `${u.name || 'Sin nombre'} · ${u.email || 'Sin email'}`;
+                        const meta = document.createElement('small');
+                        meta.textContent = `${u.role || 'Sin rol'} · ${u.group || 'Sin grupo'}`;
+                        li.append(title, meta);
+                    }, () => openCustomer(u.id, u.name));
                 });
             }
 
-            resultsBox.style.display = "block";
+            setResultsOpen(true);
         }
 
         searchInput.addEventListener("input", () => {
             clearTimeout(timer);
             const q = searchInput.value.trim();
             if (q.length < 2) {
-                resultsBox.style.display = "none";
+                setResultsOpen(false);
                 return;
             }
-            resultsList.innerHTML = '<li class="result-header" style="font-style:italic;font-weight:normal;">Buscando…</li>';
-            resultsBox.style.display = "block";
+            resultsList.innerHTML = '<li class="search-loading"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i> Buscando…</li>';
+            setResultsOpen(true);
             timer = setTimeout(async () => {
                 try {
                     const res = await fetch(`/search/?q=${encodeURIComponent(q)}`);
                     const data = await res.json();
                     renderResults(data);
                 } catch(e) {
-                    resultsList.innerHTML = '<li>Error al buscar</li>';
+                    resultsList.innerHTML = '';
+                    appendEmpty('error', 'No se pudo buscar', 'Comprueba la conexión y vuelve a intentarlo.');
                 }
             }, 300);
         });
 
+        searchInput.addEventListener('keydown', e => {
+            const items = resultItems();
+            if (e.key === 'ArrowDown' && items.length) {
+                e.preventDefault();
+                setActiveResult(activeIndex + 1);
+            } else if (e.key === 'ArrowUp' && items.length) {
+                e.preventDefault();
+                setActiveResult(activeIndex <= 0 ? items.length - 1 : activeIndex - 1);
+            } else if (e.key === 'Enter' && activeIndex >= 0 && items[activeIndex]) {
+                e.preventDefault();
+                items[activeIndex].click();
+            } else if (e.key === 'Escape') {
+                setResultsOpen(false);
+            }
+        });
+
         document.addEventListener("click", (e) => {
             if (!resultsBox.contains(e.target) && e.target !== searchInput) {
-                resultsBox.style.display = "none";
+                setResultsOpen(false);
             }
         });
     }
@@ -1215,11 +1357,19 @@
             // First layout pass after loadTabs/ensureCurrentTab populated the bar.
             _layoutTabs();
 
-            // Seed the pane cache with the .ticket-pane that was server-rendered
-            // into #workspace, so clicking back on its tab is instant (no fetch).
+            // Seed the pane cache with a server-rendered ticket or profile.
             if (_panesEnabled()) {
-                const initialPane = document.querySelector('#workspace > .ticket-pane');
+                const ws = _getWorkspace();
+                let initialPane = ws && ws.querySelector(':scope > .ticket-pane, :scope > .profile-pane');
+                if (!initialPane && isTabUrl(_realPageUrl)) {
+                    const appPane = _getAppContent()?.querySelector(':scope > .profile-pane');
+                    if (appPane && ws) {
+                        ws.appendChild(appPane);
+                        initialPane = appPane;
+                    }
+                }
                 if (initialPane) {
+                    const isTicketPane = initialPane.classList.contains('ticket-pane');
                     const rawTid = initialPane.getAttribute('data-ticket-id');
                     const ticketId = rawTid && rawTid !== 'null' && rawTid !== ''
                         ? (parseInt(rawTid, 10) || rawTid)
@@ -1227,6 +1377,7 @@
                     _paneCache.set(normalizeUrl(_realPageUrl), {
                         $pane: initialPane,
                         ticketId,
+                        paneType: isTicketPane ? 'ticket' : 'profile',
                         lastUsed: Date.now(),
                     });
                     // Deep-link page load on a ticket: show workspace, hide app-content
@@ -1236,7 +1387,7 @@
                     // create_ticket.js, but that path was racy: on F5 with tabs
                     // restored from localStorage, Select2/Quill sometimes never
                     // initialized and the form fell back to raw HTML widgets.
-                    if (initialPane.dataset.tfInitialized !== '1') {
+                    if (isTicketPane && initialPane.dataset.tfInitialized !== '1') {
                         initialPane.dataset.tfInitialized = '1';
                         if (typeof window.initTicketPane === 'function') {
                             try {
@@ -1297,9 +1448,9 @@
 
     document.addEventListener('DOMContentLoaded', initOnce);
 
-    window.openCustomer = function (id) {
+    window.openCustomer = function (id, name) {
         if (window.urls && window.urls.customer_profile) {
-            Tabs.addTab(`Cliente ${id}`, `${window.urls.customer_profile}?id=${id}`);
+            Tabs.addTab(name || `Cliente ${id}`, `${window.urls.customer_profile}?id=${id}`);
         } else {
             window.location.href = `/customers/profile/?id=${id}`;
         }

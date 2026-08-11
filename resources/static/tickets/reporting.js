@@ -45,6 +45,27 @@
         destroyChart(key);
         const canvas = $(canvasId);
         if (!canvas || !window.Chart) return;
+        const container = canvas.closest('.tf-report-canvas');
+        const previousEmpty = container && container.querySelector('.tf-chart-empty');
+        if (previousEmpty) previousEmpty.remove();
+        if (container) container.classList.remove('has-empty-state');
+        canvas.hidden = false;
+
+        const hasData = config.tfHasData !== false;
+        delete config.tfHasData;
+        if (!hasData) {
+            canvas.hidden = true;
+            if (container) {
+                container.classList.add('has-empty-state');
+                const empty = document.createElement('div');
+                empty.className = 'tf-chart-empty';
+                empty.innerHTML = '<i class="far fa-chart-bar" aria-hidden="true"></i>' +
+                    '<strong>Sin datos para este periodo</strong>' +
+                    '<span>Prueba otra empresa o amplía el rango de fechas.</span>';
+                container.appendChild(empty);
+            }
+            return;
+        }
         window.__tfReportCharts[key] = new Chart(canvas.getContext('2d'), config);
     }
 
@@ -343,6 +364,17 @@
         $('repTo').value = fmtDate(to);
     }
 
+    function setRangeMode(mode, days) {
+        const label = $('repRangeMode');
+        if (!label) return;
+        if (mode === 'custom') {
+            label.textContent = `Periodo activo: rango personalizado · ${$('repFrom').value} → ${$('repTo').value}`;
+            return;
+        }
+        const names = { 7: 'últimos 7 días', 30: 'últimos 30 días', 90: 'últimos 90 días', 365: 'último año' };
+        label.textContent = 'Periodo activo: ' + (names[days] || `últimos ${days} días`);
+    }
+
     function params() {
         const p = new URLSearchParams();
         if ($('repBrand').value) p.set('brand', $('repBrand').value);
@@ -354,6 +386,7 @@
     function doughnut(key, canvasId, dist) {
         const text = cssVar('--color-text', '#333');
         makeChart(key, canvasId, {
+            tfHasData: dist.some(d => Number(d.n) > 0),
             type: 'doughnut',
             data: {
                 labels: dist.map(d => d.label),
@@ -371,6 +404,7 @@
         const text = cssVar('--color-text', '#333');
         const grid = cssVar('--color-border', '#ddd');
         makeChart(key, canvasId, {
+            tfHasData: dist.some(d => Number(d.n) > 0),
             type: 'bar',
             data: {
                 labels: dist.map(d => d.label),
@@ -395,6 +429,7 @@
         const grid = cssVar('--color-border', '#ddd');
         const cfg = opts || {};
         makeChart(key, canvasId, {
+            tfHasData: labels.length > 0,
             type: 'bar',
             data: {
                 labels: labels,
@@ -468,6 +503,7 @@
         const text = cssVar('--color-text', '#333');
         const grid = cssVar('--color-border', '#ddd');
         makeChart(key, canvasId, {
+            tfHasData: values.some(v => Number(v) > 0),
             type: 'bar',
             data: { labels, datasets: [{ data: values, backgroundColor: color || palette()[1], borderRadius: 4 }] },
             options: {
@@ -525,6 +561,7 @@
             const text = cssVar('--color-text', '#333');
             const grid = cssVar('--color-border', '#ddd');
             makeChart('volume', 'chartVolume', {
+                tfHasData: json.series.created.length > 0 || json.series.closed.length > 0,
                 type: 'line',
                 data: {
                     labels: days,
@@ -566,7 +603,11 @@
             const oTbody = $('repOldestTbody');
             const oldest = json.oldest_open || [];
             if (!oldest.length) {
-                oTbody.innerHTML = '<tr><td colspan="5">Sin tickets abiertos 🎉</td></tr>';
+                oTbody.innerHTML = '<tr><td colspan="5"><div class="tf-empty tf-empty--compact">' +
+                    '<i class="fas fa-check-circle tf-empty-icon" aria-hidden="true"></i>' +
+                    '<span class="tf-empty-message">Sin tickets abiertos</span>' +
+                    '<span class="tf-empty-hint">No hay backlog abierto para los filtros seleccionados.</span>' +
+                    '</div></td></tr>';
             } else {
                 oTbody.innerHTML = oldest.map(t => {
                     const age = t.age_days == null ? '—'
@@ -582,7 +623,11 @@
 
             const tbody = $('repBrandTbody');
             if (!json.by_brand.length) {
-                tbody.innerHTML = '<tr><td colspan="4">Sin datos en el rango</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="4"><div class="tf-empty tf-empty--compact">' +
+                    '<i class="fas fa-filter tf-empty-icon" aria-hidden="true"></i>' +
+                    '<span class="tf-empty-message">Sin datos en el rango</span>' +
+                    '<span class="tf-empty-hint">Prueba otra empresa o amplía el periodo.</span>' +
+                    '</div></td></tr>';
             } else {
                 tbody.innerHTML = json.by_brand.map(r =>
                     `<tr><td>${esc(r.brand)}</td><td>${r.created.toLocaleString()}</td>` +
@@ -599,15 +644,25 @@
 
     document.querySelectorAll('.tf-report-presets button').forEach(btn => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.tf-report-presets button').forEach(b => b.classList.remove('is-active'));
+            document.querySelectorAll('.tf-report-presets button').forEach(b => {
+                b.classList.remove('is-active');
+                b.setAttribute('aria-pressed', 'false');
+            });
             btn.classList.add('is-active');
-            setPreset(parseInt(btn.dataset.days, 10));
+            btn.setAttribute('aria-pressed', 'true');
+            const days = parseInt(btn.dataset.days, 10);
+            setPreset(days);
+            setRangeMode('preset', days);
             load();
         });
     });
     // Rango personalizado: al editar una fecha se deselecciona el preset y se aplica solo.
     [$('repFrom'), $('repTo')].forEach(inp => inp.addEventListener('change', () => {
-        document.querySelectorAll('.tf-report-presets button').forEach(b => b.classList.remove('is-active'));
+        document.querySelectorAll('.tf-report-presets button').forEach(b => {
+            b.classList.remove('is-active');
+            b.setAttribute('aria-pressed', 'false');
+        });
+        setRangeMode('custom');
         load();
     }));
     $('repBrand').addEventListener('change', load);
@@ -635,6 +690,16 @@
     };
     document.addEventListener('tf:themechange', window.__tfReportThemeHandler);
 
+    const toolbarToggle = $('repToolbarToggle');
+    const toolbar = $('repToolbar');
+    if (toolbarToggle && toolbar) {
+        toolbarToggle.addEventListener('click', () => {
+            const open = toolbar.classList.toggle('is-open');
+            toolbarToggle.setAttribute('aria-expanded', String(open));
+        });
+    }
+
     setPreset(30);
+    setRangeMode('preset', 30);
     load();
 })();

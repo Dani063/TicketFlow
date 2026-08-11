@@ -37,6 +37,20 @@
 .tf-filter-label i { margin-right: 4px; opacity: .8; }
 .tf-report-toolbar .tf-select { min-width: 170px; height: 36px; }
 
+.tf-report-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2, 8px);
+}
+
+.tf-report-mobile-toggle { display: none; }
+
+.tf-report-range-mode {
+    margin: var(--space-2, 8px) 0 0;
+    color: var(--color-text-muted, #64748b);
+    font-size: var(--font-size-xs, 12px);
+}
+
 /* Segmented control de presets */
 .tf-segment {
     display: inline-flex;
@@ -63,6 +77,12 @@
     background: var(--color-primary, #5b67ca);
     color: #fff;
 }
+.tf-segment button:focus-visible {
+    position: relative;
+    z-index: 1;
+    outline: 2px solid var(--color-accent, #58d8f7);
+    outline-offset: -2px;
+}
 
 /* Rango personalizado */
 .tf-daterange {
@@ -75,7 +95,7 @@
 
 .tf-report-kpis {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    grid-template-columns: repeat(4, minmax(160px, 1fr));
     gap: var(--space-3, 12px);
     margin: var(--space-4, 16px) 0;
 }
@@ -158,6 +178,7 @@
 /* Tablas del reporting (admin_panel.css no se carga aquí) */
 .tf-report-wrap .tf-admin-table {
     width: 100%;
+    min-width: 640px;
     border-collapse: collapse;
     font-size: .86rem;
 }
@@ -242,6 +263,116 @@
 }
 .tf-report-panel--wide .tf-report-canvas { height: 300px; }
 
+.tf-report-canvas canvas[hidden] { display: none; }
+.tf-chart-empty {
+    height: 132px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: var(--space-2, 8px);
+    border: 1px dashed var(--color-border-strong, #cbd5e1);
+    border-radius: var(--radius-md, 8px);
+    color: var(--color-text-muted, #64748b);
+    text-align: center;
+    padding: var(--space-4, 16px);
+    box-sizing: border-box;
+}
+.tf-chart-empty i {
+    color: var(--color-text-disabled, #94a3b8);
+    font-size: 1.35rem;
+}
+.tf-chart-empty strong {
+    color: var(--color-text, #1e293b);
+    font-size: var(--font-size-sm, 13px);
+}
+.tf-report-canvas.has-empty-state { height: auto !important; }
+
+.tf-report-wrap .tf-admin-table-area:focus-visible {
+    outline: 2px solid var(--color-primary, #5b67ca);
+    outline-offset: -2px;
+}
+
 @media (max-width: 900px) {
     .tf-report-grid { grid-template-columns: 1fr; }
+    .tf-report-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    .tf-report-toolbar {
+        align-items: stretch;
+    }
+
+    .tf-report-toolbar .tf-toolbar-grow { display: none; }
+
+    .tf-report-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
+
+@media (max-width: 768px) {
+    .tf-report-mobile-toggle { display: inline-flex; }
+
+    .tf-report-wrap {
+        margin-left: 0;
+        height: auto;
+        min-height: 0;
+        padding: var(--space-3, 12px);
+        overflow: visible;
+    }
+
+    .tf-report-toolbar {
+        display: none;
+        padding: var(--space-3, 12px);
+    }
+
+    .tf-report-toolbar.is-open { display: flex; }
+
+    .tf-report-toolbar .tf-filter,
+    .tf-report-toolbar .tf-select,
+    .tf-report-toolbar .tf-segment,
+    .tf-report-toolbar .tf-daterange,
+    .tf-report-actions {
+        width: 100%;
+        max-width: none;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+    .tf-report-toolbar .tf-segment button { flex: 1 1 0; }
+
+    .tf-report-toolbar .tf-daterange {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    }
+
+    .tf-report-date { width: 100%; max-width: none; min-width: 0; }
+
+    .tf-report-actions .tf-btn { flex: 1 1 0; }
+
+    .tf-report-range-mode { margin-bottom: var(--space-3, 12px); }
+
+    .tf-report-kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        margin-top: 0;
+    }
+
+    .tf-kpi-card { padding: var(--space-3, 12px); }
+    .tf-kpi-value { font-size: 1.45rem; }
+    .tf-report-panel { padding: var(--space-3, 12px); }
+    .tf-report-canvas,
+    .tf-report-panel--wide .tf-report-canvas { height: 230px; }
+
+    .tf-report-wrap .tf-admin-table-area {
+        overflow-x: auto;
+        padding: 0;
+        scrollbar-gutter: auto;
+    }
+}
+
+@media (max-width: 420px) {
+    .tf-report-kpis { grid-template-columns: 1fr 1fr; gap: var(--space-2, 8px); }
+    .tf-kpi-label { font-size: .72rem; }
+    .tf-kpi-delta { font-size: .65rem; }
+    .tf-report-actions { flex-direction: column; }
+    .tf-report-actions .tf-btn { width: 100%; }
 }
