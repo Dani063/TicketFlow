@@ -15,6 +15,9 @@
     let _sortBy      = '';
     let _sortDir     = 'asc';
     let _brandId     = '';
+    let _fromDate    = '';
+    let _toDate      = '';
+    let _lastExactTotal = null;
     let _selectedIds = new Set();
     let _lastRenderedCount = 0;
     let _totalRequestSeq = 0;
@@ -38,7 +41,67 @@
         return '-';
     }
 
-    function brandParam() { return _brandId ? `&brand_id=${encodeURIComponent(_brandId)}` : ''; }
+    function fmtDate(date) {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    }
+
+    function setPreset(days) {
+        const to = new Date();
+        const from = new Date();
+        from.setDate(to.getDate() - days);
+        _fromDate = fmtDate(from);
+        _toDate = fmtDate(to);
+        const fromInput = document.getElementById('ticketsFrom');
+        const toInput = document.getElementById('ticketsTo');
+        if (fromInput) fromInput.value = _fromDate;
+        if (toInput) toInput.value = _toDate;
+    }
+
+    function normalizeRange() {
+        if (_fromDate && _toDate && _toDate < _fromDate) {
+            [_fromDate, _toDate] = [_toDate, _fromDate];
+            document.getElementById('ticketsFrom').value = _fromDate;
+            document.getElementById('ticketsTo').value = _toDate;
+        }
+    }
+
+    function filterParams() {
+        const p = new URLSearchParams();
+        if (_brandId) p.set('brand_id', _brandId);
+        if (_fromDate) p.set('from', _fromDate);
+        if (_toDate) p.set('to', _toDate);
+        const query = p.toString();
+        return query ? '&' + query : '';
+    }
+
+    function exportParams() {
+        const p = new URLSearchParams();
+        p.set('view', _currentView || 'mis_tickets');
+        if (_brandId) p.set('brand_id', _brandId);
+        if (_fromDate) p.set('from', _fromDate);
+        if (_toDate) p.set('to', _toDate);
+        if (_sortBy) {
+            p.set('sort_by', _sortBy);
+            p.set('sort_dir', _sortDir);
+        }
+        return p.toString();
+    }
+
+    function updateFilterSummary() {
+        const summary = document.getElementById('ticketsFilterSummary');
+        if (!summary) return;
+        const brand = document.getElementById('brandFilter');
+        const brandLabel = brand && brand.value
+            ? brand.options[brand.selectedIndex].text
+            : 'Todas las empresas';
+        const active = document.querySelector('#filters li[data-view].active .filter-name');
+        const viewLabel = active ? active.textContent.trim() : 'Todos los tickets';
+        const totalLabel = Number.isFinite(_lastExactTotal)
+            ? `${_lastExactTotal} ticket${_lastExactTotal === 1 ? '' : 's'}`
+            : 'Calculando tickets';
+        summary.textContent = `${totalLabel} · ${brandLabel} · ${viewLabel} · ${_fromDate} → ${_toDate}`;
+    }
 
     function getUrlParam(name) {
         return new URLSearchParams(window.location.search).get(name);
@@ -127,6 +190,7 @@
         _totalPages  = p.total_pages || p.page || 1;
         _currentPage = p.page;
         _pageSize    = p.page_size;
+        _lastExactTotal = exact ? p.total : null;
 
         renderPageNumbers(p.page, _totalPages, { exact, hasNext: !!p.has_next });
 
@@ -145,6 +209,7 @@
         if (sel) sel.value = p.page_size;
 
         document.getElementById("paginationBar").style.display = "flex";
+        updateFilterSummary();
     }
 
     function applyExactTotalFromCounts(filtros) {
@@ -173,7 +238,7 @@
         const seq = ++_totalRequestSeq;
         try {
             const response = await fetch(
-                `/tickets/filter/?view=${encodeURIComponent(view)}&total_only=1&page_size=${pageSize}${brandParam()}`
+                `/tickets/filter/?view=${encodeURIComponent(view)}&total_only=1&page_size=${pageSize}${filterParams()}`
             );
             const json = await response.json();
             const total = Number(json.pagination && json.pagination.total);
@@ -232,7 +297,7 @@
         try {
             refreshIcon.classList.add("spin-once");
             const forceParam = force === true ? '&force_counts=1' : '';
-            const response = await fetch(`/tickets/filter/?counts=1&counts_only=1&page_size=${_pageSize}${forceParam}${brandParam()}`);
+            const response = await fetch(`/tickets/filter/?counts=1&counts_only=1&page_size=${_pageSize}${forceParam}${filterParams()}`);
             const json = await response.json();
             if (json.filtros) {
                 for (const [key, value] of Object.entries(json.filtros)) {
@@ -272,7 +337,7 @@
             tbody.innerHTML = "";
             clearSelection();
 
-            let url = `/tickets/filter/?view=${encodeURIComponent(view)}&page=${page}&page_size=${_pageSize}&fast=1${brandParam()}`;
+            let url = `/tickets/filter/?view=${encodeURIComponent(view)}&page=${page}&page_size=${_pageSize}&fast=1${filterParams()}`;
             if (_sortBy) url += `&sort_by=${_sortBy}&sort_dir=${_sortDir}`;
             const response = await fetch(url);
             const json = await response.json();
@@ -376,6 +441,10 @@
                 else { u.searchParams.delete("sort_by"); u.searchParams.delete("sort_dir"); }
                 if (_brandId) u.searchParams.set("brand_id", _brandId);
                 else u.searchParams.delete("brand_id");
+                if (_fromDate) u.searchParams.set("from", _fromDate);
+                else u.searchParams.delete("from");
+                if (_toDate) u.searchParams.set("to", _toDate);
+                else u.searchParams.delete("to");
                 window.history.replaceState({}, "", u);
             }
         } catch (err) {
@@ -407,6 +476,32 @@
         const savedSort = getUrlParam("sort_by");
         if (savedSort) { _sortBy = savedSort; _sortDir = getUrlParam("sort_dir") || 'asc'; }
 
+        setPreset(30);
+        _fromDate = getUrlParam('from') || _fromDate;
+        _toDate = getUrlParam('to') || _toDate;
+        normalizeRange();
+        document.getElementById('ticketsFrom').value = _fromDate;
+        document.getElementById('ticketsTo').value = _toDate;
+
+        const presetButtons = document.querySelectorAll('.tf-ticket-presets button');
+        function setActivePreset(days) {
+            presetButtons.forEach(button => {
+                const active = days !== null && parseInt(button.dataset.days, 10) === days;
+                button.classList.toggle('is-active', active);
+                button.setAttribute('aria-pressed', active ? 'true' : 'false');
+            });
+        }
+        function syncPresetFromRange() {
+            const today = fmtDate(new Date());
+            const parse = (value) => {
+                const [year, month, day] = value.split('-').map(Number);
+                return Date.UTC(year, month - 1, day);
+            };
+            const days = Math.round((parse(_toDate) - parse(_fromDate)) / 86400000);
+            setActivePreset(_toDate === today && [7, 30, 90, 365].includes(days) ? days : null);
+        }
+        syncPresetFromRange();
+
         const brandSel = document.getElementById('brandFilter');
         const savedBrand = getUrlParam('brand_id');
         if (brandSel) {
@@ -414,11 +509,45 @@
             _brandId = brandSel.value || '';
             brandSel.addEventListener('change', () => {
                 _brandId = brandSel.value || '';
+                _lastExactTotal = null;
                 clearSelection();
                 loadTickets(_currentView, 1);
                 refreshFilterCounts(true);
             });
         }
+
+        presetButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const days = parseInt(button.dataset.days, 10);
+                setPreset(days);
+                setActivePreset(days);
+                _lastExactTotal = null;
+                clearSelection();
+                loadTickets(_currentView, 1);
+                refreshFilterCounts(true);
+            });
+        });
+
+        [document.getElementById('ticketsFrom'), document.getElementById('ticketsTo')].forEach(input => {
+            input.addEventListener('change', () => {
+                _fromDate = document.getElementById('ticketsFrom').value;
+                _toDate = document.getElementById('ticketsTo').value;
+                if (!_fromDate || !_toDate) setPreset(30);
+                normalizeRange();
+                syncPresetFromRange();
+                _lastExactTotal = null;
+                clearSelection();
+                loadTickets(_currentView, 1);
+                refreshFilterCounts(true);
+            });
+        });
+
+        document.getElementById('ticketsExportCsv').addEventListener('click', () => {
+            window.location.href = '/tickets/export.csv?' + exportParams();
+        });
+        document.getElementById('ticketsExportPdf').addEventListener('click', () => {
+            window.location.href = '/tickets/export.pdf?' + exportParams();
+        });
 
         if (!activeView && viewFilters.length > 0) activeView = viewFilters[0].dataset.view;
 
@@ -432,12 +561,22 @@
             filter.setAttribute('aria-current', 'true');
             const label = filter.querySelector('.filter-name')?.textContent?.trim();
             if (viewTitle && label) viewTitle.textContent = label;
+            updateFilterSummary();
         }
 
         if (filtersToggle && filtersPanel) {
             filtersToggle.addEventListener('click', () => {
                 const open = filtersPanel.classList.toggle('is-open');
                 filtersToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+        }
+
+        const toolbarToggle = document.getElementById('ticketsToolbarToggle');
+        const toolbar = document.getElementById('ticketsToolbar');
+        if (toolbarToggle && toolbar) {
+            toolbarToggle.addEventListener('click', () => {
+                const open = toolbar.classList.toggle('is-open');
+                toolbarToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
             });
         }
 
@@ -473,7 +612,7 @@
             if (f.dataset.view === activeView) setActiveView(f);
         });
 
-        if (activeView) loadTickets(activeView, activePage, false);
+        if (activeView) loadTickets(activeView, activePage, true);
 
         setTimeout(() => refreshFilterCounts(), 600);
 

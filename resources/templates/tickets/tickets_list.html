@@ -3,6 +3,11 @@
 
 {% block title %}TicketFlow – Tickets{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'tickets/reporting.css' %}?v=s6.0">
+<link rel="stylesheet" href="{% static 'tickets/tickets_list.css' %}?v=s6.1">
+{% endblock %}
+
 {% block content %}
 <!-- Bulk merge modal (solo para agentes) -->
 {% if user.role and user.role.role_name|lower not in 'end user,end-user,cliente,customer' %}
@@ -226,17 +231,55 @@
                 <span class="list-section-eyebrow">Vista activa</span>
                 <h2 id="ticketsViewTitle">Tickets</h2>
             </div>
+            <button type="button" class="tf-btn tf-btn--secondary tf-btn--sm tf-ticket-mobile-toolbar-toggle"
+                    id="ticketsToolbarToggle" aria-controls="ticketsToolbar" aria-expanded="false">
+                <i class="fas fa-sliders-h"></i> Filtrar y exportar
+            </button>
         </div>
-        {% if brands %}
-        <div class="brand-filter-bar">
-            <select id="brandFilter" class="tf-select">
+
+        <div class="tf-report-toolbar tf-tickets-toolbar" id="ticketsToolbar">
+            <div class="tf-filter">
+                <label class="tf-filter-label" for="brandFilter"><i class="fas fa-building"></i> Empresa</label>
+                <select id="brandFilter" class="tf-select">
                 <option value="">Todas las empresas</option>
                 {% for b in brands %}
                 <option value="{{ b.id }}">{{ b.name }}</option>
                 {% endfor %}
-            </select>
+                </select>
+            </div>
+
+            <div class="tf-filter">
+                <span class="tf-filter-label"><i class="far fa-calendar"></i> Rango</span>
+                <div class="tf-segment tf-ticket-presets" role="group" aria-label="Rango predefinido">
+                    <button type="button" data-days="7" aria-pressed="false">7d</button>
+                    <button type="button" data-days="30" class="is-active" aria-pressed="true">30d</button>
+                    <button type="button" data-days="90" aria-pressed="false">90d</button>
+                    <button type="button" data-days="365" aria-pressed="false">1a</button>
+                </div>
+            </div>
+
+            <div class="tf-filter">
+                <span class="tf-filter-label">Fechas · editar para personalizar</span>
+                <div class="tf-daterange">
+                    <input type="date" class="tf-input tf-report-date" id="ticketsFrom" aria-label="Desde">
+                    <span class="tf-daterange-sep">→</span>
+                    <input type="date" class="tf-input tf-report-date" id="ticketsTo" aria-label="Hasta">
+                </div>
+            </div>
+
+            <div class="tf-toolbar-grow"></div>
+            <div class="tf-report-actions" aria-label="Exportar tickets filtrados">
+                <button type="button" class="tf-btn tf-btn--secondary tf-btn--sm" id="ticketsExportCsv">
+                    <i class="fas fa-file-csv"></i> Exportar CSV
+                </button>
+                <button type="button" class="tf-btn tf-btn--secondary tf-btn--sm" id="ticketsExportPdf">
+                    <i class="fas fa-file-pdf"></i> Exportar PDF
+                </button>
+            </div>
         </div>
-        {% endif %}
+        <p class="tf-tickets-filter-summary" id="ticketsFilterSummary" aria-live="polite">
+            Aplicando filtros…
+        </p>
         <div class="tabla tf-table-scroll">
             <div id="loadingSpinner" class="tf-spinner tf-spinner--overlay" style="display:none;"></div>
             <table class="tickets-table">
@@ -282,5 +325,5 @@
 <script>
 window.__ticketsData = { createTicketUrl: "{% url 'create_ticket' %}" };
 </script>
-<script src="{% static 'tickets/tickets_list.js' %}?v=s6.1"></script>
+<script src="{% static 'tickets/tickets_list.js' %}?v=s6.2"></script>
 {% endblock %}

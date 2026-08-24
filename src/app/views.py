@@ -10,7 +10,7 @@ from collections import deque
 from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from .models import Brand, Organization, Ticket, Comment, User, TicketTag, Attachment, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating, SatisfactionReason, AssignmentRule, AssignmentRuleMember, SLAPolicy, AutomationRule, ResponseTemplate, OutboundEmailLog
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.hashers import check_password
@@ -121,6 +121,40 @@ _TICKET_GROUP_BY = {
     'no_update_48h':          'assignee',
     'sla_breached':           'assignee',
     'sla_at_risk':            'assignee',
+}
+
+_TICKET_VIEW_LABELS = {
+    'mis_tickets': 'Todos tus tickets',
+    'telefonica_mes': 'Tickets Telefónica último mes',
+    'unsolved_no_tareas': 'Tus tickets no resueltos (sin tareas)',
+    'unassigned': 'Tickets sin asignar',
+    'all_unsolved_no_tareas': 'Todos los tickets no resueltos (sin tareas)',
+    'recently_updated': 'Tickets actualizados recientemente',
+    'recently_solved': 'Tickets resueltos recientemente',
+    'pendientes': 'Tickets en estado pending',
+    'tareas': 'Todas las tareas',
+    'unsolved_groups': 'Tickets no resueltos de tus grupos',
+    'rated_last7': 'Tickets valorados en los últimos 7 días',
+    'internos_comuny': 'Tickets internos open de Comunycarse',
+    'abiertos_ecomfax': 'Tickets open de eComFax',
+    'recordia_sgsd': 'Recordia SGSD',
+    'closed': 'Tickets en estado closed',
+    'sus_pendientes': 'Sus tickets en estado pending',
+    'espera': 'Tickets en estado espera',
+    'abiertos': 'Tickets en estado open',
+    'sus_no_cerrados': 'Sus tickets no closed',
+    'ultimos_cerrados': 'Últimos tickets closed',
+    'no_resueltos': 'Todos los tickets no resueltos',
+    'twitter': 'Recibido por Twitter',
+    'twitter_dm': 'Recibido por Twitter mensaje directo',
+    'twitter_like': 'Recibido por Twitter Me gusta',
+    'sus_tareas': 'Todas sus tareas',
+    'resueltos': 'Tickets en estado resolved',
+    'new_in_groups': 'Tickets nuevos de tus grupos',
+    'open': 'Tickets en estado open',
+    'no_update_48h': 'Tickets sin actualizar en 48 horas',
+    'sla_breached': 'SLA incumplido',
+    'sla_at_risk': 'SLA en riesgo',
 }
 
 _GROUP_DB_SORT = {
@@ -338,12 +372,56 @@ def _balanced_agent_page(agent_counts, page, page_size):
     return page, total_pages, total, target_offsets, target_allocations
 
 
-def _ticket_filter_counts_cache_key(user, brand_id=None):
+def _ticket_filter_counts_cache_key(user, brand_id=None, date_from=None, date_to=None):
     role_name = (getattr(getattr(user, 'role', None), 'role_name', '') or '').lower()
     return (
-        f"tickets:filter-counts:v3:user:{user.id}:"
-        f"role:{role_name}:group:{user.group_id or 0}:brand:{brand_id or 0}"
+        f"tickets:filter-counts:v4:user:{user.id}:"
+        f"role:{role_name}:group:{user.group_id or 0}:brand:{brand_id or 0}:"
+        f"from:{date_from}:to:{date_to}"
     )
+
+
+def _parse_filter_date_range(params, default_days=30, max_days=366):
+    """Devuelve un rango local inclusivo y normalizado para filtros de tickets."""
+    today = timezone.localdate()
+    try:
+        date_from = datetime.strptime(params.get('from', ''), '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        date_from = today - timedelta(days=default_days)
+    try:
+        date_to = datetime.strptime(params.get('to', ''), '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        date_to = today
+    if date_to < date_from:
+        date_from, date_to = date_to, date_from
+    if (date_to - date_from).days > max_days:
+        date_from = date_to - timedelta(days=max_days)
+
+    tz = timezone.get_current_timezone()
+    start_dt = timezone.make_aware(datetime.combine(date_from, datetime.min.time()), tz)
+    end_dt = timezone.make_aware(datetime.combine(date_to, datetime.max.time()), tz)
+    return date_from, date_to, start_dt, end_dt
+
+
+def _ticket_listing_queryset(request):
+    """Query base de /tickets con empresa y fechas aplicadas una sola vez."""
+    base_qs = _base_tickets_queryset(request.user)
+    brand_id = _as_int_or_none(request.GET.get('brand_id'))
+    date_from, date_to, start_dt, end_dt = _parse_filter_date_range(request.GET)
+    if brand_id:
+        base_qs = base_qs.filter(brand_id=brand_id)
+    base_qs = base_qs.filter(created_at__range=(start_dt, end_dt))
+    return base_qs, brand_id, date_from, date_to
+
+
+def _ticket_filter_payload(brand_id, date_from, date_to, view=None):
+    return {
+        'brand_id': brand_id,
+        'from': str(date_from),
+        'to': str(date_to),
+        'view': view or '',
+        'view_label': _TICKET_VIEW_LABELS.get(view, 'Todos los tickets'),
+    }
 
 
 def _ensure_urgency(qs):
@@ -576,13 +654,10 @@ def filter_tickets(request):
         page = 1
     page_size = _parse_page_size(request.GET.get("page_size"))
 
-    base_qs = _base_tickets_queryset(request.user)
-
-    # Filtro por marca/entidad: se aplica al queryset base para que vistas,
-    # contadores, totales y paginación lo hereden.
-    brand_id = _as_int_or_none(request.GET.get("brand_id"))
-    if brand_id:
-        base_qs = base_qs.filter(brand_id=brand_id)
+    # Empresa y fechas se aplican al queryset base para que vistas, contadores,
+    # totales, paginación y exportaciones partan del mismo conjunto exacto.
+    base_qs, brand_id, date_from, date_to = _ticket_listing_queryset(request)
+    applied_filters = _ticket_filter_payload(brand_id, date_from, date_to, view)
 
     if total_only:
         total = _tickets_for_view(base_qs, view, request.user).count()
@@ -593,6 +668,7 @@ def filter_tickets(request):
                 "page_size": page_size,
             },
             "filtros": {view: total} if view else {},
+            "applied_filters": applied_filters,
         })
 
     # Los contadores son costosos. Solo se calculan cuando counts=1.
@@ -601,7 +677,9 @@ def filter_tickets(request):
     _counts_cache_key = None
     _counts_loaded_from_cache = False
     if compute_counts:
-        _counts_cache_key = _ticket_filter_counts_cache_key(request.user, brand_id)
+        _counts_cache_key = _ticket_filter_counts_cache_key(
+            request.user, brand_id, date_from, date_to
+        )
         if not force_counts:
             cached_filtros = cache.get(_counts_cache_key)
             if cached_filtros is not None:
@@ -733,7 +811,7 @@ def filter_tickets(request):
         cache.set(_counts_cache_key, filtros, _TICKET_FILTER_COUNTS_TTL)
 
     if counts_only:
-        return JsonResponse({"filtros": filtros})
+        return JsonResponse({"filtros": filtros, "applied_filters": applied_filters})
 
     tickets = _tickets_for_view(base_qs, view, request.user)
     balanced_assignment_view = view == 'all_unsolved_no_tareas'
@@ -970,11 +1048,133 @@ def filter_tickets(request):
         },
         "sort": {"sort_by": sort_by if db_sort else "", "sort_dir": sort_dir},
         "group_by": group_by,
+        "applied_filters": applied_filters,
         "balanced_assignment": {
             "enabled": True,
             "agents": balanced_distribution,
         } if balanced_distribution is not None else {"enabled": False, "agents": []},
     })
+
+
+def _ticket_export_queryset(request):
+    """Conjunto y metadatos compartidos por CSV/PDF de la lista de tickets."""
+    base_qs, brand_id, date_from, date_to = _ticket_listing_queryset(request)
+    view = request.GET.get('view') or 'mis_tickets'
+    qs = _tickets_for_view(base_qs, view, request.user)
+
+    sort_by = request.GET.get('sort_by', '')
+    sort_dir = request.GET.get('sort_dir', 'asc')
+    db_sort = _TICKET_SORT_FIELDS.get(sort_by)
+    if db_sort:
+        if sort_by == 'sla':
+            qs = _ensure_urgency(qs).order_by(
+                F('sla_next_due').desc(nulls_last=True)
+                if sort_dir == 'desc'
+                else F('sla_next_due').asc(nulls_last=True)
+            )
+        else:
+            qs = qs.order_by(f'-{db_sort}' if sort_dir == 'desc' else db_sort)
+    else:
+        qs = qs.order_by('-created_at', '-id')
+
+    qs = qs.select_related('brand', 'requester')
+    brand = Brand.objects.filter(id=brand_id).only('name').first() if brand_id else None
+    view_label = _TICKET_VIEW_LABELS.get(view, 'Todos los tickets')
+    brand_label = brand.name if brand else ('Todas las empresas' if not brand_id else f'Empresa #{brand_id}')
+    total = qs.count()
+    generated_at = timezone.localtime()
+
+    view_filename_label = view_label
+    if view_filename_label.lower().startswith('tickets '):
+        view_filename_label = view_filename_label[8:]
+    brand_token = slugify(brand.name).replace('-', '_') if brand else ''
+    view_token = slugify(view_filename_label).replace('-', '_') or 'todos'
+    name_parts = ['Tickets']
+    if brand_token and brand_token not in view_token:
+        name_parts.append(brand_token)
+    name_parts.append(view_token)
+    filename_base = '_'.join(name_parts) + f'_{date_from:%Y%m%d}-{date_to:%Y%m%d}'
+
+    metadata = {
+        'title': view_label,
+        'brand': brand_label,
+        'view': view_label,
+        'date_from': date_from.strftime('%d/%m/%Y'),
+        'date_to': date_to.strftime('%d/%m/%Y'),
+        'generated_at': generated_at.strftime('%d/%m/%Y %H:%M'),
+        'total': total,
+        'filename_base': filename_base,
+    }
+    return qs, metadata
+
+
+def _ticket_export_values(ticket):
+    solved_at = ticket.resolved_at or ticket.closed_at
+    return [
+        ticket.id,
+        ticket.get_status_display() or ticket.status or '',
+        ticket.service or '',
+        ticket.subject,
+        ticket.get_type_display() if ticket.type else '',
+        ticket.get_channel_display() if ticket.channel else '',
+        ticket.requester.name if ticket.requester else '',
+        ticket.get_priority_display() if ticket.priority else '',
+        timezone.localtime(ticket.created_at).strftime('%Y-%m-%d %H:%M') if ticket.created_at else '',
+        timezone.localtime(solved_at).strftime('%Y-%m-%d %H:%M') if solved_at else '',
+        ticket.category or '',
+    ]
+
+
+@api_login_required
+def tickets_export_csv(request):
+    """Exporta exactamente los tickets visibles tras aplicar empresa, fechas y vista."""
+    import csv
+    from django.http import StreamingHttpResponse
+
+    qs, metadata = _ticket_export_queryset(request)
+
+    class _Echo:
+        def write(self, value):
+            return value
+
+    writer = csv.writer(_Echo())
+
+    def _rows():
+        yield '\ufeff'
+        yield writer.writerow(['EXPORTACIÓN DE TICKETS'])
+        yield writer.writerow(['Empresa', metadata['brand']])
+        yield writer.writerow(['Vista', metadata['view']])
+        yield writer.writerow(['Desde', metadata['date_from']])
+        yield writer.writerow(['Hasta', metadata['date_to']])
+        yield writer.writerow(['Generado', metadata['generated_at']])
+        yield writer.writerow(['Tickets resultantes', metadata['total']])
+        yield writer.writerow([])
+        yield writer.writerow([
+            'ID', 'Status', 'Service', 'Subject', 'Type', 'Channel',
+            'Requester', 'Priority', 'Requested', 'Solved', 'Category',
+        ])
+        for ticket in qs.iterator(chunk_size=2000):
+            yield writer.writerow(_ticket_export_values(ticket))
+
+    response = StreamingHttpResponse(_rows(), content_type='text/csv; charset=utf-8')
+    response['Content-Disposition'] = (
+        f'attachment; filename="{metadata["filename_base"]}.csv"'
+    )
+    return response
+
+
+@api_login_required
+def tickets_export_pdf(request):
+    """Exporta el mismo conjunto del CSV como fichas de tickets paginadas."""
+    from .services.ticket_exports import build_tickets_pdf
+
+    qs, metadata = _ticket_export_queryset(request)
+    pdf_bytes = build_tickets_pdf(qs.iterator(chunk_size=500), metadata)
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = (
+        f'attachment; filename="{metadata["filename_base"]}.pdf"'
+    )
+    return response
 
 @api_login_required
 def filter_customers(request):
@@ -1105,26 +1305,8 @@ def reporting(request):
 
 def _reporting_params(request):
     """Parsea brand/from/to con defaults (últimos 30 días) y clamp a 366 días."""
-    from datetime import date
-
     brand_id = _as_int_or_none(request.GET.get('brand'))
-    today = timezone.localdate()
-    try:
-        date_from = datetime.strptime(request.GET.get('from', ''), '%Y-%m-%d').date()
-    except (ValueError, TypeError):
-        date_from = today - timedelta(days=30)
-    try:
-        date_to = datetime.strptime(request.GET.get('to', ''), '%Y-%m-%d').date()
-    except (ValueError, TypeError):
-        date_to = today
-    if date_to < date_from:
-        date_from, date_to = date_to, date_from
-    if (date_to - date_from).days > 366:
-        date_from = date_to - timedelta(days=366)
-
-    tz = timezone.get_current_timezone()
-    start_dt = timezone.make_aware(datetime.combine(date_from, datetime.min.time()), tz)
-    end_dt = timezone.make_aware(datetime.combine(date_to, datetime.max.time()), tz)
+    date_from, date_to, start_dt, end_dt = _parse_filter_date_range(request.GET)
     return brand_id, date_from, date_to, start_dt, end_dt
 
 

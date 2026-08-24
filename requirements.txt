@@ -10,3 +10,4 @@ gunicorn
 whitenoise
 bleach[css]>=5.0.0
 openai>=1.40,<2
+reportlab>=4.2,<5
