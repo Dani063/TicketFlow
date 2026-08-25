@@ -31,7 +31,7 @@ class CommentService:
         content = (content or "").strip()
         html_body = (html_body or "").strip()
         if not content and not html_body:
-            raise APIValidationError("empty_comment", "El contenido no puede estar vacio.", status=400)
+            raise APIValidationError("empty_comment", "El mensaje no puede estar vacío.", status=400)
 
         final_is_public = bool(is_public) if is_agent(actor) else True
         if html_body:

@@ -204,6 +204,21 @@ class TicketFlowBackendTests(TestCase):
         self.assertIsNone(ticket.first_response_due_at)
         self.assertTrue(TicketEvent.objects.filter(ticket=ticket, field_name="status").exists())
 
+    def test_add_comment_empty_error_names_the_missing_message(self):
+        ticket = self.make_ticket()
+        self.client.force_login(self.agent)
+        response = self.client.post(
+            reverse("add_comment", args=[ticket.id]),
+            data=json.dumps({"content": "   ", "is_public": True}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], {
+            "code": "empty_comment",
+            "message": "El mensaje no puede estar vacío.",
+        })
+
     def test_end_user_internal_comment_is_forced_public(self):
         ticket = self.make_ticket()
         self.client.force_login(self.customer)
