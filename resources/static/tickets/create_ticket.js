@@ -116,8 +116,57 @@ window.initTicketPane = function (root, ctx) {
     // only runs its DOMContentLoaded handler once per page, so panes mounted
     // after first load (sidebar → ticket, or new ticket via tab) would never
     // get a working composer without this call.
+    let paneComposer = null;
     if (window.QuillComposer && typeof window.QuillComposer.initFor === 'function') {
-        window.QuillComposer.initFor(rootEl);
+        paneComposer = window.QuillComposer.initFor(rootEl);
+    }
+
+    function focusValidationTarget(selector) {
+        if (selector === '#new-message') {
+            if (paneComposer && typeof paneComposer.focus === 'function') {
+                paneComposer.focus();
+                return;
+            }
+            rootEl.querySelector('#quill-editor .ql-editor')?.focus();
+            return;
+        }
+
+        const field = rootEl.querySelector(selector);
+        if (!field) return;
+        const select2Selection = field.nextElementSibling?.querySelector?.('.select2-selection');
+        if (select2Selection) select2Selection.focus();
+        else field.focus();
+    }
+
+    function warnMessageRequired(action) {
+        window.toast.warning(`Escribe un mensaje antes de ${action}.`);
+        focusValidationTarget('#new-message');
+    }
+
+    function validateNewTicketRequiredFields() {
+        const required = [
+            {
+                selector: '#empresa',
+                value: (rootEl.querySelector('#empresa')?.value || '').trim(),
+                message: 'Selecciona una empresa antes de crear el ticket.',
+            },
+            {
+                selector: '#subject',
+                value: (rootEl.querySelector('#subject')?.value || '').trim(),
+                message: 'Escribe un asunto antes de crear el ticket.',
+            },
+            {
+                selector: '#new-message',
+                value: (rootEl.querySelector('#new-message')?.value || '').trim(),
+                message: 'Escribe el mensaje inicial antes de crear el ticket.',
+            },
+        ];
+        const missing = required.find(item => !item.value);
+        if (!missing) return true;
+
+        window.toast.warning(missing.message);
+        focusValidationTarget(missing.selector);
+        return false;
     }
     function middleEllipsis(filename, max = 26, filler = '…') {
         if (!filename) return '';
@@ -319,13 +368,7 @@ window.initTicketPane = function (root, ctx) {
 
         // Si aún no existe id real, validar como en "Publicar"
         if (!ctx.ticketId) {
-            const errors = [];
-            const brand = (rootEl.querySelector('#empresa')?.value || '').trim();
-            const subject = (rootEl.querySelector('#subject')?.value || '').trim();
-            if (!brand) errors.push('Please provide a ticket brand');
-            if (!content) errors.push('Please provide a ticket description');
-            if (!subject) errors.push('Please provide a ticket subject');
-            if (errors.length) { errors.forEach(e => window.toast.warning(e)); return; }
+            if (!validateNewTicketRequiredFields()) return;
 
             // Inyecta status y crea/redirige
             const ticketForm = rootEl.querySelector('#ticket-form');
@@ -346,7 +389,7 @@ window.initTicketPane = function (root, ctx) {
         }
 
         // Ticket existente: validar contenido
-        if (!content) { window.toast.warning('El contenido no puede estar vacío.'); return; }
+        if (!content) { warnMessageRequired('enviar'); return; }
 
         const isPublic = (typeof isPublicInput !== 'undefined') ? (isPublicInput.value === 'true') : true;
         const payload = { content, is_public: isPublic };
@@ -484,7 +527,7 @@ window.initTicketPane = function (root, ctx) {
 
         const textarea = rootEl.querySelector('#new-message');
         const content = (textarea?.value || '').trim();
-        if (!content) { window.toast.warning('El contenido no puede estar vacío.'); return; }
+        if (!content) { warnMessageRequired('publicar'); return; }
 
         const isPublic = (typeof isPublicInput !== 'undefined') ? (isPublicInput.value === 'true') : true;
         const newStatus = (rootEl.querySelector('#selected-status')?.textContent || 'open').trim().toLowerCase();
@@ -608,21 +651,9 @@ window.initTicketPane = function (root, ctx) {
     if (ticketForm) {
         ticketForm.addEventListener('submit', (e) => {
             // Solo bloqueamos el submit automático en tickets NUEVOS si faltan datos
-            if (!ctx.ticketId) {
-                const brand = (rootEl.querySelector('#empresa')?.value || '').trim();
-                const subject = (rootEl.querySelector('#subject')?.value || '').trim();
-                const description = (rootEl.querySelector('#new-message')?.value || '').trim();
-
-                const errors = [];
-                if (!brand) errors.push('Please provide a ticket brand');
-                if (!description) errors.push('Please provide a ticket description');
-                if (!subject) errors.push('Please provide a ticket subject');
-
-                if (errors.length) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    errors.forEach(err => window.toast.warning(err));
-                }
+            if (!ctx.ticketId && !validateNewTicketRequiredFields()) {
+                e.preventDefault();
+                e.stopPropagation();
             }
         });
     }
@@ -672,14 +703,7 @@ window.initTicketPane = function (root, ctx) {
             }
 
             // Ticket nuevo → validación + submit (tu flujo actual)
-            const errors = [];
-            const brand = (rootEl.querySelector('#empresa')?.value || '').trim();
-            const subject = (rootEl.querySelector('#subject')?.value || '').trim();
-            const description = (rootEl.querySelector('#new-message')?.value || '').trim();
-            if (!brand) errors.push('Please provide a ticket brand');
-            if (!description) errors.push('Please provide a ticket description');
-            if (!subject) errors.push('Please provide a ticket subject');
-            if (errors.length) { errors.forEach(err => window.toast.warning(err)); return; }
+            if (!validateNewTicketRequiredFields()) return;
 
             const selectedStatus = rootEl.querySelector('#selected-status').textContent.trim();
             let statusInput = ticketForm.querySelector('input[name="status"]');
