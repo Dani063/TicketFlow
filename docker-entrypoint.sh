@@ -34,7 +34,8 @@ case "$ROLE" in
       --workers 3 \
       --timeout 60 \
       --access-logfile - \
-      --error-logfile -
+      --error-logfile - \
+      --logger-class TicketFlow.gunicorn_logging.JsonLogger
     ;;
   worker)
     check_sqs_queue

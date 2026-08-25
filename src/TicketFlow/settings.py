@@ -142,39 +142,78 @@ ALLOWED_HOSTS = [h.strip() for h in _hosts.split(",") if h.strip()]
 _csrf = os.getenv("CSRF_TRUSTED_ORIGINS", "").strip()
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf.split(",") if o.strip()]
 
+# === Logging ===
+# Un único handler sobre el logger *raíz*: así queda cubierto cualquier módulo
+# que use `logging.getLogger(__name__)`. Antes solo estaban configurados
+# 'app.views' y 'django', y como no había logger raíz todo lo que emitían
+# `app/services/`, `app/tasks.py` y `health/` por debajo de WARNING se
+# descartaba en silencio (y lo de WARNING arriba salía por el `lastResort` de
+# Python, sin formato ni nivel).
+#
+# LOG_LEVEL controla el nivel del código propio y se fija por entorno desde el
+# ConfigMap: DEBUG en desarrollo, INFO o WARNING en producción.
+_NIVELES_VALIDOS = {'CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG', 'NOTSET'}
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+if LOG_LEVEL not in _NIVELES_VALIDOS:
+    LOG_LEVEL = "INFO"
+
+DJANGO_LOG_LEVEL = os.getenv("DJANGO_LOG_LEVEL", "WARNING").upper()
+if DJANGO_LOG_LEVEL not in _NIVELES_VALIDOS:
+    DJANGO_LOG_LEVEL = "WARNING"
+
+# JSON en el entorno desplegado (el colector filtra por el campo 'level');
+# texto plano en local, que es lo legible. Se puede forzar con LOG_FORMAT.
+LOG_FORMAT = os.getenv("LOG_FORMAT", "text" if DEBUG else "json").lower()
+if LOG_FORMAT not in ('json', 'text'):
+    LOG_FORMAT = 'json'
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
-        'simple': {
-            'format': '{levelname} {message}',
+        'json': {
+            '()': 'TicketFlow.logging_formatters.JsonFormatter',
+        },
+        'text': {
+            'format': '{asctime} {levelname:<8} {name}: {message}',
             'style': '{',
         },
     },
     'handlers': {
-        'console_app': {
+        'console': {
             'class': 'logging.StreamHandler',
-            'formatter': 'simple',
+            'stream': 'ext://sys.stdout',
+            'formatter': LOG_FORMAT,
         },
     },
+    # Raíz: cubre el código propio y cualquier librería sin entrada explícita.
+    'root': {
+        'handlers': ['console'],
+        'level': LOG_LEVEL,
+    },
+    # Los loggers de abajo no declaran handler a propósito: propagan al raíz y
+    # usan el suyo. Aquí solo se ajusta el nivel para recortar ruido.
     'loggers': {
-        # Logger para tu aplicación
-        'app.views': {
-            'handlers': ['console_app'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-        # Reducir la verbosidad de los loggers de Django
+        # Django en INFO comenta cada request; se mantiene el nivel reducido
+        # que ya tenía. Los errores siguen llegando.
         'django': {
-            'handlers': ['console_app'],
-            'level': 'WARNING',
-            'propagate': False,
+            'level': DJANGO_LOG_LEVEL,
         },
         'django.request': {
-            'handlers': ['console_app'],
             'level': 'ERROR',
-            'propagate': False,
         },
+        # Clientes de AWS y HTTP: en INFO son extremadamente verbosos y estos
+        # pods hablan con SSM, SQS y SES continuamente.
+        'boto3': {'level': 'WARNING'},
+        'botocore': {'level': 'WARNING'},
+        's3transfer': {'level': 'WARNING'},
+        'urllib3': {'level': 'WARNING'},
+        'msal': {'level': 'WARNING'},
+        'openai': {'level': 'WARNING'},
+        'httpx': {'level': 'WARNING'},
+        'httpcore': {'level': 'WARNING'},
+        'kombu': {'level': 'WARNING'},
     },
 }
    
@@ -363,6 +402,11 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {
 # para probar en local el flujo que dispara Celery (p.ej. clasificación IA al crear).
 CELERY_TASK_ALWAYS_EAGER = os.getenv('CELERY_TASK_ALWAYS_EAGER', '').lower() in ('1', 'true', 'yes', 'on')
 CELERY_TASK_EAGER_PROPAGATES = CELERY_TASK_ALWAYS_EAGER
+
+# Celery, por defecto, ARRANCA quitando los handlers del logger raíz y pone los
+# suyos. Eso se llevaría por delante la configuración de LOGGING justo en los dos
+# roles donde más hace falta (worker y beat), dejándolos sin JSON ni nivel.
+CELERY_WORKER_HIJACK_ROOT_LOGGER = False
 # Los resultados de tareas no se usan — se descartan para no necesitar result backend
 CELERY_TASK_IGNORE_RESULT = True
 CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'cache+memory://')

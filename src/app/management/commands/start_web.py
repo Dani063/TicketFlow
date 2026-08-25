@@ -23,5 +23,6 @@ class Command(BaseCommand):
             "--log-level", options["loglevel"],
             "--access-logfile", "-",
             "--error-logfile",  "-",
+            "--logger-class", "TicketFlow.gunicorn_logging.JsonLogger",
         ]
         os.execvp("gunicorn", cmd)
