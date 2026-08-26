@@ -347,7 +347,20 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/2.1/howto/static-files/
 STATIC_URL = '/static/'
 STATIC_ROOT = PROJECT_ROOT / "staticfiles"
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# Django 4.2+ resuelve el backend de estáticos desde STORAGES. Este proyecto
+# contiene algún recurso JavaScript heredado en UTF-16, por lo que usamos la
+# variante comprimida sin manifest (el backend manifest intenta decodificar
+# todos los JS como UTF-8 durante el postprocesado). Se conserva el ajuste
+# antiguo para los despliegues que todavía ejecuten Django 3.2.
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage',
+    },
+}
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = PROJECT_ROOT / "resources" / "media"
 
