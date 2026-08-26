@@ -23,6 +23,16 @@ from gunicorn import glogging
 from TicketFlow.logging_formatters import JsonFormatter
 
 
+# Los probes de Kubernetes (exec + curl a localhost) y los health checks del ALB
+# golpean /livez y /readyz cada pocos segundos y son la mayor parte del volumen
+# del access log. Se silencian; los fallos siguen viendose en los propios probes.
+_RUTAS_SILENCIADAS = tuple(
+    ruta.strip()
+    for ruta in os.getenv("ACCESS_LOG_SKIP_PATHS", "/livez,/readyz").split(",")
+    if ruta.strip()
+)
+
+
 def _formato_json_activo():
     """Replica el criterio de `LOG_FORMAT` de settings.py leyendo el entorno."""
     formato = os.getenv("LOG_FORMAT", "").lower()
@@ -58,6 +68,8 @@ class JsonLogger(glogging.Logger):
 
     def access(self, resp, req, environ, request_time):
         if not self.cfg.accesslog:
+            return
+        if environ.get('PATH_INFO') in _RUTAS_SILENCIADAS:
             return
         if not _formato_json_activo():
             super().access(resp, req, environ, request_time)
