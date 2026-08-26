@@ -34,12 +34,12 @@ _RUTAS_SILENCIADAS = tuple(
 
 
 def _formato_json_activo():
-    """Replica el criterio de `LOG_FORMAT` de settings.py leyendo el entorno."""
-    formato = os.getenv("LOG_FORMAT", "").lower()
-    if formato in ("json", "text"):
-        return formato == "json"
-    debug = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes", "on")
-    return not debug
+    """Mismo criterio que `LOG_FORMAT` en settings.py, leido del entorno.
+
+    JSON por defecto, con independencia de DEBUG: solo un LOG_FORMAT=text
+    explicito devuelve el formato legible de gunicorn.
+    """
+    return os.getenv("LOG_FORMAT", "json").lower() != "text"
 
 
 def _entero(valor):

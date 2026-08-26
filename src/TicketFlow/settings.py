@@ -162,9 +162,11 @@ DJANGO_LOG_LEVEL = os.getenv("DJANGO_LOG_LEVEL", "WARNING").upper()
 if DJANGO_LOG_LEVEL not in _NIVELES_VALIDOS:
     DJANGO_LOG_LEVEL = "WARNING"
 
-# JSON en el entorno desplegado (el colector filtra por el campo 'level');
-# texto plano en local, que es lo legible. Se puede forzar con LOG_FORMAT.
-LOG_FORMAT = os.getenv("LOG_FORMAT", "text" if DEBUG else "json").lower()
+# JSON siempre por defecto, tambien con DEBUG=True: el formato del log no debe
+# depender del modo de la aplicacion. El entorno desplegado puede tener DEBUG
+# activo y el colector necesita el campo 'level' igualmente.
+# Para trabajar en local con salida legible: LOG_FORMAT=text en el .env.
+LOG_FORMAT = os.getenv("LOG_FORMAT", "json").lower()
 if LOG_FORMAT not in ('json', 'text'):
     LOG_FORMAT = 'json'
 
