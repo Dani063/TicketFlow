@@ -10,8 +10,10 @@
    debe ver exactamente lo mismo que el resto de la plataforma. */
 
 :root {
-    --sv-navy: #1e0b54;          /* fondo del panel de marca */
-    --sv-navy-deep: #0e0a3c;     /* titulares */
+    --brand-primary: #24213f;
+    --brand-accent: #ffb703;
+    --sv-navy: var(--brand-primary);
+    --sv-navy-deep: #172033;
     --sv-blue: #1976f0;          /* títulos de sección y foco */
     --sv-orange: #ef7d00;        /* acción principal */
     --sv-orange-dark: #d66f00;
@@ -31,9 +33,17 @@ body {
     min-height: 100vh;
     background: var(--sv-bg);
     color: var(--sv-text);
-    font-family: "Poppins", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     font-size: 15px;
     line-height: 1.55;
+}
+
+.sv-signal {
+    position: fixed;
+    z-index: 10;
+    inset: 0 0 auto;
+    height: 5px;
+    background: linear-gradient(90deg, var(--brand-accent) 0 28%, #7c3aed 28% 33%, var(--brand-primary) 33%);
 }
 
 /* --- Estructura: dos paneles, como el login de Recordia --- */
@@ -156,7 +166,7 @@ body {
 }
 .sv-option:hover { border-color: var(--sv-blue); background: #f7faff; }
 .sv-option input { accent-color: var(--sv-blue); flex: none; }
-.sv-option i { font-size: 21px; color: var(--sv-muted); flex: none; }
+.sv-face { font-size: 25px; color: var(--sv-muted); flex: none; line-height: 1; }
 .sv-option span { font-weight: 500; color: var(--sv-navy-deep); }
 
 /* :has() da el estado seleccionado sin JS; los navegadores que no lo soportan
@@ -166,13 +176,13 @@ body {
     background: #f1fbf5;
     box-shadow: inset 0 0 0 1px var(--sv-good);
 }
-.sv-option--good:has(input:checked) i { color: var(--sv-good); }
+.sv-option--good:has(input:checked) .sv-face { color: var(--sv-good); }
 .sv-option--bad:has(input:checked) {
     border-color: var(--sv-bad);
     background: #fdf3f3;
     box-shadow: inset 0 0 0 1px var(--sv-bad);
 }
-.sv-option--bad:has(input:checked) i { color: var(--sv-bad); }
+.sv-option--bad:has(input:checked) .sv-face { color: var(--sv-bad); }
 
 /* --- Campos --- */
 
@@ -233,6 +243,7 @@ body {
 /* --- Estados finales --- */
 
 .sv-result-ico {
+    display: block;
     font-size: 40px;
     color: var(--sv-blue);
     margin-bottom: 16px;

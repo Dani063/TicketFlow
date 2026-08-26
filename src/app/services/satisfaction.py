@@ -80,7 +80,15 @@ class SatisfactionService:
         """
         # Sin URL pública los enlaces de voto saldrían vacíos: un correo pidiendo
         # valoración con botones muertos es peor que no enviarlo.
-        if not (getattr(settings, "TICKETFLOW_PUBLIC_URL", "") or "").strip():
+        from app.models import HelpCenter
+        center = HelpCenter.objects.filter(active=True, service__iexact=ticket.service or "").first()
+        if center and center.slug == "ecomfax":
+            public_url = getattr(settings, "ECOMFAX_HELP_PUBLIC_URL", "")
+        elif center and center.slug == "recordia":
+            public_url = getattr(settings, "RECORDIA_HELP_PUBLIC_URL", "")
+        else:
+            public_url = getattr(settings, "TICKETFLOW_PUBLIC_URL", "")
+        if not (public_url or "").strip():
             logger.warning("satisfaction_offer_skipped_no_public_url", extra={"ticket_id": ticket.id})
             record_metric("satisfaction.offer_skipped", labels={"ticket_id": ticket.id, "reason": "no_public_url"})
             return None

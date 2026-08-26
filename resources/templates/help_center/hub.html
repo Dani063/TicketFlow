@@ -1,0 +1,9 @@
+{% load static %}
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex, follow"><title>Centros de ayuda</title>
+<link rel="stylesheet" href="{% static 'help_centers/public_help.css' %}?v=1.0"></head>
+<body class="hc-body hc-hub"><main class="hc-hub__main"><div class="hc-hub__intro"><span class="hc-eyebrow">TicketFlow · Ayuda pública</span>
+<h1>¿Sobre qué producto necesitas ayuda?</h1><p>Consulta la documentación o contacta directamente con el equipo de soporte.</p></div>
+<div class="hc-hub__grid">{% for item in centers %}<a class="hc-hub-card hc-brand--{{ item.slug }}" style="--brand-primary:{{ item.primary_color }};--brand-accent:{{ item.accent_color }}" href="{% url 'help_home' item.slug item.default_locale %}">
+<span class="hc-hub-card__signal"></span><span class="hc-brand__mark">{{ item.name|slice:':1' }}</span><strong>{{ item.name }}</strong><span>{{ item.tagline_es }}</span><b>Ir al centro de ayuda →</b></a>{% empty %}<p>No hay centros activos.</p>{% endfor %}</div></main></body></html>
+

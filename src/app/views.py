@@ -22,11 +22,8 @@ import json
 import logging
 import random
 from django.views.decorators.http import require_POST
-from django.core.files.storage import default_storage
-from django.core.files.base import ContentFile
 from django.utils.text import slugify
 from django.conf import settings
-import os, time
 from django.conf import settings as DJANGO_SETTINGS
 from django.utils import timezone
 from django.views import View
@@ -2231,30 +2228,17 @@ def upload_attachment(request, ticket_id):
     if not f:
         return JsonResponse({'error': 'No se recibió ningún archivo.'}, status=400)
 
-    # Nombre seguro + carpeta por ticket
-    root, ext = os.path.splitext(f.name)
-    safe_name = f"{slugify(root)[:80]}{ext.lower()}"
-    rel_dir = f"attachments/tickets/{ticket.id}/"
-    rel_path = os.path.join(rel_dir, f"{int(time.time())}_{safe_name}")
-
-    # Guardar a disco
-    saved_path = default_storage.save(rel_path, ContentFile(f.read()))
-    raw_url = default_storage.url(saved_path)
-    # build_absolute_uri solo si la URL es relativa (local dev); S3 ya devuelve URL absoluta
-    file_url = raw_url if raw_url.startswith('http') else request.build_absolute_uri(raw_url)
-
-    att = Attachment.objects.create(
-        file_url=file_url,
-        file_type=getattr(f, 'content_type', None),
-        ticket=ticket,
-        uploaded_by=request.user,
-    )
+    from app.services.attachments import AttachmentService
+    try:
+        att = AttachmentService.save(f, ticket, request.user)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
 
     return JsonResponse({
         'id': att.id,
         'file_url': att.file_url,
         'file_type': att.file_type or '',
-        'filename': safe_name,
+        'filename': att.original_name,
         'size': getattr(f, 'size', 0),
     })
 
@@ -3306,6 +3290,12 @@ def satisfaction_survey(request, token):
 
     def _render(state, error=None, score=None):
         language = ResponseTemplateService.pick_language(ticket) if ticket else 'es'
+        from app.models import HelpCenter
+        center = None
+        if ticket:
+            center = HelpCenter.objects.filter(active=True, service__iexact=ticket.service or '').first()
+            if not center and ticket.brand_id:
+                center = HelpCenter.objects.filter(active=True, brand_id=ticket.brand_id).first()
         return render(request, 'tickets/satisfaction_survey.html', {
             'state': state,
             'error': error,
@@ -3313,7 +3303,10 @@ def satisfaction_survey(request, token):
             'ticket': ticket,
             # Sin nombre de marca no se pone nada: el cliente final no conoce
             # «TicketFlow», que es el nombre interno de la herramienta.
-            'brand_name': ticket.brand.name if ticket and ticket.brand_id and ticket.brand else '',
+            'brand_name': center.name if center else (ticket.brand.name if ticket and ticket.brand_id and ticket.brand else ''),
+            'center': center,
+            'language': language,
+            'brand_style': f'--brand-primary:{center.primary_color};--brand-accent:{center.accent_color}' if center else '',
             'reasons': SatisfactionService.reasons_for(language) if state == 'form' else [],
             'selected_score': score,
         }, status=404 if state == 'invalid' else 200)
@@ -3329,7 +3322,9 @@ def satisfaction_survey(request, token):
     if request.method == 'POST':
         score = (request.POST.get('score') or '').strip().lower()
         if score not in ('good', 'bad'):
-            return _render('form', error='Elige una de las dos opciones para continuar.')
+            language = ResponseTemplateService.pick_language(ticket) if ticket else 'es'
+            error = 'Choose one of the two options to continue.' if language == 'en' else 'Elige una de las dos opciones para continuar.'
+            return _render('form', error=error)
         reason = None
         if score == 'bad':
             reason_id = _as_int_or_none(request.POST.get('reason_id'))

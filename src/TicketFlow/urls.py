@@ -6,7 +6,7 @@ from datetime import datetime
 from django.urls import path, include
 from django.contrib import admin
 from django.contrib.auth.views import LoginView, LogoutView
-from app import forms, views
+from app import forms, views, public_views
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -31,6 +31,7 @@ urlpatterns = [
     path('api/tags/', views.tags_api, name='tags_api'),
     path('api/users/search/', views.users_search_api, name='users_search_api'),
     path('tickets/<int:ticket_id>/attachments/upload/', views.upload_attachment, name='upload_attachment'),
+    path('attachments/<int:attachment_id>/download/', public_views.attachment_download, name='attachment_download'),
 
     path("customers/filter/", views.filter_customers, name="filter_customers"),
     path('customers/', views.customers_list, name='customers_list'),
@@ -54,6 +55,21 @@ urlpatterns = [
     path('profile/', views.profile, name='profile'),
     path('settings/', views.legacy_settings_redirect, name='legacy_settings_redirect'),
     path('docs/', views.documentation, name='documentation'),
+    path('django-admin/', admin.site.urls),
+
+    # Portales publicos de producto. No requieren sesion y no enlazan a la app interna.
+    path('help/', public_views.help_hub, name='help_hub'),
+    path('help/<slug:center_slug>/<str:locale>/', public_views.help_home, name='help_home'),
+    path('help/<slug:center_slug>/<str:locale>/categories/<slug:category_slug>/', public_views.help_category, name='help_category'),
+    path('help/<slug:center_slug>/<str:locale>/sections/<slug:section_slug>/', public_views.help_section, name='help_section'),
+    path('help/<slug:center_slug>/<str:locale>/articles/<slug:article_slug>/', public_views.help_article, name='help_article'),
+    path('help/<slug:center_slug>/<str:locale>/search/', public_views.help_search, name='help_search'),
+    path('help/<slug:center_slug>/<str:locale>/requests/new/', public_views.help_request, name='help_request'),
+    path('help/<slug:center_slug>/<str:locale>/requests/success/<str:proof>/', public_views.help_request_success, name='help_request_success'),
+    path('hc/<str:locale>/articles/<int:source_id>-<slug:legacy_slug>/', public_views.legacy_help_article, name='legacy_help_article'),
+    path('hc/<str:locale>/articles/<int:source_id>/', public_views.legacy_help_article, name='legacy_help_article_short'),
+    path('sitemap.xml', public_views.help_sitemap, name='help_sitemap'),
+    path('robots.txt', public_views.help_robots, name='help_robots'),
     path("api/users/<int:user_id>/notes/", views.update_user_notes, name="update_user_notes"),
     path("api/notifications/", views.notifications_api, name="notifications_api"),
     path("api/notifications/<int:notif_id>/read/", views.mark_notification_read, name="mark_notification_read"),

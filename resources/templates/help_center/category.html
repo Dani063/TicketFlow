@@ -1,0 +1,9 @@
+{% extends 'help_center/base.html' %}
+{% block title %}{{ category.name }} · {{ center.name }}{% endblock %}
+{% block content %}<div class="hc-wrap hc-content-wrap">
+<nav class="hc-breadcrumb" aria-label="Breadcrumb"><a href="{% url 'help_home' center.slug locale %}">{{ ui.home }}</a><span>/</span><span aria-current="page">{{ category.name }}</span></nav>
+<header class="hc-page-title"><span class="hc-eyebrow">{{ ui.all_articles }}</span><h1>{{ category.name }}</h1>{% if category.description %}<p>{{ category.description }}</p>{% endif %}</header>
+<div class="hc-section-grid">{% for section in category.sections.all %}{% if section.published %}<section class="hc-section-card"><h2><a href="{% url 'help_section' center.slug locale section.slug %}">{{ section.name }}</a></h2>
+<ul>{% for article in section.articles.all|slice:':6' %}{% if article.published %}<li><a href="{% url 'help_article' center.slug locale article.slug %}">{{ article.title }}</a></li>{% endif %}{% endfor %}</ul>
+<a class="hc-text-link" href="{% url 'help_section' center.slug locale section.slug %}">{{ ui.all_articles }} →</a></section>{% endif %}{% endfor %}</div></div>{% endblock %}
+

@@ -1,24 +1,20 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="es">
+<html lang="{{ language|default:'es' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex, nofollow">
-    <title>Valora la atención recibida{% if ticket %} – Ticket #{{ ticket.id }}{% endif %}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
-    <link rel="stylesheet" href="{% static 'tickets/satisfaction.css' %}?v=s5.7">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <title>{% if language == 'en' %}Rate the support you received{% else %}Valora la atención recibida{% endif %}{% if ticket %} – Ticket #{{ ticket.id }}{% endif %}</title>
+    <link rel="stylesheet" href="{% static 'tickets/satisfaction.css' %}?v=s5.8">
 </head>
-<body>
+<body class="sv-brand--{{ center.slug|default:'ticketflow' }}" style="{{ brand_style }}">
+<div class="sv-signal" aria-hidden="true"></div>
 <div class="sv-shell">
 <aside class="sv-aside">
     <div class="sv-aside-inner">
         {% if brand_name %}<span class="sv-logo">{{ brand_name }}</span>{% endif %}
-        <p class="sv-claim">Tu opinión nos ayuda a mejorar la atención que te damos.</p>
+        <p class="sv-claim">{% if language == 'en' %}Your feedback helps us improve the support we provide.{% else %}Tu opinión nos ayuda a mejorar la atención que te damos.{% endif %}</p>
     </div>
 </aside>
 
@@ -26,15 +22,14 @@
     {% if ticket %}<span class="sv-ticket">Ticket #{{ ticket.id }}</span>{% endif %}
 
     {% if state == 'form' %}
-        <h1 class="sv-title">¿Cómo valoras la atención recibida?</h1>
+        <h1 class="sv-title">{% if language == 'en' %}How would you rate the support you received?{% else %}¿Cómo valoras la atención recibida?{% endif %}</h1>
         {% if ticket %}<p class="sv-subject">{{ ticket.subject }}</p>{% endif %}
         {% if rating.is_answered %}
             <p class="sv-note">
-                <i class="fas fa-info-circle"></i>
-                Ya nos habías dado tu valoración. Puedes cambiarla si lo prefieres.
+                {% if language == 'en' %}You already rated this request. You can change your answer if you wish.{% else %}Ya nos habías dado tu valoración. Puedes cambiarla si lo prefieres.{% endif %}
             </p>
         {% endif %}
-        {% if error %}<p class="sv-error"><i class="fas fa-exclamation-triangle"></i> {{ error }}</p>{% endif %}
+        {% if error %}<p class="sv-error">{{ error }}</p>{% endif %}
 
         <form method="post" id="svForm" novalidate>
             {% csrf_token %}
@@ -42,22 +37,22 @@
                 <label class="sv-option sv-option--good">
                     <input type="radio" name="score" value="good"
                            {% if selected_score == 'good' %}checked{% endif %}>
-                    <i class="fas fa-smile"></i>
-                    <span>Bien, estoy satisfecho</span>
+                    <span class="sv-face" aria-hidden="true">☺</span>
+                    <span>{% if language == 'en' %}Good, I'm satisfied{% else %}Bien, estoy satisfecho{% endif %}</span>
                 </label>
                 <label class="sv-option sv-option--bad">
                     <input type="radio" name="score" value="bad"
                            {% if selected_score == 'bad' %}checked{% endif %}>
-                    <i class="fas fa-frown"></i>
-                    <span>Mal, no estoy satisfecho</span>
+                    <span class="sv-face" aria-hidden="true">☹</span>
+                    <span>{% if language == 'en' %}Bad, I'm unsatisfied{% else %}Mal, no estoy satisfecho{% endif %}</span>
                 </label>
             </div>
 
             {% if reasons %}
             <div class="sv-field" id="svReasonField" hidden>
-                <label class="sv-label" for="svReason">¿Qué es lo que no ha ido bien?</label>
+                <label class="sv-label" for="svReason">{% if language == 'en' %}What did not go well?{% else %}¿Qué es lo que no ha ido bien?{% endif %}</label>
                 <select name="reason_id" id="svReason">
-                    <option value="">Prefiero no indicarlo</option>
+                    <option value="">{% if language == 'en' %}I prefer not to say{% else %}Prefiero no indicarlo{% endif %}</option>
                     {% for reason in reasons %}
                         <option value="{{ reason.id }}"
                                 {% if rating.reason_choice_id == reason.id %}selected{% endif %}>{{ reason.label }}</option>
@@ -67,47 +62,45 @@
             {% endif %}
 
             <div class="sv-field">
-                <label class="sv-label" for="svComment">¿Quieres contarnos algo más? (opcional)</label>
+                <label class="sv-label" for="svComment">{% if language == 'en' %}Would you like to tell us anything else? (optional){% else %}¿Quieres contarnos algo más? (opcional){% endif %}</label>
                 <textarea name="comment" id="svComment" rows="4"
                           maxlength="2000">{{ rating.comment|default_if_none:'' }}</textarea>
             </div>
 
-            <button type="submit" class="sv-submit">Enviar valoración</button>
+            <button type="submit" class="sv-submit">{% if language == 'en' %}Submit rating{% else %}Enviar valoración{% endif %}</button>
         </form>
 
     {% elif state == 'done' %}
         <div class="sv-result">
             {% if rating.score == 'good' %}
-                <i class="fas fa-smile sv-result-ico sv-result-ico--good"></i>
+                <span class="sv-result-ico sv-result-ico--good">☺</span>
             {% else %}
-                <i class="fas fa-frown sv-result-ico sv-result-ico--bad"></i>
+                <span class="sv-result-ico sv-result-ico--bad">☹</span>
             {% endif %}
-            <h1 class="sv-title">¡Gracias por tu valoración!</h1>
+            <h1 class="sv-title">{% if language == 'en' %}Thank you for your feedback!{% else %}¡Gracias por tu valoración!{% endif %}</h1>
             <p class="sv-note">
-                Hemos registrado que
+                {% if language == 'en' %}We recorded that you are {% if rating.score == 'good' %}satisfied{% else %}not satisfied{% endif %} with the support you received. {% if not rating.is_expired %}You can use this link again to change your answer.{% endif %}{% else %}Hemos registrado que
                 {% if rating.score == 'good' %}estás satisfecho{% else %}no estás satisfecho{% endif %}
                 con la atención recibida.
-                {% if not rating.is_expired %}Puedes volver a este enlace si quieres cambiarla.{% endif %}
+                {% if not rating.is_expired %}Puedes volver a este enlace si quieres cambiarla.{% endif %}{% endif %}
             </p>
         </div>
 
     {% elif state == 'expired' %}
         <div class="sv-result">
-            <i class="fas fa-hourglass-end sv-result-ico"></i>
-            <h1 class="sv-title">Este enlace ya ha caducado</h1>
+            <span class="sv-result-ico">⌛</span>
+            <h1 class="sv-title">{% if language == 'en' %}This link has expired{% else %}Este enlace ya ha caducado{% endif %}</h1>
             <p class="sv-note">
-                El plazo para valorar esta solicitud ha terminado. Si necesitas algo más,
-                escríbenos y abriremos una nueva.
+                {% if language == 'en' %}The deadline to rate this request has passed. If you need anything else, submit a new request.{% else %}El plazo para valorar esta solicitud ha terminado. Si necesitas algo más, escríbenos y abriremos una nueva.{% endif %}
             </p>
         </div>
 
     {% else %}
         <div class="sv-result">
-            <i class="fas fa-unlink sv-result-ico"></i>
-            <h1 class="sv-title">Enlace no válido</h1>
+            <span class="sv-result-ico">×</span>
+            <h1 class="sv-title">{% if language == 'en' %}Invalid link{% else %}Enlace no válido{% endif %}</h1>
             <p class="sv-note">
-                No hemos encontrado la valoración asociada a este enlace. Comprueba que lo has
-                copiado completo desde el correo.
+                {% if language == 'en' %}We could not find the rating associated with this link. Check that you copied the full address from the email.{% else %}No hemos encontrado la valoración asociada a este enlace. Comprueba que lo has copiado completo desde el correo.{% endif %}
             </p>
         </div>
     {% endif %}

@@ -242,6 +242,7 @@ MIDDLEWARE = [
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
+    'app.middleware.PublicHelpHostMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -517,6 +518,40 @@ AWS_SES_REGION = os.getenv('AWS_SES_REGION', 'eu-west-1')
 SES_CONFIGURATION_SET = os.getenv('SES_CONFIGURATION_SET', '')  # opcional: tracking de bounces/quejas
 # Base de los enlaces {{ticket_url}} en plantillas (sin barra final)
 TICKETFLOW_PUBLIC_URL = os.getenv('TICKETFLOW_PUBLIC_URL', '')
+
+# === Centros de ayuda publicos (eComFax / Recordia) ===
+PUBLIC_HELP_ENABLED = os.getenv('PUBLIC_HELP_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
+PUBLIC_TICKET_INTAKE_ENABLED = os.getenv('PUBLIC_TICKET_INTAKE_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
+ECOMFAX_HELP_PUBLIC_URL = os.getenv('ECOMFAX_HELP_PUBLIC_URL', 'https://support.ecomfax.com').rstrip('/')
+RECORDIA_HELP_PUBLIC_URL = os.getenv('RECORDIA_HELP_PUBLIC_URL', 'https://support.recordia.net').rstrip('/')
+# Recordia usa actualmente el buzon/marca operativa de Comunycarse. El nombre es
+# configurable para no acoplar el portal publico al despliegue de un cliente.
+PUBLIC_RECORDIA_BRAND_NAME = os.getenv('PUBLIC_RECORDIA_BRAND_NAME', 'Comunycarse Helpdesk')
+PUBLIC_ECOMFAX_BRAND_NAME = os.getenv('PUBLIC_ECOMFAX_BRAND_NAME', 'eComFax')
+
+# Protecciones del formulario anonimo. El tiempo minimo frena bots sin CAPTCHA;
+# en tests puede fijarse a cero.
+PUBLIC_FORM_MIN_SECONDS = int(os.getenv('PUBLIC_FORM_MIN_SECONDS', '2'))
+PUBLIC_TICKET_IP_LIMIT = int(os.getenv('PUBLIC_TICKET_IP_LIMIT', '5'))
+PUBLIC_TICKET_IP_WINDOW_MINUTES = int(os.getenv('PUBLIC_TICKET_IP_WINDOW_MINUTES', '10'))
+PUBLIC_TICKET_EMAIL_LIMIT = int(os.getenv('PUBLIC_TICKET_EMAIL_LIMIT', '3'))
+PUBLIC_TICKET_EMAIL_WINDOW_MINUTES = int(os.getenv('PUBLIC_TICKET_EMAIL_WINDOW_MINUTES', '60'))
+# REMOTE_ADDR es el valor seguro sin proxy. En un ingress que sanee/añada XFF,
+# configurar HTTP_X_FORWARDED_FOR (se toma el ultimo salto añadido por el proxy).
+PUBLIC_CLIENT_IP_HEADER = os.getenv('PUBLIC_CLIENT_IP_HEADER', 'REMOTE_ADDR')
+
+# Adjuntos privados: local en desarrollo, S3 privado en produccion cuando se
+# define el bucket. Nunca se expone la URL de almacenamiento directamente.
+PUBLIC_ATTACHMENTS_S3_BUCKET = os.getenv('PUBLIC_ATTACHMENTS_S3_BUCKET', '')
+PUBLIC_ATTACHMENTS_S3_REGION = os.getenv('PUBLIC_ATTACHMENTS_S3_REGION', os.getenv('AWS_REGION', 'eu-west-1'))
+PUBLIC_ATTACHMENT_MAX_FILES = int(os.getenv('PUBLIC_ATTACHMENT_MAX_FILES', '5'))
+PUBLIC_ATTACHMENT_MAX_BYTES = int(os.getenv('PUBLIC_ATTACHMENT_MAX_BYTES', str(15 * 1024 * 1024)))
+PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS = {
+    item.strip().lower() for item in os.getenv(
+        'PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS',
+        'pdf,png,jpg,jpeg,gif,webp,txt,csv,doc,docx,xls,xlsx,zip,log',
+    ).split(',') if item.strip()
+}
 
 # === Encuesta de satisfacción (CSAT) ===
 # Kill switch propio, independiente de OUTBOUND_EMAIL_ENABLED: permite tener el

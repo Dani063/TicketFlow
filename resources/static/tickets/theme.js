@@ -103,8 +103,8 @@
                 case 'help-docs':
                     window.location.href = (window.urls && window.urls.documentation) || '/docs/';
                     break;
-                case 'help-contact':
-                    window.location.href = 'mailto:molqueda@cloudwws.com';
+                case 'help-center':
+                    window.location.href = item.dataset.url || '/help/';
                     break;
                 case 'signout':
                     pop.style.display = 'none';

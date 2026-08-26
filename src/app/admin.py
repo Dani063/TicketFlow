@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import Brand, Comment, Group, OutboundEmailLog, ResponseTemplate, Role, SatisfactionRating, SatisfactionReason, SLAPolicy, Ticket, TicketAIAnalysis, User
+from .models import Brand, Comment, Group, HelpArticle, HelpCategory, HelpCenter, HelpSection, OutboundEmailLog, ResponseTemplate, Role, SatisfactionRating, SatisfactionReason, SLAPolicy, Ticket, TicketAIAnalysis, User
 
 # ====== Ticket ======
 
@@ -130,3 +130,33 @@ class SLAPolicyAdmin(admin.ModelAdmin):
     list_filter = ("active", "priority", "brand")
     search_fields = ("name",)
     list_select_related = ("brand", "assigned_group")
+
+
+@admin.register(HelpCenter)
+class HelpCenterAdmin(admin.ModelAdmin):
+    list_display = ("name", "slug", "service", "default_locale", "active", "updated_at")
+    list_filter = ("active", "default_locale")
+    search_fields = ("name", "slug", "service")
+
+
+@admin.register(HelpCategory)
+class HelpCategoryAdmin(admin.ModelAdmin):
+    list_display = ("name", "center", "locale", "position", "published")
+    list_filter = ("center", "locale", "published")
+    search_fields = ("name", "source_id")
+
+
+@admin.register(HelpSection)
+class HelpSectionAdmin(admin.ModelAdmin):
+    list_display = ("name", "category", "position", "published")
+    list_filter = ("published", "category__center", "category__locale")
+    search_fields = ("name", "source_id")
+    list_select_related = ("category", "category__center")
+
+
+@admin.register(HelpArticle)
+class HelpArticleAdmin(admin.ModelAdmin):
+    list_display = ("title", "section", "promoted", "published", "source_updated_at")
+    list_filter = ("published", "promoted", "section__category__center", "section__category__locale")
+    search_fields = ("title", "body_text", "source_id")
+    list_select_related = ("section", "section__category", "section__category__center")

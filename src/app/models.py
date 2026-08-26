@@ -257,6 +257,13 @@ class TicketEvent(models.Model):
 class Attachment(models.Model):
     file_url = models.URLField(null=False, help_text='URL of the attached file')
     file_type = models.CharField(max_length=255, null=True)
+    storage_key = models.CharField(max_length=500, blank=True, default='')
+    storage_backend = models.CharField(
+        max_length=16, default='local', choices=[('local', 'Local'), ('s3', 'Amazon S3')],
+    )
+    original_name = models.CharField(max_length=255, blank=True, default='')
+    size = models.PositiveBigIntegerField(default=0)
+    is_private = models.BooleanField(default=True)
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, null=True, blank=True)
     comment = models.ForeignKey(Comment, on_delete=models.CASCADE, null=True, blank=True)
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
@@ -628,3 +635,133 @@ class OperationalMetric(models.Model):
 
     def __str__(self):
         return f"{self.name}={self.value}"
+
+
+# ---------------------------------------------------------------------------
+# Centros de ayuda publicos
+# ---------------------------------------------------------------------------
+
+
+class HelpCenter(models.Model):
+    """Portal publico de una linea de producto."""
+
+    slug = models.SlugField(max_length=40, unique=True)
+    name = models.CharField(max_length=100)
+    service = models.CharField(max_length=100, db_index=True)
+    brand = models.ForeignKey(
+        Brand, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="help_centers",
+    )
+    domains = models.JSONField(default=list, blank=True)
+    default_locale = models.CharField(max_length=10, default="es")
+    supported_locales = models.JSONField(default=list, blank=True)
+    tagline_es = models.CharField(max_length=255, blank=True, default="")
+    tagline_en = models.CharField(max_length=255, blank=True, default="")
+    primary_color = models.CharField(max_length=20, default="#172033")
+    accent_color = models.CharField(max_length=20, default="#7c3aed")
+    active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def locale_supported(self, locale):
+        return locale in (self.supported_locales or [self.default_locale])
+
+
+class HelpCategory(models.Model):
+    center = models.ForeignKey(HelpCenter, on_delete=models.CASCADE, related_name="categories")
+    locale = models.CharField(max_length=10, db_index=True)
+    source_id = models.BigIntegerField(null=True, blank=True)
+    translation_key = models.CharField(max_length=100, blank=True, default="", db_index=True)
+    slug = models.SlugField(max_length=180)
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    position = models.PositiveIntegerField(default=0)
+    published = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        ordering = ["position", "name"]
+        unique_together = [("center", "locale", "slug")]
+        indexes = [models.Index(fields=["center", "locale", "published"], name="help_category_list_idx")]
+
+    def __str__(self):
+        return f"{self.center.name} / {self.name} [{self.locale}]"
+
+
+class HelpSection(models.Model):
+    category = models.ForeignKey(HelpCategory, on_delete=models.CASCADE, related_name="sections")
+    source_id = models.BigIntegerField(null=True, blank=True)
+    translation_key = models.CharField(max_length=100, blank=True, default="", db_index=True)
+    slug = models.SlugField(max_length=180)
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    position = models.PositiveIntegerField(default=0)
+    published = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        ordering = ["position", "name"]
+        unique_together = [("category", "slug")]
+
+    @property
+    def locale(self):
+        return self.category.locale
+
+    def __str__(self):
+        return f"{self.category} / {self.name}"
+
+
+class HelpArticle(models.Model):
+    section = models.ForeignKey(HelpSection, on_delete=models.CASCADE, related_name="articles")
+    source_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    translation_key = models.CharField(max_length=100, blank=True, default="", db_index=True)
+    slug = models.SlugField(max_length=220)
+    title = models.CharField(max_length=500)
+    body_html = models.TextField(blank=True, default="")
+    body_text = models.TextField(blank=True, default="")
+    promoted = models.BooleanField(default=False, db_index=True)
+    position = models.PositiveIntegerField(default=0)
+    source_url = models.URLField(max_length=1000, blank=True, default="")
+    source_updated_at = models.DateTimeField(null=True, blank=True)
+    published = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position", "title"]
+        unique_together = [("section", "slug")]
+        indexes = [
+            models.Index(fields=["source_id", "published"], name="help_article_source_idx"),
+            models.Index(fields=["promoted", "published"], name="help_article_promoted_idx"),
+        ]
+
+    @property
+    def center(self):
+        return self.section.category.center
+
+    @property
+    def locale(self):
+        return self.section.category.locale
+
+    def __str__(self):
+        return f"{self.title} [{self.locale}]"
+
+
+class PublicTicketAttempt(models.Model):
+    """Contador de abuso sin persistir IPs ni emails en claro."""
+
+    center = models.ForeignKey(HelpCenter, on_delete=models.CASCADE, related_name="ticket_attempts")
+    ip_hash = models.CharField(max_length=64, db_index=True)
+    email_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    accepted = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["center", "ip_hash", "created_at"], name="public_ticket_ip_idx"),
+            models.Index(fields=["center", "email_hash", "created_at"], name="public_ticket_email_idx"),
+        ]

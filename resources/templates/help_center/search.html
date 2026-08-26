@@ -1,0 +1,7 @@
+{% extends 'help_center/base.html' %}
+{% block title %}{{ ui.results }} · {{ center.name }}{% endblock %}
+{% block content %}<div class="hc-wrap hc-content-wrap"><nav class="hc-breadcrumb"><a href="{% url 'help_home' center.slug locale %}">{{ ui.home }}</a><span>/</span><span>{{ ui.results }}</span></nav>
+<header class="hc-page-title"><span class="hc-eyebrow">{{ ui.search }}</span><h1>{{ ui.results }}{% if query %}: “{{ query }}”{% endif %}</h1></header>
+{% if results %}<ol class="hc-search-results">{% for article in results %}<li><a href="{% url 'help_article' center.slug locale article.slug %}"><h2>{{ article.title }}</h2><p>{{ article.body_text|truncatewords:30 }}</p><small>{{ article.section.name }}</small></a></li>{% endfor %}</ol>
+{% else %}<div class="hc-empty"><span>0</span><h2>{{ ui.no_results }}</h2><p>{{ ui.try_request }}</p><a class="hc-button" href="{% url 'help_request' center.slug locale %}">{{ ui.submit_request }}</a></div>{% endif %}</div>{% endblock %}
+

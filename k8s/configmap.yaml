@@ -4,12 +4,24 @@ metadata:
   name: ticketflow-config
 data:
   DEBUG: "False"
-  ALLOWED_HOSTS: "ticketflow.example.com"           # ← cambiar al dominio real
-  CSRF_TRUSTED_ORIGINS: "https://ticketflow.example.com"
+  ALLOWED_HOSTS: "ticketflow.example.com,support.ecomfax.com,support.recordia.net"  # ← cambiar ticketflow.example.com al dominio real
+  CSRF_TRUSTED_ORIGINS: "https://ticketflow.example.com,https://support.ecomfax.com,https://support.recordia.net"
   DB_NAME: "ticketflow"
   DB_PORT: "3306"
   AWS_SSM_PREFIX: "/Recordia/Development/Ticketflow"
   AWS_REGION: "eu-west-1"
   SSO_LOGIN_API_URL: "https://dev-login-api.agentia365.com"
   SSO_LOGIN_UI_URL: "https://dev-login.recordia.net"
+  PUBLIC_HELP_ENABLED: "true"
+  PUBLIC_TICKET_INTAKE_ENABLED: "true"
+  ECOMFAX_HELP_PUBLIC_URL: "https://support.ecomfax.com"
+  RECORDIA_HELP_PUBLIC_URL: "https://support.recordia.net"
+  PUBLIC_ECOMFAX_BRAND_NAME: "eComFax"
+  PUBLIC_RECORDIA_BRAND_NAME: "Comunycarse Helpdesk"
+  # El nombre del bucket privado debe configurarse antes de activar el formulario
+  # en produccion. Puede ir aqui o en ticketflow-secrets segun la politica local.
+  # PUBLIC_ATTACHMENTS_S3_BUCKET: "ticketflow-private-attachments"
+  PUBLIC_ATTACHMENTS_S3_REGION: "eu-west-1"
+  # El ingress de confianza debe sanear/añadir X-Forwarded-For.
+  PUBLIC_CLIENT_IP_HEADER: "HTTP_X_FORWARDED_FOR"
   # Azure, Zendesk y SECRET_KEY vienen de SSM — no van aquí
