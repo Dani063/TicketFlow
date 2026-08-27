@@ -110,6 +110,8 @@ Todas vienen del ConfigMap `ticketflow-config` y el Secret `ticketflow-secrets`.
 | `SECRET_KEY` | SSM `{prefix}/SecretKey` | Clave secreta Django |
 | `CELERY_SQS_QUEUE_URL` | SSM `{prefix}/CelerySQSQueueUrl` | URL completa de la cola SQS |
 | `CELERY_BROKER_URL` | — | Solo en local con Redis; en producción no definir (usa SQS) |
+| `ARTIFACT_VERSION` | Imagen CI/CD | Tag con la que se construyó la imagen; alimenta automáticamente el identificador visual de versión |
+| `TICKETFLOW_VERSION` | Opcional | Override explícito de la versión visual; tiene prioridad sobre `ARTIFACT_VERSION` |
 
 ---
 

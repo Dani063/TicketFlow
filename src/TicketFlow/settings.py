@@ -100,9 +100,18 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = 'app.User'
 
-# Versión visible del producto. Es la única fuente usada por las plantillas;
-# puede sobrescribirse en despliegue sin duplicar el valor en el frontend.
-TICKETFLOW_VERSION = os.getenv('TICKETFLOW_VERSION', '2.2.0')
+def _resolve_ticketflow_version():
+    """Resuelve la versión visual desde el tag sellado en la imagen corporativa."""
+    return (
+        os.getenv('TICKETFLOW_VERSION')
+        or os.getenv('ARTIFACT_VERSION')
+        or 'dev'
+    )
+
+
+# La imagen corporativa exporta ARTIFACT_VERSION desde la tag usada por CI/CD.
+# TICKETFLOW_VERSION queda como override explícito para ejecuciones especiales.
+TICKETFLOW_VERSION = _resolve_ticketflow_version()
 
 AUTHENTICATION_BACKENDS = [
     'app.backends.EmailBackend',  # Backend personalizado

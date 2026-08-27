@@ -1,9 +1,13 @@
+import os
 from unittest.mock import MagicMock, call, patch
 
 from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase, override_settings
+
+from app.context_processors import fragment_base
+from TicketFlow.settings import _resolve_ticketflow_version
 
 
 class StartWebCommandTests(SimpleTestCase):
@@ -89,3 +93,29 @@ class StaticFilesConfigurationTests(SimpleTestCase):
             settings.STORAGES["staticfiles"]["BACKEND"],
             "whitenoise.storage.CompressedStaticFilesStorage",
         )
+
+
+class VersionContextTests(SimpleTestCase):
+    @patch.dict(os.environ, {"ARTIFACT_VERSION": "2.3.1-dev"}, clear=True)
+    def test_artifact_version_is_used_by_default(self):
+        self.assertEqual(_resolve_ticketflow_version(), "2.3.1-dev")
+
+    @patch.dict(
+        os.environ,
+        {"TICKETFLOW_VERSION": "custom", "ARTIFACT_VERSION": "2.3.1-dev"},
+        clear=True,
+    )
+    def test_explicit_version_overrides_artifact_tag(self):
+        self.assertEqual(_resolve_ticketflow_version(), "custom")
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_local_fallback_is_not_a_stale_release(self):
+        self.assertEqual(_resolve_ticketflow_version(), "dev")
+
+    @override_settings(TICKETFLOW_VERSION="2.3.1-dev")
+    def test_deployment_version_is_exposed_to_templates(self):
+        request = RequestFactory().get("/")
+
+        context = fragment_base(request)
+
+        self.assertEqual(context["app_version"], "2.3.1-dev")
