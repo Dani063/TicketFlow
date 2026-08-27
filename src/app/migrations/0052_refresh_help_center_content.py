@@ -1,13 +1,13 @@
 """Refresh public help content after the exhaustive Zendesk attachment audit."""
 
 import html
-import json
-from pathlib import Path
 
 from django.conf import settings
 from django.db import migrations
 from django.utils.dateparse import parse_datetime
 from django.utils.html import strip_tags
+
+from app.migration_data.help_content_snapshot_0052 import load_snapshot
 
 
 def refresh_help_centers(apps, schema_editor):
@@ -16,11 +16,7 @@ def refresh_help_centers(apps, schema_editor):
     HelpSection = apps.get_model("app", "HelpSection")
     HelpArticle = apps.get_model("app", "HelpArticle")
     Brand = apps.get_model("app", "Brand")
-    snapshot = Path(settings.PROJECT_ROOT) / "resources" / "help_content" / "help_centers.json"
-    if not snapshot.exists():
-        raise RuntimeError(f"No se encuentra el snapshot de centros de ayuda: {snapshot}")
-
-    data = json.loads(snapshot.read_text(encoding="utf-8"))
+    data = load_snapshot()
     brand_defaults = {
         "ecomfax": getattr(settings, "PUBLIC_ECOMFAX_BRAND_NAME", "eComFax"),
         "recordia": getattr(settings, "PUBLIC_RECORDIA_BRAND_NAME", "Comunycarse Helpdesk"),

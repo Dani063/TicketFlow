@@ -190,8 +190,14 @@ class HelpContentSnapshotTests(SimpleTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        from app.migration_data.help_content_snapshot_0052 import load_snapshot
+
         path = Path(settings.PROJECT_ROOT) / "resources" / "help_content" / "help_centers.json"
-        cls.snapshot = json.loads(path.read_text(encoding="utf-8"))
+        cls.source_snapshot = json.loads(path.read_text(encoding="utf-8"))
+        cls.snapshot = load_snapshot()
+
+    def test_deployable_snapshot_matches_source(self):
+        self.assertEqual(self.snapshot, self.source_snapshot)
 
     def _articles(self, center_slug, locale=None):
         center = next(row for row in self.snapshot["centers"] if row["slug"] == center_slug)

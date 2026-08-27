@@ -13,7 +13,13 @@ TicketFlow incorpora los antiguos centros de Zendesk de eComFax y Recordia como 
 
 La importación autenticada distingue los segmentos de Zendesk: conserva el contenido anónimo y el destinado a clientes autenticados (`249029`), y excluye borradores y documentación exclusiva de agentes (`249009`). Los recursos que dejan de estar referenciados se retiran del árbol estático para que la documentación interna tampoco quede accesible mediante una URL directa.
 
-El snapshot reproducible está en `resources/help_content/help_centers.json`. Las migraciones `0051_seed_help_center_content` y `0052_refresh_help_center_content` lo cargan durante el despliegue. Para refrescar todo el contenido se requieren `ZENDESK_EMAIL` y `ZENDESK_API_TOKEN`; el comando impide usar `--prune` con un inventario anónimo para no retirar artículos de cliente por error:
+El snapshot maestro reproducible está en `resources/help_content/help_centers.json`. Para que el artefacto corporativo no dependa de carpetas externas al paquete Python, las migraciones `0051_seed_help_center_content` y `0052_refresh_help_center_content` cargan la copia comprimida e integrada de `src/app/migration_data/help_content_snapshot_0052.py`. Tras refrescar el JSON maestro hay que regenerarla con:
+
+```powershell
+python scripts/build_help_content_snapshot.py
+```
+
+La prueba `HelpContentSnapshotTests.test_deployable_snapshot_matches_source` impide publicar ambas copias desincronizadas. Para refrescar todo el contenido se requieren `ZENDESK_EMAIL` y `ZENDESK_API_TOKEN`; el comando impide usar `--prune` con un inventario anónimo para no retirar artículos de cliente por error:
 
 ```powershell
 cd src
