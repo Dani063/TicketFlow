@@ -1,0 +1,19 @@
+{% extends 'help_center/base.html' %}
+{% block title %}{{ center.name }} · {{ ui.help_center }}{% endblock %}
+{% block hero %}
+<section class="hc-hero"><div class="hc-wrap hc-hero__inner"><span class="hc-eyebrow">{{ center.name }} · {{ ui.help_center }}</span>
+<h1>{% if locale == 'es' %}Resuelve tu duda, sin rodeos.{% else %}Find your answer, without the runaround.{% endif %}</h1>
+<p>{% if locale == 'es' %}{{ center.tagline_es }}{% else %}{{ center.tagline_en }}{% endif %}</p>
+<form action="{% url 'help_search' center.slug locale %}" method="get" role="search" class="hc-search hc-search--hero">
+<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.7-4.7m2.2-5.3a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z"/></svg>
+<label class="hc-visually-hidden" for="hero-search">{{ ui.search }}</label><input id="hero-search" type="search" name="q" placeholder="{{ ui.search_placeholder }}"><button>{{ ui.search }}</button></form>
+</div></section>
+{% endblock %}
+{% block content %}<div class="hc-wrap hc-layout">
+<section><div class="hc-section-heading"><div><span class="hc-eyebrow">01</span><h2>{{ ui.categories }}</h2></div></div>
+<div class="hc-category-grid">{% for category in categories %}<a class="hc-category-card" href="{% url 'help_category' center.slug locale category.slug %}">
+<span class="hc-category-card__index">0{{ forloop.counter }}</span><div><h3>{{ category.name }}</h3>{% if category.description %}<p>{{ category.description }}</p>{% endif %}<small>{{ category.article_count }} {% if locale == 'es' %}{% if category.article_count == 1 %}artículo{% else %}artículos{% endif %}{% else %}{% if category.article_count == 1 %}article{% else %}articles{% endif %}{% endif %}</small></div><span class="hc-arrow">→</span></a>{% endfor %}</div></section>
+{% if promoted %}<section class="hc-promoted"><div class="hc-section-heading"><div><span class="hc-eyebrow">02</span><h2>{{ ui.promoted }}</h2></div></div>
+<ol class="hc-article-list">{% for article in promoted %}<li><a href="{% url 'help_article' center.slug locale article.slug %}"><span>{{ article.title }}</span><small>{{ article.section.name }}</small></a></li>{% endfor %}</ol></section>{% endif %}
+<aside class="hc-contact-card"><span class="hc-contact-card__mark">?</span><div><h2>{% if locale == 'es' %}¿Sigues necesitando ayuda?{% else %}Still need help?{% endif %}</h2><p>{{ ui.try_request }}</p></div><a class="hc-button" href="{% url 'help_request' center.slug locale %}">{{ ui.submit_request }} →</a></aside>
+</div>{% endblock %}

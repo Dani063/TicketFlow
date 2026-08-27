@@ -1,0 +1,55 @@
+{% load static %}
+<!doctype html>
+<html lang="{{ locale }}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="{{ robots|default:'index, follow' }}">
+    <meta name="theme-color" content="{{ center.primary_color }}">
+    <link rel="canonical" href="{{ canonical_url }}">
+    <link rel="alternate" hreflang="{{ other_locale }}" href="{{ locale_switch_url }}">
+    <title>{% block title %}{{ ui.help_center }} · {{ center.name }}{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'help_centers/public_help.css' %}?v=1.0">
+</head>
+<body class="hc-body hc-brand--{{ center.slug }}" style="{{ brand_style }}">
+<a class="hc-skip" href="#main">{% if locale == 'es' %}Saltar al contenido{% else %}Skip to content{% endif %}</a>
+<div class="hc-signal" aria-hidden="true"></div>
+<header class="hc-header">
+    <div class="hc-wrap hc-header__inner">
+        <a class="hc-brand" href="{% url 'help_home' center.slug locale %}" aria-label="{{ center.name }} · {{ ui.help_center }}">
+            <span class="hc-brand__mark" aria-hidden="true">{{ center.name|slice:':1' }}</span>
+            <span><strong>{{ center.name }}</strong><small>{{ ui.help_center }}</small></span>
+        </a>
+        <nav class="hc-nav" aria-label="{% if locale == 'es' %}Navegación principal{% else %}Main navigation{% endif %}">
+            <a href="{% url 'help_request' center.slug locale %}" class="hc-nav__request">{{ ui.submit_request }}</a>
+            <a href="{{ locale_switch_url }}" class="hc-locale" lang="{{ other_locale }}" hreflang="{{ other_locale }}">{{ other_locale|upper }}</a>
+        </nav>
+    </div>
+</header>
+
+{% block hero %}
+<section class="hc-search-band">
+    <div class="hc-wrap hc-search-band__inner">
+        <form action="{% url 'help_search' center.slug locale %}" method="get" role="search" class="hc-search">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.7-4.7m2.2-5.3a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z"/></svg>
+            <label class="hc-visually-hidden" for="help-search">{{ ui.search }}</label>
+            <input id="help-search" type="search" name="q" value="{{ query|default:'' }}" placeholder="{{ ui.search_placeholder }}" autocomplete="off">
+            <button type="submit">{{ ui.search }}</button>
+        </form>
+    </div>
+</section>
+{% endblock %}
+
+<main id="main" class="hc-main">
+    {% block content %}{% endblock %}
+</main>
+
+<footer class="hc-footer">
+    <div class="hc-wrap hc-footer__inner">
+        <span>{{ center.name }} · {{ ui.help_center }}</span>
+        <a href="{% url 'help_request' center.slug locale %}">{{ ui.submit_request }}</a>
+    </div>
+</footer>
+<script src="{% static 'help_centers/public_help.js' %}?v=1.0" defer></script>
+</body>
+</html>

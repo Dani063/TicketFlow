@@ -1,0 +1,4 @@
+{% extends 'help_center/base.html' %}
+{% block title %}{{ ui.success_title }} · {{ center.name }}{% endblock %}
+{% block hero %}{% endblock %}
+{% block content %}<div class="hc-success"><div class="hc-success__signal" aria-hidden="true">✓</div><span class="hc-eyebrow">{{ center.name }} support</span><h1>{{ ui.success_title }}</h1><p>{{ ui.success_body }}</p><div class="hc-reference"><span>{{ ui.reference }}</span><strong>#{{ ticket_id }}</strong></div><a class="hc-button" href="{% url 'help_home' center.slug locale %}">{{ ui.back_help }}</a></div>{% endblock %}

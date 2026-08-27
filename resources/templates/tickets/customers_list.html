@@ -1,139 +1,95 @@
-{% extends 'base.html' %}
+{% extends base_template %}
 {% load static %}
 
 {% block title %}TicketFlow – Customers{% endblock %}
 
-{% block extra_css %}
-<link rel="stylesheet" href="{% static 'tickets/home.css' %}">
-{% endblock %}
-
 {% block content %}
 <div class="title-bar">
     <h1>Lista de Clientes</h1>
+    <button type="button" class="tf-btn tf-btn--secondary tf-btn--sm mobile-filters-toggle" id="customerFiltersToggle" aria-expanded="false" aria-controls="customerFiltersPanel">
+        <i class="fas fa-filter"></i> Filtros
+    </button>
 </div>
 
+<div class="tf-split-layout">
 <!-- Columna izquierda: filtros -->
-<div class="left-column">
+<aside class="left-column customer-filters-panel" id="customerFiltersPanel">
     <h2>Filtros</h2>
     <ul id="customerFilters">
         <li data-view="all" class="active">
-            <span class="filter-name">All customers</span>
+            <span class="filter-name">Todos los clientes</span>
             <span class="filter-count">{{ filtros.all }}</span>
         </li>
         <li data-view="suspended">
-            <span class="filter-name">Suspended users</span>
+            <span class="filter-name">Usuarios suspendidos</span>
             <span class="filter-count">{{ filtros.suspended }}</span>
         </li>
     </ul>
-</div>
+</aside>
 
 <!-- Columna derecha: tabla -->
-<div class="profile-content">
-    <div class="stats-group" style="width: 100%;">
-        <h2>Usuarios</h2>
-        <div class="tabla">
-            <table>
+<main class="profile-content customers-list-content">
+    <div class="stats-group with-pagination" style="width: 100%;">
+        <div class="list-section-heading">
+            <div>
+                <span class="list-section-eyebrow">Directorio</span>
+                <h2>Clientes</h2>
+            </div>
+            <span class="list-section-hint"><i class="fas fa-external-link-alt"></i> Selecciona una fila para abrir el perfil</span>
+        </div>
+        <div class="tf-toolbar">
+            <input type="text" class="tf-input tf-input--search" id="customersSearch" placeholder="Buscar por nombre o email…">
+            <select class="tf-select" id="customersRoleFilter">
+                <option value="">Todos los roles</option>
+                {% for role in roles %}<option value="{{ role.id }}">{{ role.role_name }}</option>{% endfor %}
+            </select>
+            <select class="tf-select" id="customersGroupFilter">
+                <option value="">Todos los grupos</option>
+                {% for group in groups %}<option value="{{ group.id }}">{{ group.group_name }}</option>{% endfor %}
+            </select>
+        </div>
+        <div class="tabla tf-table-scroll">
+            <div id="loadingSpinner" class="tf-spinner tf-spinner--overlay" style="display:none;"></div>
+            <table class="customers-table">
                 <thead>
                     <tr>
-                        <th>ID</th>
-                        <th>Nombre</th>
-                        <th>Email</th>
-                        <th>Estado</th>
-                        <th>Rol</th>
-                        <th>Grupo</th>
-                        <th>Fecha creación</th>
+                        <th class="sortable" data-sort="id" onclick="toggleSort('id')">ID <i class="sort-icon fas fa-sort"></i></th>
+                        <th class="sortable" data-sort="name" onclick="toggleSort('name')">Nombre <i class="sort-icon fas fa-sort"></i></th>
+                        <th class="sortable" data-sort="email" onclick="toggleSort('email')">Email <i class="sort-icon fas fa-sort"></i></th>
+                        <th class="sortable" data-sort="status" onclick="toggleSort('status')">Estado <i class="sort-icon fas fa-sort"></i></th>
+                        <th class="sortable" data-sort="role" onclick="toggleSort('role')">Rol <i class="sort-icon fas fa-sort"></i></th>
+                        <th class="sortable" data-sort="group" onclick="toggleSort('group')">Grupo <i class="sort-icon fas fa-sort"></i></th>
+                        <th class="sortable" data-sort="created_at" onclick="toggleSort('created_at')">Fecha creación <i class="sort-icon fas fa-sort"></i></th>
+                        <th class="customer-open-col"><span class="sr-only">Abrir perfil</span></th>
                     </tr>
                 </thead>
                 <tbody id="customersTableBody">
-                    <tr><td colspan="5">Cargando...</td></tr>
+                    <tr><td colspan="8"><div class="tf-empty tf-empty--compact"><span class="tf-empty-message">Cargando...</span></div></td></tr>
                 </tbody>
             </table>
         </div>
+        <div id="paginationBar" class="pagination-bar" style="display:none;">
+            <div class="page-numbers" id="pageNumbers"></div>
+            <span class="page-size-sep">Por página</span>
+            <div class="page-size-wrapper">
+                <select id="pageSizeSelect" onchange="changePageSize(this.value)">
+                    <option value="10">10</option>
+                    <option value="20">20</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                    <option value="150">150</option>
+                </select>
+            </div>
+            <span id="registrosInfo" class="registros-info"></span>
+        </div>
     </div>
+</main>
 </div>
+{% endblock %}
 
+{% block extra_js %}
 <script>
-function getUrlParam(name) {
-    const params = new URLSearchParams(window.location.search);
-    return params.get(name);
-}
-
-    async function loadCustomers(view, updateUrl = true) {
-        const tbody = document.getElementById("customersTableBody");
-        tbody.innerHTML = `<tr><td colspan="5">Cargando...</td></tr>`;
-
-        try {
-            const response = await fetch(`/customers/filter/?view=${view}`);
-            const data = await response.json();
-
-            tbody.innerHTML = "";
-            if (!data.customers || data.customers.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="5">No hay usuarios.</td></tr>`;
-            } else {
-                data.customers.forEach(u => {
-                    const row = document.createElement("tr");
-                    row.onclick = () => openCustomer(u.id);
-                    row.innerHTML = `
-                    <td>${u.id}</td>
-                    <td>${u.name}</td>
-                    <td>${u.email}</td>
-                    <td>${u.status}</td>
-                    <td>${u.role}</td>
-                    <td>${u.group}</td>
-                    <td>${u.created_at}</td>
-                `;
-                    tbody.appendChild(row);
-                });
-            }
-
-            if (data.filtros) {
-                for (const [key, value] of Object.entries(data.filtros)) {
-                    const span = document.querySelector(`#customerFilters li[data-view="${key}"] .filter-count`);
-                    if (span) span.textContent = value;
-                }
-            }
-
-            if (updateUrl) {
-                const url = new URL(window.location);
-                url.searchParams.set("view", view);
-                window.history.replaceState({}, "", url);
-            }
-        } catch (err) {
-            console.error("Error cargando usuarios:", err);
-        }
-    }
-    function openCustomer(customerId) {
-        const tabText = "Cliente " + customerId;
-        const tabUrl = "{% url 'customer_profile' %}?id=" + customerId;
-        if (window.Tabs && typeof window.Tabs.addTab === 'function') {
-            window.Tabs.addTab(tabText, tabUrl);
-        } else {
-            window.location.href = tabUrl;
-        }
-    }
-document.addEventListener("DOMContentLoaded", () => {
-    const filters = document.querySelectorAll("#customerFilters li");
-    let activeView = getUrlParam("view");
-
-    if (!activeView && filters.length > 0) {
-        activeView = filters[0].dataset.view;
-    }
-
-    filters.forEach(f => {
-        f.addEventListener("click", () => {
-            filters.forEach(x => x.classList.remove("active"));
-            f.classList.add("active");
-            loadCustomers(f.dataset.view);
-        });
-
-        if (f.dataset.view === activeView) {
-            f.classList.add("active");
-        }
-    });
-
-    if (activeView) {
-        loadCustomers(activeView, false);
-    }
-});
+window.__customersData = { customerProfileUrl: "{% url 'customer_profile' %}" };
 </script>
+<script src="{% static 'tickets/customers_list.js' %}?v=s6.1"></script>
 {% endblock %}

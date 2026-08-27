@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/2.1/ref/settings/
 
 import os
 import posixpath
+import logging as _logging
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -25,6 +26,26 @@ def _get_ssm_parameter(name):
     """Fetches a single SecureString parameter from AWS SSM Parameter Store."""
     result = _ssm_client().get_parameter(Name=name, WithDecryption=True)
     return result["Parameter"]["Value"]
+
+
+def _get_ssm_json(path):
+    """Fetches a JSON SecureString from SSM and returns it parsed as dict."""
+    import json
+    try:
+        return json.loads(_get_ssm_parameter(path))
+    except Exception as exc:
+        _exc_str = str(exc)
+        if 'AccessDenied' in _exc_str or 'AccessDeniedException' in _exc_str:
+            raise RuntimeError(
+                f"Sin permisos IAM para leer {path}. "
+                f"Añade ssm:GetParameter al rol del pod. Causa: {exc}"
+            ) from exc
+        if 'ParameterNotFound' in _exc_str:
+            raise RuntimeError(
+                f"Parámetro SSM no encontrado: {path}. "
+                f"Créalo en Parameter Store como SecureString JSON."
+            ) from exc
+        raise
 
 
 def _get_ssm_db_config(prefix):
@@ -65,8 +86,9 @@ PROJECT_ROOT = find_project_root(__file__)
 # Buscamos el .env un nivel por encima (raíz del proyecto)
 env_path = PROJECT_ROOT / ".env"
 if env_path.exists():
-    load_dotenv(env_path)
-
+    load_dotenv(env_path, override=True)
+if os.getenv("DISABLE_AWS_SSM", "").lower() in ("1", "true", "yes", "on"):
+    os.environ["AWS_SSM_PREFIX"] = ""
 
 # BASE_DIR is now resolved by Path.
 
@@ -77,6 +99,19 @@ STATICFILES_DIRS = [
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = 'app.User'
+
+def _resolve_ticketflow_version():
+    """Resuelve la versión visual desde el tag sellado en la imagen corporativa."""
+    return (
+        os.getenv('TICKETFLOW_VERSION')
+        or os.getenv('ARTIFACT_VERSION')
+        or 'dev'
+    )
+
+
+# La imagen corporativa exporta ARTIFACT_VERSION desde la tag usada por CI/CD.
+# TICKETFLOW_VERSION queda como override explícito para ejecuciones especiales.
+TICKETFLOW_VERSION = _resolve_ticketflow_version()
 
 AUTHENTICATION_BACKENDS = [
     'app.backends.EmailBackend',  # Backend personalizado
@@ -92,10 +127,18 @@ if not SECRET_KEY:
     try:
         SECRET_KEY = _get_ssm_parameter(_secret_key_path)
     except Exception as exc:
-        raise RuntimeError(
-            f"SECRET_KEY no definido y no se pudo obtener de SSM ({_secret_key_path}). "
-            f"Configúralo en .env o verifica permisos IAM. Causa: {exc}"
-        ) from exc
+        _exc_str = str(exc)
+        if 'AccessDenied' in _exc_str or 'AccessDeniedException' in _exc_str:
+            raise RuntimeError(
+                f"Sin permisos IAM para leer {_secret_key_path}. "
+                f"Añade ssm:GetParameter al rol del pod. Causa: {exc}"
+            ) from exc
+        if 'ParameterNotFound' in _exc_str:
+            raise RuntimeError(
+                f"Parámetro SSM no encontrado: {_secret_key_path}. "
+                f"Créalo en Parameter Store o define SECRET_KEY en .env."
+            ) from exc
+        raise
 
 # DEBUG por entorno
 DEBUG = os.getenv("DEBUG", "False").lower() in ("1", "true", "yes", "on")
@@ -108,39 +151,80 @@ ALLOWED_HOSTS = [h.strip() for h in _hosts.split(",") if h.strip()]
 _csrf = os.getenv("CSRF_TRUSTED_ORIGINS", "").strip()
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf.split(",") if o.strip()]
 
+# === Logging ===
+# Un único handler sobre el logger *raíz*: así queda cubierto cualquier módulo
+# que use `logging.getLogger(__name__)`. Antes solo estaban configurados
+# 'app.views' y 'django', y como no había logger raíz todo lo que emitían
+# `app/services/`, `app/tasks.py` y `health/` por debajo de WARNING se
+# descartaba en silencio (y lo de WARNING arriba salía por el `lastResort` de
+# Python, sin formato ni nivel).
+#
+# LOG_LEVEL controla el nivel del código propio y se fija por entorno desde el
+# ConfigMap: DEBUG en desarrollo, INFO o WARNING en producción.
+_NIVELES_VALIDOS = {'CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG', 'NOTSET'}
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+if LOG_LEVEL not in _NIVELES_VALIDOS:
+    LOG_LEVEL = "INFO"
+
+DJANGO_LOG_LEVEL = os.getenv("DJANGO_LOG_LEVEL", "WARNING").upper()
+if DJANGO_LOG_LEVEL not in _NIVELES_VALIDOS:
+    DJANGO_LOG_LEVEL = "WARNING"
+
+# JSON siempre por defecto, tambien con DEBUG=True: el formato del log no debe
+# depender del modo de la aplicacion. El entorno desplegado puede tener DEBUG
+# activo y el colector necesita el campo 'level' igualmente.
+# Para trabajar en local con salida legible: LOG_FORMAT=text en el .env.
+LOG_FORMAT = os.getenv("LOG_FORMAT", "json").lower()
+if LOG_FORMAT not in ('json', 'text'):
+    LOG_FORMAT = 'json'
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
-        'simple': {
-            'format': '{levelname} {message}',
+        'json': {
+            '()': 'TicketFlow.logging_formatters.JsonFormatter',
+        },
+        'text': {
+            'format': '{asctime} {levelname:<8} {name}: {message}',
             'style': '{',
         },
     },
     'handlers': {
-        'console_app': {
+        'console': {
             'class': 'logging.StreamHandler',
-            'formatter': 'simple',
+            'stream': 'ext://sys.stdout',
+            'formatter': LOG_FORMAT,
         },
     },
+    # Raíz: cubre el código propio y cualquier librería sin entrada explícita.
+    'root': {
+        'handlers': ['console'],
+        'level': LOG_LEVEL,
+    },
+    # Los loggers de abajo no declaran handler a propósito: propagan al raíz y
+    # usan el suyo. Aquí solo se ajusta el nivel para recortar ruido.
     'loggers': {
-        # Logger para tu aplicación
-        'app.views': {
-            'handlers': ['console_app'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-        # Reducir la verbosidad de los loggers de Django
+        # Django en INFO comenta cada request; se mantiene el nivel reducido
+        # que ya tenía. Los errores siguen llegando.
         'django': {
-            'handlers': ['console_app'],
-            'level': 'WARNING',
-            'propagate': False,
+            'level': DJANGO_LOG_LEVEL,
         },
         'django.request': {
-            'handlers': ['console_app'],
             'level': 'ERROR',
-            'propagate': False,
         },
+        # Clientes de AWS y HTTP: en INFO son extremadamente verbosos y estos
+        # pods hablan con SSM, SQS y SES continuamente.
+        'boto3': {'level': 'WARNING'},
+        'botocore': {'level': 'WARNING'},
+        's3transfer': {'level': 'WARNING'},
+        'urllib3': {'level': 'WARNING'},
+        'msal': {'level': 'WARNING'},
+        'openai': {'level': 'WARNING'},
+        'httpx': {'level': 'WARNING'},
+        'httpcore': {'level': 'WARNING'},
+        'kombu': {'level': 'WARNING'},
     },
 }
    
@@ -150,6 +234,7 @@ LOGGING = {
 INSTALLED_APPS = [
     'health.apps.HealthConfig',
     'app',
+    'django_celery_beat',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -161,9 +246,12 @@ INSTALLED_APPS = [
 # Middleware framework
 # https://docs.djangoproject.com/en/2.1/topics/http/middleware/
 MIDDLEWARE = [
+    'health.middleware.HealthProbeHostMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
+    'app.middleware.PublicHelpHostMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
@@ -185,6 +273,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'app.context_processors.fragment_base',
             ],
         },
     },
@@ -192,7 +281,20 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'TicketFlow.wsgi.application'
 # Database — credenciales desde AWS SSM Parameter Store (prod/dev) o .env (local sin SSM)
-_ssm_prefix = os.getenv("AWS_SSM_PREFIX")
+# DISABLE_AWS_SSM=1 (variable de entorno, no .env) permite ejecutar checks/tests
+# sin sesión AWS: el .env se carga con override=True, así que es la única forma
+# de desactivar SSM puntualmente desde fuera. (Documentada en docs/backend-architecture.md)
+if os.getenv("DISABLE_AWS_SSM", os.getenv("AWS_SSM_DISABLE", "")).lower() in ("1", "true", "yes", "on"):
+    _ssm_prefix = None
+else:
+    _ssm_prefix = os.getenv("AWS_SSM_PREFIX")
+
+
+# Credenciales agrupadas desde SSM (una sola llamada por bloque)
+_ssm_azure   = _get_ssm_json(f"{_ssm_prefix}/AzureCredentials")   if _ssm_prefix else {}
+_ssm_zendesk = _get_ssm_json(f"{_ssm_prefix}/ZendeskCredentials") if _ssm_prefix else {}
+
+
 if _ssm_prefix:
     _ssm = _get_ssm_db_config(_ssm_prefix)
     _db_user     = _ssm["USER"]
@@ -203,19 +305,27 @@ else:
     _db_password = os.getenv("DB_PASSWORD", "")
     _db_host     = os.getenv("DB_HOST",     "127.0.0.1")
 
-DATABASES = {
-    "default": {
-        "ENGINE":   os.getenv("DB_ENGINE", "django.db.backends.mysql"),
-        "NAME":     os.getenv("DB_NAME",   "ticketflow"),
-        "USER":     _db_user,
-        "PASSWORD": _db_password,
-        "HOST":     _db_host,
-        "PORT":     os.getenv("DB_PORT",   "3306"),
-        "OPTIONS": {
-            "init_command": "SET sql_mode='STRICT_TRANS_TABLES'"
-        },
+if os.getenv("USE_SQLITE", "").lower() in ("1", "true", "yes", "on"):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE":   os.getenv("DB_ENGINE", "django.db.backends.mysql"),
+            "NAME":     os.getenv("DB_NAME",   "ticketflow"),
+            "USER":     _db_user,
+            "PASSWORD": _db_password,
+            "HOST":     _db_host,
+            "PORT":     os.getenv("DB_PORT",   "3306"),
+            "OPTIONS": {
+                "init_command": "SET sql_mode='STRICT_TRANS_TABLES'"
+            },
+        }
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/2.1/ref/settings/#auth-password-validators
@@ -246,11 +356,238 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/2.1/howto/static-files/
 STATIC_URL = '/static/'
 STATIC_ROOT = PROJECT_ROOT / "staticfiles"
-# Ficheros subidos (adjuntos)
+# Django 4.2+ resuelve el backend de estáticos desde STORAGES. Este proyecto
+# contiene algún recurso JavaScript heredado en UTF-16, por lo que usamos la
+# variante comprimida sin manifest (el backend manifest intenta decodificar
+# todos los JS como UTF-8 durante el postprocesado). Se conserva el ajuste
+# antiguo para los despliegues que todavía ejecuten Django 3.2.
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedStaticFilesStorage',
+    },
+}
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedStaticFilesStorage'
 MEDIA_URL = '/media/'
-
 MEDIA_ROOT = PROJECT_ROOT / "resources" / "media"
-# Configuracion de la URL de inicio de sesi�n
+
+SSO_LOGIN_API_URL = os.getenv("SSO_LOGIN_API_URL", "https://dev-login-api.agentia365.com")
+SSO_LOGIN_UI_URL = os.getenv("SSO_LOGIN_UI_URL", "https://dev-login.recordia.net/")
+
+# === Zendesk (solo comandos de importación histórica) ===
+# Local: desde .env | Producción: desde SSM /Recordia/.../ZendeskCredentials
+ZENDESK_SUBDOMAIN = os.getenv('ZENDESK_SUBDOMAIN') or _ssm_zendesk.get('ZENDESK_SUBDOMAIN', '')
+ZENDESK_EMAIL     = os.getenv('ZENDESK_EMAIL')     or _ssm_zendesk.get('ZENDESK_EMAIL', '')
+ZENDESK_API_TOKEN = os.getenv('ZENDESK_API_TOKEN') or _ssm_zendesk.get('ZENDESK_API_TOKEN', '')
+
+# === Celery ===
+# Producción: SQS (sin broker propio que mantener, usa IAM del pod)
+# Local dev:  sobreescribir con CELERY_BROKER_URL=redis://localhost:6379/0 en .env
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'sqs://')
+_sqs_queue_url = os.getenv('CELERY_SQS_QUEUE_URL', '')
+if not _sqs_queue_url and _ssm_prefix:
+    try:
+        _sqs_queue_url = _get_ssm_parameter(f"{_ssm_prefix}/CelerySQSQueueUrl")
+        os.environ['CELERY_SQS_QUEUE_URL'] = _sqs_queue_url
+    except Exception as _sqs_exc:
+        _sqs_err = str(_sqs_exc)
+        if 'AccessDenied' in _sqs_err or 'AccessDeniedException' in _sqs_err:
+            raise RuntimeError(
+                f"Sin permisos IAM para leer {_ssm_prefix}/CelerySQSQueueUrl. "
+                f"Añade ssm:GetParameter al rol del pod. Causa: {_sqs_exc}"
+            ) from _sqs_exc
+        if 'ParameterNotFound' in _sqs_err:
+            raise RuntimeError(
+                f"Parámetro SSM no encontrado: {_ssm_prefix}/CelerySQSQueueUrl. "
+                f"Créalo en Parameter Store (tipo String)."
+            ) from _sqs_exc
+        raise
+# Si el broker es SQS, CELERY_SQS_QUEUE_URL es obligatoria para evitar auto-creación
+if CELERY_BROKER_URL == 'sqs://' and not _sqs_queue_url:
+    raise RuntimeError(
+        "CELERY_SQS_QUEUE_URL no está definida. "
+        "En local añade CELERY_BROKER_URL=redis://localhost:6379/0 al .env. "
+        "En producción crea el parámetro SSM {prefix}/CelerySQSQueueUrl."
+    )
+# Deriva el nombre de la cola desde la URL (soporta colas FIFO con sufijo .fifo)
+_sqs_queue_name = _sqs_queue_url.rstrip('/').split('/')[-1] if _sqs_queue_url else 'celery'
+CELERY_TASK_DEFAULT_QUEUE = _sqs_queue_name
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    'region': os.getenv('AWS_REGION', 'eu-west-1'),
+    'visibility_timeout': 3600,
+    # La clave debe coincidir con el nombre real de la cola (incluido .fifo si aplica)
+    'predefined_queues': {
+        _sqs_queue_name: {'url': _sqs_queue_url},
+    } if _sqs_queue_url else {},
+}
+# Modo eager (solo dev): ejecuta las tareas .delay() en el mismo proceso, sin worker
+# ni broker. Gated por env, apagado por defecto -> cero impacto en producción. Útil
+# para probar en local el flujo que dispara Celery (p.ej. clasificación IA al crear).
+CELERY_TASK_ALWAYS_EAGER = os.getenv('CELERY_TASK_ALWAYS_EAGER', '').lower() in ('1', 'true', 'yes', 'on')
+CELERY_TASK_EAGER_PROPAGATES = CELERY_TASK_ALWAYS_EAGER
+
+# Celery, por defecto, ARRANCA quitando los handlers del logger raíz y pone los
+# suyos. Eso se llevaría por delante la configuración de LOGGING justo en los dos
+# roles donde más hace falta (worker y beat), dejándolos sin JSON ni nivel.
+CELERY_WORKER_HIJACK_ROOT_LOGGER = False
+# Los resultados de tareas no se usan — se descartan para no necesitar result backend
+CELERY_TASK_IGNORE_RESULT = True
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'cache+memory://')
+CELERY_BEAT_SCHEDULE = {
+    'poll-m365-mailboxes': {
+        'task': 'app.tasks.poll_m365_mailboxes',
+        'schedule': 120.0,
+    },
+    'auto-assign-unassigned-tickets': {
+        'task': 'app.tasks.auto_assign_unassigned_tickets',
+        'schedule': 300.0,  # Cada 5 minutos
+    },
+    'mark-sla-breaches': {
+        'task': 'app.tasks.mark_sla_breaches',
+        'schedule': 300.0,
+    },
+    'notify-sla-at-risk': {
+        'task': 'app.tasks.notify_sla_at_risk',
+        'schedule': 300.0,
+    },
+    'offer-satisfaction-surveys': {
+        'task': 'app.tasks.offer_satisfaction_surveys',
+        'schedule': 900.0,  # Cada 15 min; el retardo real lo fija SATISFACTION_SURVEY_DELAY_HOURS
+    },
+}
+
+# === Azure AD (lectura buzones M365 + envío via Graph sendMail) ===
+# Local: desde .env | Producción: desde SSM /Recordia/.../AzureCredentials
+AZURE_TENANT_ID     = os.getenv('AZURE_TENANT_ID')     or _ssm_azure.get('AZURE_TENANT_ID', '')
+AZURE_CLIENT_ID     = os.getenv('AZURE_CLIENT_ID')     or _ssm_azure.get('AZURE_CLIENT_ID', '')
+AZURE_CLIENT_SECRET = os.getenv('AZURE_CLIENT_SECRET') or _ssm_azure.get('AZURE_CLIENT_SECRET', '')
+
+# === Azure OpenAI (alternativa heredada — opcional) ===
+# El proveedor de IA en producción es OpenAI directo (ver más abajo, {prefix}/OpenAiToken).
+# Este bloque solo aplica si algún día se aprovisiona Azure OpenAI: SSM
+# {prefix}/AzureOpenAICredentials (SecureString JSON con ENDPOINT/API_KEY/DEPLOYMENT/
+# API_VERSION). Su AUSENCIA es lo esperado hoy → log a debug, no warning (no implica
+# que la IA esté apagada: eso lo decide _AI_HAS_CREDS más abajo).
+_ssm_aoai = {}
+if _ssm_prefix:
+    try:
+        _ssm_aoai = _get_ssm_json(f"{_ssm_prefix}/AzureOpenAICredentials")
+    except Exception as _aoai_exc:
+        _logging.getLogger(__name__).debug(
+            "AzureOpenAICredentials no presente en SSM (esperado: se usa OpenAI directo): %s", _aoai_exc
+        )
+AZURE_OPENAI_ENDPOINT    = os.getenv('AZURE_OPENAI_ENDPOINT')    or _ssm_aoai.get('AZURE_OPENAI_ENDPOINT', '')
+AZURE_OPENAI_API_KEY     = os.getenv('AZURE_OPENAI_API_KEY')     or _ssm_aoai.get('AZURE_OPENAI_API_KEY', '')
+AZURE_OPENAI_DEPLOYMENT  = os.getenv('AZURE_OPENAI_DEPLOYMENT')  or _ssm_aoai.get('AZURE_OPENAI_DEPLOYMENT', 'gpt-4o-mini')
+AZURE_OPENAI_API_VERSION = os.getenv('AZURE_OPENAI_API_VERSION') or _ssm_aoai.get('AZURE_OPENAI_API_VERSION', '2024-10-21')
+
+# === OpenAI directo (proveedor de IA en producción) ===
+# Sin endpoint de Azure, ai.py usa el cliente OpenAI estándar (api.openai.com) con
+# OPENAI_API_KEY; el modelo va en OPENAI_MODEL. El resto del código es idéntico.
+#
+# Precedencia de la clave:
+#   1. OPENAI_API_KEY del entorno/.env  -> LOCAL: tu clave de desarrollo SIEMPRE manda.
+#   2. SSM {prefix}/OpenAiToken          -> PRODUCCIÓN: SecureString SIMPLE (no JSON)
+#      que dejó sistemas; el pod lo lee con el rol IAM.
+#   3. OPENAI_API_KEY dentro del JSON AzureOpenAICredentials -> compatibilidad.
+# SSM SOLO se consulta si no hay clave en el entorno: así el local queda desacoplado
+# del rollout a prod (no arrastra el secreto de producción al proceso de desarrollo)
+# y un fallo de permisos/parámetro nunca rompe el arranque (queda en debug).
+OPENAI_MODEL = os.getenv('OPENAI_MODEL') or _ssm_aoai.get('OPENAI_MODEL', 'gpt-4o-mini')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
+if not OPENAI_API_KEY and _ssm_prefix:
+    try:
+        OPENAI_API_KEY = _get_ssm_parameter(f"{_ssm_prefix}/OpenAiToken").strip()
+    except Exception as _oai_exc:
+        _logging.getLogger(__name__).debug("OpenAiToken no disponible en SSM: %s", _oai_exc)
+if not OPENAI_API_KEY:
+    OPENAI_API_KEY = _ssm_aoai.get('OPENAI_API_KEY', '')
+
+# Embeddings (casos similares + asistencia de respuesta). Mismo proveedor que el chat.
+AZURE_OPENAI_EMBEDDING_DEPLOYMENT = os.getenv('AZURE_OPENAI_EMBEDDING_DEPLOYMENT') or _ssm_aoai.get('AZURE_OPENAI_EMBEDDING_DEPLOYMENT', '')
+OPENAI_EMBEDDING_MODEL = os.getenv('OPENAI_EMBEDDING_MODEL') or _ssm_aoai.get('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small')
+
+# Flags de la clasificación IA. Por defecto solo se enciende si hay credenciales
+# (Azure OpenAI u OpenAI directo), así los entornos sin keys no notan ningún cambio.
+_AI_HAS_CREDS = bool((AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY) or OPENAI_API_KEY)
+if not _AI_HAS_CREDS:
+    _logging.getLogger(__name__).info(
+        "IA desactivada: sin credenciales. Define OPENAI_API_KEY en .env para local, "
+        "o el parámetro SSM {prefix}/OpenAiToken en el despliegue."
+    )
+AI_CLASSIFICATION_ENABLED = os.getenv(
+    'AI_CLASSIFICATION_ENABLED',
+    'true' if _AI_HAS_CREDS else 'false'
+).lower() in ('1', 'true', 'yes', 'on')
+AI_AUTO_APPLY = os.getenv('AI_AUTO_APPLY', 'true').lower() in ('1', 'true', 'yes', 'on')
+AI_AUTO_APPLY_CONFIDENCE = float(os.getenv('AI_AUTO_APPLY_CONFIDENCE', '0.7'))
+# Asistencia de respuesta IA (borradores a partir del ticket + casos similares).
+# Se enciende por defecto si hay credenciales, como la clasificación.
+AI_REPLY_ASSIST_ENABLED = os.getenv(
+    'AI_REPLY_ASSIST_ENABLED', 'true' if _AI_HAS_CREDS else 'false'
+).lower() in ('1', 'true', 'yes', 'on')
+AI_SIMILAR_TICKETS_K = int(os.getenv('AI_SIMILAR_TICKETS_K', '3'))
+AI_MAX_BODY_CHARS = int(os.getenv('AI_MAX_BODY_CHARS', '6000'))
+AI_REQUEST_TIMEOUT_SECONDS = int(os.getenv('AI_REQUEST_TIMEOUT_SECONDS', '30'))
+
+# === Email saliente (confirmaciones al cliente) ===
+# SES autentica con el rol IAM del pod (como SQS/SSM): sin credenciales SMTP.
+# Kill switch global; en local conviene dejarlo a false (BBDD compartida).
+OUTBOUND_EMAIL_ENABLED = os.getenv('OUTBOUND_EMAIL_ENABLED', 'false').lower() in ('1', 'true', 'yes', 'on')
+AWS_SES_REGION = os.getenv('AWS_SES_REGION', 'eu-west-1')
+SES_CONFIGURATION_SET = os.getenv('SES_CONFIGURATION_SET', '')  # opcional: tracking de bounces/quejas
+# Base de los enlaces {{ticket_url}} en plantillas (sin barra final)
+TICKETFLOW_PUBLIC_URL = os.getenv('TICKETFLOW_PUBLIC_URL', '')
+
+# === Centros de ayuda publicos (eComFax / Recordia) ===
+PUBLIC_HELP_ENABLED = os.getenv('PUBLIC_HELP_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
+PUBLIC_TICKET_INTAKE_ENABLED = os.getenv('PUBLIC_TICKET_INTAKE_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
+ECOMFAX_HELP_PUBLIC_URL = os.getenv('ECOMFAX_HELP_PUBLIC_URL', 'https://support.ecomfax.com').rstrip('/')
+RECORDIA_HELP_PUBLIC_URL = os.getenv('RECORDIA_HELP_PUBLIC_URL', 'https://support.recordia.net').rstrip('/')
+# Recordia usa actualmente el buzon/marca operativa de Comunycarse. El nombre es
+# configurable para no acoplar el portal publico al despliegue de un cliente.
+PUBLIC_RECORDIA_BRAND_NAME = os.getenv('PUBLIC_RECORDIA_BRAND_NAME', 'Comunycarse Helpdesk')
+PUBLIC_ECOMFAX_BRAND_NAME = os.getenv('PUBLIC_ECOMFAX_BRAND_NAME', 'eComFax')
+
+# Protecciones del formulario anonimo. El tiempo minimo frena bots sin CAPTCHA;
+# en tests puede fijarse a cero.
+PUBLIC_FORM_MIN_SECONDS = int(os.getenv('PUBLIC_FORM_MIN_SECONDS', '2'))
+PUBLIC_TICKET_IP_LIMIT = int(os.getenv('PUBLIC_TICKET_IP_LIMIT', '5'))
+PUBLIC_TICKET_IP_WINDOW_MINUTES = int(os.getenv('PUBLIC_TICKET_IP_WINDOW_MINUTES', '10'))
+PUBLIC_TICKET_EMAIL_LIMIT = int(os.getenv('PUBLIC_TICKET_EMAIL_LIMIT', '3'))
+PUBLIC_TICKET_EMAIL_WINDOW_MINUTES = int(os.getenv('PUBLIC_TICKET_EMAIL_WINDOW_MINUTES', '60'))
+# REMOTE_ADDR es el valor seguro sin proxy. En un ingress que sanee/añada XFF,
+# configurar HTTP_X_FORWARDED_FOR (se toma el ultimo salto añadido por el proxy).
+PUBLIC_CLIENT_IP_HEADER = os.getenv('PUBLIC_CLIENT_IP_HEADER', 'REMOTE_ADDR')
+
+# Adjuntos privados: local en desarrollo, S3 privado en produccion cuando se
+# define el bucket. Nunca se expone la URL de almacenamiento directamente.
+PUBLIC_ATTACHMENTS_S3_BUCKET = os.getenv('PUBLIC_ATTACHMENTS_S3_BUCKET', '')
+PUBLIC_ATTACHMENTS_S3_REGION = os.getenv('PUBLIC_ATTACHMENTS_S3_REGION', os.getenv('AWS_REGION', 'eu-west-1'))
+PUBLIC_ATTACHMENT_MAX_FILES = int(os.getenv('PUBLIC_ATTACHMENT_MAX_FILES', '5'))
+PUBLIC_ATTACHMENT_MAX_BYTES = int(os.getenv('PUBLIC_ATTACHMENT_MAX_BYTES', str(15 * 1024 * 1024)))
+PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS = {
+    item.strip().lower() for item in os.getenv(
+        'PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS',
+        'pdf,png,jpg,jpeg,gif,webp,txt,csv,doc,docx,xls,xlsx,zip,log',
+    ).split(',') if item.strip()
+}
+
+# === Encuesta de satisfacción (CSAT) ===
+# Kill switch propio, independiente de OUTBOUND_EMAIL_ENABLED: permite tener el
+# email saliente activo sin empezar a encuestar. Por defecto APAGADO.
+SATISFACTION_SURVEY_ENABLED = os.getenv('SATISFACTION_SURVEY_ENABLED', 'false').lower() in ('1', 'true', 'yes', 'on')
+# Horas desde la resolución antes de preguntar (Zendesk usaba 24): da margen a que
+# el cliente compruebe la solución y evita encuestar reaperturas inmediatas.
+SATISFACTION_SURVEY_DELAY_HOURS = int(os.getenv('SATISFACTION_SURVEY_DELAY_HOURS', '24'))
+# Validez del enlace de voto. Dentro de la ventana el cliente puede rectificar.
+SATISFACTION_SURVEY_TTL_DAYS = int(os.getenv('SATISFACTION_SURVEY_TTL_DAYS', '30'))
+# Tope de encuestas por vuelta del barrido: acota el daño de un arranque en frío.
+SATISFACTION_SURVEY_BATCH = int(os.getenv('SATISFACTION_SURVEY_BATCH', '200'))
+
+# Configuracion de la URL de inicio de sesión
 LOGIN_URL = '/login/'
 DEFAULT_CHARSET = 'utf-8'
 

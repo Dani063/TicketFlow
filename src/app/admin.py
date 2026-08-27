@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import Ticket, Comment, User, Role, Group  # Role/Group existen en tu modelo
+from .models import Brand, Comment, Group, HelpArticle, HelpCategory, HelpCenter, HelpSection, OutboundEmailLog, ResponseTemplate, Role, SatisfactionRating, SatisfactionReason, SLAPolicy, Ticket, TicketAIAnalysis, User
 
 # ====== Ticket ======
 
@@ -59,6 +59,104 @@ class UserAdmin(DjangoUserAdmin):
         }),
     )
 
-# ====== Catálogos ======
+# ====== Catï¿½logos ======
 admin.site.register(Role)
 admin.site.register(Group)
+
+
+@admin.register(Brand)
+class BrandAdmin(admin.ModelAdmin):
+    list_display = ("name", "support_email", "from_name", "mailbox_type", "language")
+    list_filter = ("mailbox_type",)
+    search_fields = ("name", "support_email")
+
+
+@admin.register(ResponseTemplate)
+class ResponseTemplateAdmin(admin.ModelAdmin):
+    list_display = ("key", "brand", "language", "subject", "active", "updated_at")
+    list_filter = ("active", "language", "brand")
+    search_fields = ("key", "subject")
+    list_select_related = ("brand",)
+
+
+@admin.register(SatisfactionReason)
+class SatisfactionReasonAdmin(admin.ModelAdmin):
+    list_display = ("code", "label", "language", "position", "active")
+    list_filter = ("active", "language")
+    search_fields = ("code", "label")
+
+
+@admin.register(SatisfactionRating)
+class SatisfactionRatingAdmin(admin.ModelAdmin):
+    list_display = ("id", "ticket", "score", "source", "assignee", "reason_choice",
+                    "offered_at", "responded_at", "expires_at")
+    list_filter = ("score", "source")
+    search_fields = ("ticket__subject", "comment", "reason")
+    list_select_related = ("ticket", "assignee", "reason_choice")
+    # El token es la credencial del enlace pÃºblico: no debe editarse a mano.
+    readonly_fields = ("token", "zendesk_id")
+
+
+@admin.register(OutboundEmailLog)
+class OutboundEmailLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "template_key", "to_email", "brand", "provider", "status", "result", "attempts", "created_at", "sent_at")
+    list_filter = ("status", "provider", "template_key")
+    search_fields = ("to_email", "subject", "provider_message_id")
+    readonly_fields = [f.name for f in OutboundEmailLog._meta.fields]
+    list_select_related = ("brand",)
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(TicketAIAnalysis)
+class TicketAIAnalysisAdmin(admin.ModelAdmin):
+    list_display = ("id", "ticket", "kind", "status", "suggested_type", "suggested_priority",
+                    "confidence", "model_name", "prompt_version", "latency_ms", "created_at")
+    list_filter = ("status", "kind", "suggested_type", "prompt_version")
+    search_fields = ("ticket__subject", "reasoning")
+    readonly_fields = [f.name for f in TicketAIAnalysis._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(SLAPolicy)
+class SLAPolicyAdmin(admin.ModelAdmin):
+    list_display = (
+        "name", "active", "priority", "service", "brand", "assigned_group",
+        "first_response_minutes", "resolution_minutes",
+    )
+    list_filter = ("active", "priority", "brand")
+    search_fields = ("name",)
+    list_select_related = ("brand", "assigned_group")
+
+
+@admin.register(HelpCenter)
+class HelpCenterAdmin(admin.ModelAdmin):
+    list_display = ("name", "slug", "service", "default_locale", "active", "updated_at")
+    list_filter = ("active", "default_locale")
+    search_fields = ("name", "slug", "service")
+
+
+@admin.register(HelpCategory)
+class HelpCategoryAdmin(admin.ModelAdmin):
+    list_display = ("name", "center", "locale", "position", "published")
+    list_filter = ("center", "locale", "published")
+    search_fields = ("name", "source_id")
+
+
+@admin.register(HelpSection)
+class HelpSectionAdmin(admin.ModelAdmin):
+    list_display = ("name", "category", "position", "published")
+    list_filter = ("published", "category__center", "category__locale")
+    search_fields = ("name", "source_id")
+    list_select_related = ("category", "category__center")
+
+
+@admin.register(HelpArticle)
+class HelpArticleAdmin(admin.ModelAdmin):
+    list_display = ("title", "section", "promoted", "published", "source_updated_at")
+    list_filter = ("published", "promoted", "section__category__center", "section__category__locale")
+    search_fields = ("title", "body_text", "source_id")
+    list_select_related = ("section", "section__category", "section__category__center")

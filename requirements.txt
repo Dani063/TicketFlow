@@ -2,3 +2,12 @@ django>=3.2.14
 mysqlclient
 python-dotenv
 boto3
+requests
+celery[sqs,redis]
+django-celery-beat
+msal
+gunicorn
+whitenoise
+bleach[css]>=5.0.0
+openai>=1.40,<2
+reportlab>=4.2,<5

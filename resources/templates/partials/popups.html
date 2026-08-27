@@ -1,25 +1,124 @@
 {% load static %}
-<div class="notifications-popup" id="notificationsPopup" style="display:none;">
+<div class="notifications-popup" id="notificationsPopup" style="display:none;" role="dialog" aria-labelledby="notificationsTitle">
     <div class="popup-header">
-        <h2>Notificaciones</h2>
-        <button class="close-popup" id="closePopup">X</button>
+        <h2 id="notificationsTitle">Notificaciones</h2>
+        <button class="close-popup" id="closePopup" type="button" title="Cerrar" aria-label="Cerrar notificaciones">&times;</button>
     </div>
     <div class="popup-content">
         <ul id="notificationsList"></ul>
     </div>
-</div> 
+</div>
 
-<div class="user-popup" id="userPopup" style="display:none;">
-    <div class="popup-header">
-        <a href="{% url 'profile' %}" class="user-link">
-            <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="profile-picture">
-            <div class="user-meta">
-                <span class="username">{{ request.user.name }}</span>
-                <span class="email">Ver perfil</span>
-            </div>
-        </a>
+<div class="user-popup" id="userPopup" style="display:none;" data-view="main">
+    {# View: main #}
+    <div class="up-view up-view-main">
+        <div class="up-header">
+            <a href="{% url 'profile' %}" class="up-identity">
+                <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="up-avatar">
+                <div class="up-identity-text">
+                    <span class="up-name">{{ request.user.name|default:'Usuario' }}</span>
+                    <span class="up-email">{{ request.user.email|default:'' }}</span>
+                </div>
+            </a>
+        </div>
+        <ul class="up-menu">
+            <li class="up-item up-item-submenu" data-action="open-appearance">
+                <span class="up-item-label">Apariencia</span>
+                <span class="up-item-arrow">›</span>
+            </li>
+            <li class="up-item up-item-submenu" data-action="open-help">
+                <span class="up-item-label">Ayuda</span>
+                <span class="up-item-arrow">›</span>
+            </li>
+            <li class="up-item" data-action="shortcuts">
+                <span class="up-item-label">Atajos de teclado</span>
+            </li>
+            <li class="up-item up-item-divider" data-action="signout">
+                <span class="up-item-label">Cerrar sesión</span>
+            </li>
+        </ul>
+        <div class="up-version" title="Versión instalada">TicketFlow v{{ app_version }}</div>
     </div>
-    <div class="popup-content">
-        <button class="logout-button" id="logoutButton">Desloguearse</button>
+
+    {# View: appearance #}
+    <div class="up-view up-view-appearance">
+        <div class="up-header up-header-sub">
+            <button class="up-back" data-action="back" aria-label="Volver">‹</button>
+            <span class="up-sub-title">Apariencia</span>
+        </div>
+        <ul class="up-menu">
+            <li class="up-item up-theme-option" data-theme-choice="light">
+                <span class="up-item-check"><i class="fas fa-check"></i></span>
+                <span class="up-item-icon"><i class="fas fa-sun"></i></span>
+                <span class="up-item-label">Modo claro</span>
+            </li>
+            <li class="up-item up-theme-option" data-theme-choice="dark">
+                <span class="up-item-check"><i class="fas fa-check"></i></span>
+                <span class="up-item-icon"><i class="fas fa-moon"></i></span>
+                <span class="up-item-label">Modo oscuro</span>
+            </li>
+            <li class="up-item up-theme-option" data-theme-choice="system">
+                <span class="up-item-check"><i class="fas fa-check"></i></span>
+                <span class="up-item-icon"><i class="fas fa-desktop"></i></span>
+                <span class="up-item-label">Según el sistema</span>
+            </li>
+        </ul>
+    </div>
+
+    {# View: help #}
+    <div class="up-view up-view-help">
+        <div class="up-header up-header-sub">
+            <button class="up-back" data-action="back" aria-label="Volver">‹</button>
+            <span class="up-sub-title">Ayuda</span>
+        </div>
+        <ul class="up-menu">
+            <li class="up-item" data-action="help-center" data-url="{% url 'help_home' 'ecomfax' 'es' %}">
+                <span class="up-item-icon"><i class="fas fa-fax"></i></span>
+                <span class="up-item-label">Ayuda eComFax</span>
+                <span class="up-item-arrow">›</span>
+            </li>
+            <li class="up-item" data-action="help-center" data-url="{% url 'help_home' 'recordia' 'es' %}">
+                <span class="up-item-icon"><i class="fas fa-headset"></i></span>
+                <span class="up-item-label">Ayuda Recordia</span>
+                <span class="up-item-arrow">›</span>
+            </li>
+            <li class="up-item" data-action="help-docs">
+                <span class="up-item-icon"><i class="fas fa-book"></i></span>
+                <span class="up-item-label">Documentación</span>
+            </li>
+            <li class="up-item" data-action="shortcuts">
+                <span class="up-item-icon"><i class="fas fa-keyboard"></i></span>
+                <span class="up-item-label">Atajos de teclado</span>
+            </li>
+        </ul>
+        <div class="up-version">TicketFlow v{{ app_version }}</div>
+    </div>
+</div>
+
+{# Modal: Keyboard shortcuts #}
+<div class="kbs-overlay" id="kbsOverlay" style="display:none;">
+    <div class="kbs-modal" role="dialog" aria-labelledby="kbsTitle">
+        <div class="kbs-header">
+            <h3 id="kbsTitle">Atajos de teclado</h3>
+            <button class="kbs-close" id="kbsClose" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="kbs-body">
+            <div class="kbs-section">
+                <h4>Navegación</h4>
+                <div class="kbs-row"><span class="kbs-label">Ir al Dashboard</span><span class="kbs-keys"><kbd>g</kbd> <kbd>d</kbd></span></div>
+                <div class="kbs-row"><span class="kbs-label">Ir a la lista de tickets</span><span class="kbs-keys"><kbd>g</kbd> <kbd>t</kbd></span></div>
+                <div class="kbs-row"><span class="kbs-label">Enfocar buscador</span><span class="kbs-keys"><kbd>/</kbd></span></div>
+            </div>
+            <div class="kbs-section">
+                <h4>Acciones</h4>
+                <div class="kbs-row"><span class="kbs-label">Crear nuevo ticket</span><span class="kbs-keys"><kbd>c</kbd></span></div>
+                <div class="kbs-row"><span class="kbs-label">Enviar comentario</span><span class="kbs-keys"><kbd>Ctrl</kbd>+<kbd>Enter</kbd></span></div>
+                <div class="kbs-row"><span class="kbs-label">Cerrar modal / popup</span><span class="kbs-keys"><kbd>Esc</kbd></span></div>
+            </div>
+            <div class="kbs-section">
+                <h4>Ayuda</h4>
+                <div class="kbs-row"><span class="kbs-label">Mostrar esta lista</span><span class="kbs-keys"><kbd>?</kbd></span></div>
+            </div>
+        </div>
     </div>
 </div>

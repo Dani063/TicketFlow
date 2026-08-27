@@ -6,6 +6,33 @@ from unicodedata import category
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 
+from app.constants import CHANNEL_CHOICES, TICKET_TYPE_CHOICES
+
+class Organization(models.Model):
+    zendesk_id = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
+    name = models.CharField(max_length=255)
+    domain_names = models.TextField(blank=True)
+    created_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Brand(models.Model):
+    zendesk_id = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
+    name = models.CharField(max_length=255)
+    support_email = models.EmailField(blank=True, default='')
+    from_name = models.CharField(max_length=100, blank=True, default='')
+    language = models.CharField(max_length=10, blank=True, default='es')
+    mailbox_type = models.CharField(
+        max_length=10, default='m365',
+        choices=[('m365', 'Microsoft 365'), ('ses', 'Amazon SES')],
+    )
+
+    def __str__(self):
+        return self.name
+
+
 class UserManager(BaseUserManager):
     def create_user(self, email, name, password=None):
         if not email:
@@ -43,10 +70,17 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(verbose_name='Correo electronico', max_length=255, unique=True)
     name = models.CharField(max_length=255)
+    zendesk_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     group = models.ForeignKey('Group', on_delete=models.SET_NULL, null=True, blank=True, related_name='user_group')
     role = models.ForeignKey('Role', on_delete=models.SET_NULL, null=True, blank=True, related_name='user_role')
+    phone = models.CharField(max_length=64, null=True, blank=True)
+    time_zone = models.CharField(max_length=100, null=True, blank=True)
+    locale = models.CharField(max_length=20, null=True, blank=True)
+    notes = models.TextField(null=True, blank=True)
+    photo_url = models.URLField(max_length=500, null=True, blank=True)
+    organization = models.ForeignKey('Organization', on_delete=models.SET_NULL, null=True, blank=True, related_name='users')
     groups = models.ManyToManyField(
         'auth.Group',
         related_name='custom_user_set',  # Cambia el related_name para evitar conflictos
@@ -88,52 +122,148 @@ class Role(models.Model):
 class Group(models.Model):
     group_name = models.CharField(max_length=255, null=False)
     description = models.TextField(null=True)
+    zendesk_id = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
 
     def __str__(self):
         return self.group_name
 
 class Ticket(models.Model):
+    zendesk_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)
     subject = models.CharField(max_length=255, null=False)
     description = models.TextField(null=False)
     status = models.CharField(max_length=255, choices=[('open', 'Open'), ('pending', 'Pending'), ('closed', 'Closed'), ('resolved', 'Resolved')])
-    priority = models.CharField(max_length=255, choices=[('low', 'Low'), ('normal', 'Normal'), ('high', 'High'), ('urgent', 'Urgent')])
+    priority = models.CharField(max_length=255, choices=[('low', 'Low'), ('normal', 'Normal'), ('high', 'High'), ('urgent', 'Urgent')], null=True, blank=True)
     requester = models.ForeignKey(User, on_delete=models.CASCADE, related_name='requested_tickets')
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='assigned_tickets')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_tickets')
-    brand = models.CharField(max_length=255, null=True)
-    type = models.CharField(max_length=255, null=True)
+    brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
+    type = models.CharField(max_length=255, null=True, blank=True, choices=TICKET_TYPE_CHOICES)
+    # Un problema (type='problem') agrupa los incidentes que provoca (compatible con problem_id de Zendesk).
+    problem = models.ForeignKey(
+        'self', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='incidents',
+        limit_choices_to={'type': 'problem'},
+    )
     ccs = models.ManyToManyField('User', related_name='tickets_ccd', blank=True)
     tags = models.ManyToManyField('TicketTag', related_name='tickets', blank=True)
-    channel = models.CharField(max_length=255, null=True)
+    channel = models.CharField(max_length=255, null=True, blank=True, choices=CHANNEL_CHOICES)
     service = models.CharField(max_length=255, null=True)
     language = models.CharField(max_length=255, null=True)
+    assigned_group = models.ForeignKey('Group', on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     closed_at = models.DateTimeField(null=True, blank=True)
+    # Momento en que pasó a 'resolved'. Es el reloj del que cuelga la encuesta de
+    # satisfacción; los tickets resueltos antes de existir este campo se quedan a
+    # NULL a propósito, para que el barrido no los encueste retroactivamente.
+    resolved_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    due_at = models.DateTimeField(null=True, blank=True)
+    first_response_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    first_responded_at = models.DateTimeField(null=True, blank=True)
+    resolution_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    sla_breached_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    # Cumplimiento de primera respuesta, persistido al responder (record_first_response
+    # limpia first_response_due_at, así que no es computable a posteriori). NULL = no medido.
+    first_response_met = models.BooleanField(null=True, blank=True)
+    # Marcadores de idempotencia para aviso de riesgo y escalado de SLA.
+    sla_risk_notified_at = models.DateTimeField(null=True, blank=True)
+    sla_escalated_at = models.DateTimeField(null=True, blank=True)
     category = models.CharField(max_length=255, null=True)
+    security_related = models.BooleanField(null=True, blank=True)
+    monitoring = models.BooleanField(null=True, blank=True)
+    approval_status = models.CharField(max_length=255, null=True, blank=True)
+    resolution_type = models.CharField(max_length=255, null=True, blank=True)
+    required_tasks = models.CharField(max_length=255, null=True, blank=True)
+    merged_into = models.ForeignKey(
+        'self', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='merged_tickets'
+    )
+    email_message_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+    email_conversation_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+    is_deleted = models.BooleanField(default=False, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['is_deleted', 'updated_at'], name='app_ticket_deleted_updated_idx'),
+            models.Index(fields=['is_deleted', 'status'], name='app_ticket_deleted_status_idx'),
+            models.Index(fields=['is_deleted', 'channel'], name='app_ticket_deleted_channel_idx'),
+            models.Index(fields=['is_deleted', 'service'], name='app_ticket_deleted_service_idx'),
+            models.Index(fields=['is_deleted', 'merged_into', 'updated_at'], name='app_ticket_live_updated_idx'),
+            models.Index(fields=['is_deleted', 'merged_into', 'status', 'updated_at'], name='app_ticket_live_status_upd'),
+            models.Index(fields=['is_deleted', 'merged_into', 'assignee', 'updated_at'], name='app_ticket_live_assignee_idx'),
+            models.Index(fields=['is_deleted', 'merged_into', 'requester', 'updated_at'], name='app_ticket_live_requester_idx'),
+            models.Index(fields=['is_deleted', 'merged_into', 'type', 'updated_at'], name='app_ticket_live_type_upd'),
+            models.Index(fields=['is_deleted', 'merged_into', 'channel', 'updated_at'], name='app_ticket_live_channel'),
+            models.Index(fields=['is_deleted', 'merged_into', 'service', 'status', 'updated_at'], name='app_ticket_live_service'),
+            models.Index(fields=['is_deleted', 'merged_into', 'created_at', 'updated_at'], name='app_ticket_live_created'),
+            models.Index(fields=['is_deleted', 'merged_into', 'brand', 'status'], name='app_ticket_live_brand_idx'),
+        ]
+
+
+class ZendeskFieldMap(models.Model):
+    """Mapea custom fields de Zendesk con atributos del modelo Ticket.
+
+    Permite tanto importar (zendesk_id -> ticketflow_attr) como exportar
+    (ticketflow_attr -> zendesk_id en el payload PUT /tickets/{id}).
+    Se popula con el management command `sync_zendesk_fields`.
+    """
+    zendesk_field_id = models.BigIntegerField(unique=True, db_index=True)
+    zendesk_title = models.CharField(max_length=255)
+    zendesk_type = models.CharField(max_length=50)  # tagger, checkbox, integer, date, ...
+    ticketflow_attr = models.CharField(max_length=100, null=True, blank=True)
+    active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.zendesk_title} (#{self.zendesk_field_id}) -> {self.ticketflow_attr or '(unmapped)'}"
+
 
 class Comment(models.Model):
+    zendesk_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     content = models.TextField(null=False)
+    html_body = models.TextField(null=True, blank=True)
+    via_channel = models.CharField(max_length=100, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     is_public = models.BooleanField(default=True)
+    email_message_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['ticket', 'created_at'], name='app_comment_ticket_created_idx'),
+            models.Index(fields=['ticket', 'id'], name='app_comment_ticket_id_idx'),
+        ]
 
 class TicketTag(models.Model):
     name = models.CharField(max_length=255, unique=True, null=False, help_text='Label for categorizing tickets')
     def __str__(self):
         return self.name
 
-class TicketHistory(models.Model):
-    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE)
-    previous_status = models.CharField(max_length=255, null=True)
-    new_status = models.CharField(max_length=255, choices=[('open', 'Open'), ('pending', 'Pending'), ('closed', 'Closed'), ('resolved', 'Resolved')])
-    changed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
-    changed_at = models.DateTimeField(auto_now_add=True)
+
+class TicketEvent(models.Model):
+    """Registro de cambios en un ticket (Zendesk audits o cambios locales)."""
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='events')
+    actor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='ticket_events')
+    field_name = models.CharField(max_length=100)   # status, assignee_id, priority, group_id, tags…
+    old_value = models.TextField(null=True, blank=True)
+    new_value = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField()
+    zendesk_event_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)
+
+    class Meta:
+        ordering = ['created_at']
 
 class Attachment(models.Model):
     file_url = models.URLField(null=False, help_text='URL of the attached file')
     file_type = models.CharField(max_length=255, null=True)
+    storage_key = models.CharField(max_length=500, blank=True, default='')
+    storage_backend = models.CharField(
+        max_length=16, default='local', choices=[('local', 'Local'), ('s3', 'Amazon S3')],
+    )
+    original_name = models.CharField(max_length=255, blank=True, default='')
+    size = models.PositiveBigIntegerField(default=0)
+    is_private = models.BooleanField(default=True)
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, null=True, blank=True)
     comment = models.ForeignKey(Comment, on_delete=models.CASCADE, null=True, blank=True)
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
@@ -149,3 +279,489 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.user.name} → {self.message}"
+
+
+class Macro(models.Model):
+    name = models.CharField(max_length=255)
+    description = models.CharField(max_length=500, blank=True, null=True)
+    actions = models.JSONField(default=dict, help_text='JSON: {status, comment, priority, assignee_id}')
+    active = models.BooleanField(default=True)
+    zendesk_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+
+class SatisfactionReason(models.Model):
+    """Motivo de un voto negativo, gestionable desde el panel de administración.
+
+    Solo aplica a 'bad': igual que en Zendesk, un voto positivo no pide motivo.
+    El campo libre SatisfactionRating.reason se mantiene aparte porque el
+    histórico importado de Zendesk trae los motivos como texto.
+    """
+    code = models.SlugField(max_length=64, db_index=True)
+    label = models.CharField(max_length=255)
+    language = models.CharField(max_length=5, default='es',
+                                choices=[('es', 'Español'), ('en', 'English')])
+    active = models.BooleanField(default=True, db_index=True)
+    position = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('code', 'language')]
+        ordering = ['position', 'label']
+
+    def __str__(self):
+        return f"{self.label} [{self.language}]"
+
+
+class SatisfactionRating(models.Model):
+    """Valoración de satisfacción, con la semántica de Zendesk.
+
+    La OFERTA de encuesta es una fila con score='offered'; el voto del cliente
+    actualiza esa misma fila a 'good'/'bad'. Por eso todas las métricas filtran
+    por score__in=('good','bad'): las ofertas sin responder no entran en el
+    denominador del CSAT, igual que en Zendesk.
+    """
+    SCORE_CHOICES = [
+        ('offered',    'Offered'),
+        ('unoffered',  'Unoffered'),
+        ('good',       'Good'),
+        ('bad',        'Bad'),
+    ]
+    SOURCE_ZENDESK = 'zendesk'
+    SOURCE_NATIVE = 'native'
+    SOURCE_CHOICES = [
+        (SOURCE_ZENDESK, 'Zendesk'),
+        (SOURCE_NATIVE, 'TicketFlow'),
+    ]
+    # NULL en las valoraciones nativas: solo lo importado de Zendesk tiene id allí.
+    zendesk_id  = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
+    ticket      = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='satisfaction_ratings')
+    score       = models.CharField(max_length=50, choices=SCORE_CHOICES)
+    comment     = models.TextField(null=True, blank=True)
+    reason      = models.CharField(max_length=255, null=True, blank=True)
+    reason_choice = models.ForeignKey('SatisfactionReason', on_delete=models.SET_NULL,
+                                      null=True, blank=True, related_name='ratings')
+    requester   = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='satisfaction_ratings_requester')
+    assignee    = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                    related_name='satisfaction_ratings_assignee')
+    source      = models.CharField(max_length=16, choices=SOURCE_CHOICES,
+                                   default=SOURCE_NATIVE, db_index=True)
+    # Credencial del enlace público de voto. NULL en lo importado de Zendesk.
+    token       = models.CharField(max_length=64, unique=True, null=True, blank=True, db_index=True)
+    offered_at  = models.DateTimeField(null=True, blank=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    expires_at  = models.DateTimeField(null=True, blank=True)
+    created_at  = models.DateTimeField()
+    updated_at  = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        ref = self.zendesk_id or f"local:{self.pk}"
+        return f"Rating #{ref}: {self.score}"
+
+    @property
+    def is_expired(self):
+        from django.utils import timezone
+        return bool(self.expires_at and self.expires_at < timezone.now())
+
+    @property
+    def is_answered(self):
+        return self.score in ('good', 'bad')
+
+
+class AssignmentRule(models.Model):
+    name = models.CharField(max_length=255)
+    active = models.BooleanField(default=True, db_index=True)
+    # Ambito: cada dimension vacia significa «cualquiera». Con varios valores la
+    # regla casa si el ticket coincide con alguno (OR dentro de la dimension,
+    # AND entre dimensiones). Antes era un solo grupo/servicio/canal por regla.
+    groups = models.ManyToManyField('Group', blank=True, related_name='assignment_rules')
+    services = models.JSONField(default=list, blank=True)
+    channels = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class AssignmentRuleMember(models.Model):
+    rule = models.ForeignKey(AssignmentRule, on_delete=models.CASCADE, related_name='members')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='assignment_rule_memberships')
+    weight = models.PositiveIntegerField(default=1)
+    capacity = models.PositiveIntegerField(null=True, blank=True)
+    active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        unique_together = [('rule', 'user')]
+
+    def __str__(self):
+        return f"{self.rule} -> {self.user}"
+
+
+class SLAPolicy(models.Model):
+    name = models.CharField(max_length=255)
+    active = models.BooleanField(default=True, db_index=True)
+    priority = models.CharField(max_length=255, null=True, blank=True)
+    service = models.CharField(max_length=255, null=True, blank=True)
+    brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True, related_name='sla_policies')
+    # Organización del SOLICITANTE (cliente). Permite SLA por cliente: p.ej.
+    # Telefónica 2h de primera respuesta, resto 24h.
+    organization = models.ForeignKey('Organization', on_delete=models.SET_NULL, null=True, blank=True, related_name='sla_policies')
+    assigned_group = models.ForeignKey('Group', on_delete=models.SET_NULL, null=True, blank=True, related_name='sla_policies')
+    first_response_minutes = models.PositiveIntegerField(default=0)
+    resolution_minutes = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class AutomationRule(models.Model):
+    name = models.CharField(max_length=255)
+    active = models.BooleanField(default=True, db_index=True)
+    priority = models.PositiveIntegerField(default=100)
+    conditions = models.JSONField(default=dict, blank=True)
+    actions = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['priority', 'name']
+
+    def __str__(self):
+        return self.name
+
+
+class AutomationExecution(models.Model):
+    rule = models.ForeignKey(AutomationRule, on_delete=models.CASCADE, related_name='executions')
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='automation_executions')
+    event_key = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [('rule', 'ticket', 'event_key')]
+
+
+class InboundEmailLog(models.Model):
+    STATUS_RECEIVED = 'received'
+    STATUS_PROCESSED = 'processed'
+    STATUS_DUPLICATE = 'duplicate'
+    STATUS_FAILED = 'failed'
+    STATUS_CHOICES = [
+        (STATUS_RECEIVED, 'Received'),
+        (STATUS_PROCESSED, 'Processed'),
+        (STATUS_DUPLICATE, 'Duplicate'),
+        (STATUS_FAILED, 'Failed'),
+    ]
+
+    brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True, related_name='inbound_email_logs')
+    ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='inbound_email_logs')
+    message_id = models.CharField(max_length=255, db_index=True)
+    conversation_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default=STATUS_RECEIVED, db_index=True)
+    result = models.CharField(max_length=64, null=True, blank=True)
+    error = models.TextField(null=True, blank=True)
+    payload = models.JSONField(default=dict, blank=True)
+    received_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = [('brand', 'message_id')]
+        ordering = ['-received_at']
+
+    def __str__(self):
+        return f"{self.message_id} ({self.status})"
+
+
+class ResponseTemplate(models.Model):
+    """Plantilla de respuesta al cliente, por clave + marca + idioma.
+
+    brand=NULL es la plantilla global por defecto; una fila con brand concreta
+    la sobreescribe para esa marca. Variables tipo {{ticket_id}} se renderizan
+    con el motor de plantillas de Django sobre un contexto de escalares.
+    """
+    key = models.SlugField(max_length=64, db_index=True)  # p.ej. 'ticket_created'
+    brand = models.ForeignKey('Brand', on_delete=models.CASCADE, null=True, blank=True,
+                              related_name='response_templates')
+    language = models.CharField(max_length=5, default='es',
+                                choices=[('es', 'Español'), ('en', 'English')])
+    subject = models.CharField(max_length=255)
+    body_html = models.TextField()
+    body_text = models.TextField(blank=True, default='')  # vacío => derivado de body_html
+    active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('key', 'brand', 'language')]
+        ordering = ['key', 'language']
+
+    def __str__(self):
+        scope = self.brand.name if self.brand_id and self.brand else 'global'
+        return f"{self.key} [{scope}/{self.language}]"
+
+
+class OutboundEmailLog(models.Model):
+    STATUS_QUEUED = 'queued'
+    STATUS_SENT = 'sent'
+    STATUS_FAILED = 'failed'
+    STATUS_SUPPRESSED = 'suppressed'
+    STATUS_CHOICES = [
+        (STATUS_QUEUED, 'Queued'),
+        (STATUS_SENT, 'Sent'),
+        (STATUS_FAILED, 'Failed'),
+        (STATUS_SUPPRESSED, 'Suppressed'),
+    ]
+
+    brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name='outbound_email_logs')
+    ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name='outbound_email_logs')
+    template_key = models.CharField(max_length=64, blank=True, default='')
+    provider = models.CharField(max_length=10, blank=True, default='',
+                                choices=[('m365', 'Microsoft 365'), ('ses', 'Amazon SES')])
+    to_email = models.EmailField()
+    subject = models.CharField(max_length=255, blank=True, default='')
+    payload = models.JSONField(default=dict, blank=True)  # snapshot de cuerpo/headers renderizados
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_QUEUED, db_index=True)
+    result = models.CharField(max_length=64, null=True, blank=True)  # 'sent' o motivo de supresión
+    error = models.TextField(null=True, blank=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    provider_message_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
+    # 190 chars: límite de índice unique utf8mb4 en MySQL
+    dedup_key = models.CharField(max_length=190, unique=True, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.template_key or 'email'} -> {self.to_email} ({self.status})"
+
+
+class TicketAIAnalysis(models.Model):
+    """Resultado de un análisis de IA sobre un ticket (clasificación ITIL).
+
+    Modelo separado de Ticket a propósito: conserva el histórico entre
+    re-clasificaciones y congela la sugerencia de la IA en el tiempo, que es
+    exactamente lo que necesita el feedback loop del Q3 (comparar sugerencia
+    vs corrección humana en TicketEvent).
+    """
+    KIND_CLASSIFICATION = 'classification'
+    STATUS_PENDING = 'pending'
+    STATUS_SUCCESS = 'success'
+    STATUS_FAILED = 'failed'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_SUCCESS, 'Success'),
+        (STATUS_FAILED, 'Failed'),
+    ]
+
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='ai_analyses')
+    kind = models.CharField(max_length=32, default=KIND_CLASSIFICATION, db_index=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+
+    suggested_type = models.CharField(max_length=32, null=True, blank=True)      # question|incident|problem|task
+    suggested_category = models.CharField(max_length=255, null=True, blank=True)
+    suggested_priority = models.CharField(max_length=32, null=True, blank=True)  # low|normal|high|urgent
+    suggested_language = models.CharField(max_length=10, null=True, blank=True)  # es|en
+    confidence = models.FloatField(null=True, blank=True)            # mínimo de las confianzas por campo
+    field_confidences = models.JSONField(default=dict, blank=True)   # {"type": 0.93, ...}
+    reasoning = models.TextField(null=True, blank=True)              # justificación breve, visible para agentes
+    applied_fields = models.JSONField(default=list, blank=True)      # ["type", "category", ...]
+
+    input_fingerprint = models.CharField(max_length=64, db_index=True, blank=True, default='')
+    input_excerpt = models.TextField(blank=True, default='')         # lo que se envió (truncado)
+    raw_response = models.JSONField(default=dict, blank=True)
+    model_name = models.CharField(max_length=100, blank=True, default='')
+    prompt_version = models.CharField(max_length=20, blank=True, default='v1')
+    input_tokens = models.IntegerField(null=True, blank=True)
+    output_tokens = models.IntegerField(null=True, blank=True)
+    latency_ms = models.IntegerField(null=True, blank=True)
+    error = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['ticket', 'kind', 'status'], name='app_aianalysis_tks_idx')]
+
+    def __str__(self):
+        return f"AI {self.kind} ticket #{self.ticket_id} ({self.status})"
+
+
+class TicketEmbedding(models.Model):
+    """Vector de embedding de un ticket para la búsqueda de casos similares.
+
+    Coseno en memoria al volumen actual; la interfaz SimilarTicketIndex permite
+    cambiar a OpenSearch k-NN si crece. content_hash evita recomputar si el texto
+    no cambió. Base del módulo Q3 de casos similares + feedback de la IA.
+    """
+    ticket = models.OneToOneField(Ticket, on_delete=models.CASCADE, related_name='embedding')
+    vector = models.JSONField(default=list)
+    content_hash = models.CharField(max_length=64, db_index=True, blank=True, default='')
+    model_name = models.CharField(max_length=100, blank=True, default='')
+    dim = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Embedding ticket #{self.ticket_id} (dim={self.dim})"
+
+
+class OperationalMetric(models.Model):
+    name = models.CharField(max_length=100, db_index=True)
+    value = models.IntegerField(default=1)
+    labels = models.JSONField(default=dict, blank=True)
+    recorded_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-recorded_at']
+
+    def __str__(self):
+        return f"{self.name}={self.value}"
+
+
+# ---------------------------------------------------------------------------
+# Centros de ayuda publicos
+# ---------------------------------------------------------------------------
+
+
+class HelpCenter(models.Model):
+    """Portal publico de una linea de producto."""
+
+    slug = models.SlugField(max_length=40, unique=True)
+    name = models.CharField(max_length=100)
+    service = models.CharField(max_length=100, db_index=True)
+    brand = models.ForeignKey(
+        Brand, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="help_centers",
+    )
+    domains = models.JSONField(default=list, blank=True)
+    default_locale = models.CharField(max_length=10, default="es")
+    supported_locales = models.JSONField(default=list, blank=True)
+    tagline_es = models.CharField(max_length=255, blank=True, default="")
+    tagline_en = models.CharField(max_length=255, blank=True, default="")
+    primary_color = models.CharField(max_length=20, default="#172033")
+    accent_color = models.CharField(max_length=20, default="#7c3aed")
+    active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+    def locale_supported(self, locale):
+        return locale in (self.supported_locales or [self.default_locale])
+
+
+class HelpCategory(models.Model):
+    center = models.ForeignKey(HelpCenter, on_delete=models.CASCADE, related_name="categories")
+    locale = models.CharField(max_length=10, db_index=True)
+    source_id = models.BigIntegerField(null=True, blank=True)
+    translation_key = models.CharField(max_length=100, blank=True, default="", db_index=True)
+    slug = models.SlugField(max_length=180)
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    position = models.PositiveIntegerField(default=0)
+    published = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        ordering = ["position", "name"]
+        unique_together = [("center", "locale", "slug")]
+        indexes = [models.Index(fields=["center", "locale", "published"], name="help_category_list_idx")]
+
+    def __str__(self):
+        return f"{self.center.name} / {self.name} [{self.locale}]"
+
+
+class HelpSection(models.Model):
+    category = models.ForeignKey(HelpCategory, on_delete=models.CASCADE, related_name="sections")
+    source_id = models.BigIntegerField(null=True, blank=True)
+    translation_key = models.CharField(max_length=100, blank=True, default="", db_index=True)
+    slug = models.SlugField(max_length=180)
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    position = models.PositiveIntegerField(default=0)
+    published = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        ordering = ["position", "name"]
+        unique_together = [("category", "slug")]
+
+    @property
+    def locale(self):
+        return self.category.locale
+
+    def __str__(self):
+        return f"{self.category} / {self.name}"
+
+
+class HelpArticle(models.Model):
+    section = models.ForeignKey(HelpSection, on_delete=models.CASCADE, related_name="articles")
+    source_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    translation_key = models.CharField(max_length=100, blank=True, default="", db_index=True)
+    slug = models.SlugField(max_length=220)
+    title = models.CharField(max_length=500)
+    body_html = models.TextField(blank=True, default="")
+    body_text = models.TextField(blank=True, default="")
+    promoted = models.BooleanField(default=False, db_index=True)
+    position = models.PositiveIntegerField(default=0)
+    source_url = models.URLField(max_length=1000, blank=True, default="")
+    source_updated_at = models.DateTimeField(null=True, blank=True)
+    published = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position", "title"]
+        unique_together = [("section", "slug")]
+        indexes = [
+            models.Index(fields=["source_id", "published"], name="help_article_source_idx"),
+            models.Index(fields=["promoted", "published"], name="help_article_promoted_idx"),
+        ]
+
+    @property
+    def center(self):
+        return self.section.category.center
+
+    @property
+    def locale(self):
+        return self.section.category.locale
+
+    def __str__(self):
+        return f"{self.title} [{self.locale}]"
+
+
+class PublicTicketAttempt(models.Model):
+    """Contador de abuso sin persistir IPs ni emails en claro."""
+
+    center = models.ForeignKey(HelpCenter, on_delete=models.CASCADE, related_name="ticket_attempts")
+    ip_hash = models.CharField(max_length=64, db_index=True)
+    email_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    accepted = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["center", "ip_hash", "created_at"], name="public_ticket_ip_idx"),
+            models.Index(fields=["center", "email_hash", "created_at"], name="public_ticket_email_idx"),
+        ]

@@ -1,0 +1,15 @@
+{% extends 'help_center/base.html' %}
+{% block title %}{{ ui.request_title }} · {{ center.name }}{% endblock %}
+{% block content %}<div class="hc-wrap hc-form-layout"><section><nav class="hc-breadcrumb"><a href="{% url 'help_home' center.slug locale %}">{{ ui.home }}</a><span>/</span><span>{{ ui.submit_request }}</span></nav>
+<header class="hc-page-title"><span class="hc-eyebrow">{{ center.name }} support</span><h1>{{ ui.request_title }}</h1><p>{{ ui.request_intro }}</p></header>
+<form method="post" enctype="multipart/form-data" class="hc-ticket-form" id="public-ticket-form" novalidate>{% csrf_token %}{{ form.started }}
+<div class="hc-honeypot" aria-hidden="true"><label for="id_website">Website</label>{{ form.website }}</div>
+{% if form_error %}<div class="hc-alert" role="alert">{{ form_error }}</div>{% endif %}
+{% if form.started.errors %}<div class="hc-alert" role="alert">{% for error in form.started.errors %}{{ error }}{% endfor %}</div>{% endif %}
+{% if form.non_field_errors %}<div class="hc-alert" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+{% for field in form.visible_fields %}{% if field.name != 'website' %}<div class="hc-field{% if field.errors %} hc-field--error{% endif %}">
+<label for="{{ field.id_for_label }}">{{ field.label }} <span aria-hidden="true">*</span></label>{{ field }}{% for error in field.errors %}<p class="hc-field__error">{{ error }}</p>{% endfor %}</div>{% endif %}{% endfor %}
+<div class="hc-field"><label for="attachments">{{ form_copy.attachments }}</label><div class="hc-file-input"><input id="attachments" name="attachments" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx,.zip,.log"><span>{% if locale == 'es' %}Seleccionar archivos{% else %}Choose files{% endif %}</span></div><p class="hc-field__hint">{{ ui.attachments_help }}</p><ul class="hc-file-list" id="attachment-list" aria-live="polite"></ul></div>
+<button class="hc-button hc-button--submit" type="submit" data-sending="{{ ui.sending }}">{{ ui.send }} <span>→</span></button></form></section>
+<aside class="hc-form-note"><span class="hc-form-note__number">01</span><h2>{% if locale == 'es' %}Primero busca{% else %}Search first{% endif %}</h2><p>{% if locale == 'es' %}Muchas dudas ya están resueltas en nuestros artículos. Tu consulta queda igualmente a un paso.{% else %}Many questions are already covered in our articles. Your request is still only one step away.{% endif %}</p>
+<a href="{% url 'help_home' center.slug locale %}">{{ ui.back_help }} →</a><span class="hc-form-note__number">02</span><h2>{% if locale == 'es' %}Después, responde al correo{% else %}Then reply by email{% endif %}</h2><p>{% if locale == 'es' %}No necesitas crear una cuenta. Conserva la confirmación para continuar la conversación.{% else %}You do not need an account. Keep the confirmation email to continue the conversation.{% endif %}</p></aside></div>{% endblock %}

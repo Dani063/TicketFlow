@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Acceso denegado – TicketFlow{% endblock %}
+
+{% block content %}
+<div class="title-bar">
+    <h1>Acceso denegado</h1>
+</div>
+<div style="padding:40px; text-align:center;">
+    <i class="fas fa-lock" style="font-size:48px; color:#d97706; margin-bottom:16px;"></i>
+    <h2 style="margin:0 0 12px 0;">No tienes permiso para ver este recurso</h2>
+    <p style="color:#64748b; max-width:480px; margin:0 auto 24px;">
+        {{ error|default:"Si crees que esto es un error, contacta con un administrador." }}
+    </p>
+    <a href="{% url 'home' %}" class="main-btn" style="display:inline-block; padding:8px 16px; background:#7c3aed; color:#fff; border-radius:6px; text-decoration:none;">
+        <i class="fas fa-home"></i> Volver al Dashboard
+    </a>
+</div>
+{% endblock %}

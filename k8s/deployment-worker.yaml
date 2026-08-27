@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ticketflow-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ticketflow
+      role: worker
+  template:
+    metadata:
+      labels:
+        app: ticketflow
+        role: worker
+    spec:
+      containers:
+        - name: worker
+          image: ticketflow:latest           # ← actualizar con tu registry/tag
+          env:
+            - name: PYTHON_ARGS
+              value: "celery_worker"
+          envFrom:
+            - configMapRef:
+                name: ticketflow-config
+            - secretRef:
+                name: ticketflow-secrets
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "celery -A TicketFlow inspect ping --timeout 10 2>&1 | grep -q pong"
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "celery -A TicketFlow inspect ping --timeout 10 2>&1 | grep -q pong"
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 15
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

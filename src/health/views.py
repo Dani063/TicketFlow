@@ -1,5 +1,7 @@
 import logging
 
+from django.conf import settings
+from django.db import connection
 from django.http import JsonResponse
 
 from health.runtime import BudgetSource, TerminationState, get_runtime
@@ -68,3 +70,43 @@ def readyz(request):
         body["deadline_utc"] = snapshot.deadline_utc.isoformat()
 
     return JsonResponse(body, status=503)
+
+
+def internalz(request):
+    checks = {}
+    status = 200
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        checks["database"] = {"ok": True}
+    except Exception as exc:
+        checks["database"] = {"ok": False, "error": str(exc)}
+        status = 503
+
+    broker_url = getattr(settings, "CELERY_BROKER_URL", "")
+    checks["celery"] = {
+        "ok": bool(broker_url),
+        "broker": broker_url.split("://", 1)[0] if broker_url else "",
+        "default_queue": getattr(settings, "CELERY_TASK_DEFAULT_QUEUE", ""),
+    }
+    if not broker_url:
+        status = 503
+
+    try:
+        from app.models import InboundEmailLog, OperationalMetric
+
+        last_email = InboundEmailLog.objects.order_by("-received_at").first()
+        last_metric = OperationalMetric.objects.order_by("-recorded_at").first()
+        checks["operations"] = {
+            "ok": True,
+            "last_inbound_email_at": last_email.received_at.isoformat() if last_email else None,
+            "last_inbound_email_status": last_email.status if last_email else None,
+            "last_metric": last_metric.name if last_metric else None,
+            "last_metric_at": last_metric.recorded_at.isoformat() if last_metric else None,
+        }
+    except Exception as exc:
+        checks["operations"] = {"ok": False, "error": str(exc)}
+
+    return JsonResponse({"status": "ok" if status == 200 else "degraded", "checks": checks}, status=status)

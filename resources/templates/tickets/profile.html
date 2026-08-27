@@ -1,20 +1,36 @@
-{% extends 'base.html' %}
+{% extends base_template %}
 {% load static %}
 
 {% block title %}TicketFlow – Perfil{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'tickets/home.css' %}">
 {% endblock %}
 
 {% block content %}
-<div class="title-bar">
-    <h1>Perfil de Usuario</h1>
+<div id="ticket-preview-card">
+    <div class="tpc-header">
+        <span class="tpc-status"></span>
+        <span class="tpc-subject"></span>
+        <span class="tpc-priority"></span>
+    </div>
+    <div class="tpc-desc"></div>
+    <div class="tpc-comment-section">
+        <div class="tpc-comment-label">Último comentario</div>
+        <div class="tpc-comment-meta">
+            <span class="tpc-comment-author"></span>
+            <span class="tpc-comment-date"></span>
+        </div>
+        <div class="tpc-comment-body"></div>
+    </div>
 </div>
+<div class="title-bar">
+    <h1>{{ request.user.name|default:"Perfil de usuario" }}</h1>
+</div>
+<div class="profile-layout">
 
 <!-- Columna izquierda -->
 <div class="left-column">
-    <h2>Opciones de perfil</h2>
+    <span class="profile-menu-heading">Secciones</span>
     <ul id="profileMenu">
         <li data-section="info-section" class="active">
             <span class="filter-name">Información general</span>
@@ -27,17 +43,17 @@
 
 <!-- Columna derecha -->
 <div class="tabla profile-content">
-    <div class="stats-group" style="width: 100%; text-align: left;">
+    <div class="stats-group profile-surface">
 
         <!-- 🔹 Información general -->
         <div id="info-section" class="profile-section">
-            <h2>Información general</h2>
+            <h2>Tu cuenta</h2>
 
-            <div class="profile-header" style="display:flex; align-items:center; margin-bottom:20px;">
+            <div class="profile-header">
                 <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
                 <div>
-                    <h3 style="margin:0;">{{ request.user.name }}</h3>
-                    <p style="margin:5px 0 0; color:#666;">{{ request.user.email }}</p>
+                    <h3>{{ request.user.name }}</h3>
+                    <p class="profile-email">{{ request.user.email }}</p>
                 </div>
             </div>
 
@@ -60,50 +76,76 @@
                 </div>
             </div>
 
-            <div style="margin-top:20px; text-align:right;">
+            <div class="profile-actions">
                 <a href="{% url 'logout' %}" class="logout-link">Cerrar sesión</a>
             </div>
         </div>
 
         <!-- 🔹 Tickets asociados -->
         <div id="tickets-section" class="profile-section" style="display:none;">
-            <h2>Mis Tickets</h2>
-            <div class="tabla">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Asunto</th>
-                            <th>Estado</th>
-                            <th>Prioridad</th>
-                            <th>Última actualización</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% if tickets %}
-                        {% for ticket in tickets %}
-                        <tr onclick="openTicket('{{ ticket.id }}')">
-                            <td>{{ ticket.id }}</td>
-                            <td><span class="status-dot status-{{ ticket.status|lower }}"></span>{{ ticket.subject }}</td>
-                            <td>{{ ticket.status }}</td>
-                            <td>{{ ticket.priority }}</td>
-                            <td>{{ ticket.updated_at|date:"d/m/Y H:i" }}</td>
-                        </tr>
-                        {% endfor %}
-                        {% else %}
-                        <tr><td colspan="5">No tienes tickets.</td></tr>
-                        {% endif %}
-                    </tbody>
-                </table>
-            </div>
+            <h2>Tickets asociados</h2>
+            {% include 'tickets/_profile_tickets.html' %}
         </div>
 
     </div>
 </div>
+</div>
 
 <script>
-    function openTicket(ticketId) {
-        const tabText = "Ticket " + ticketId;
+    // ---- Subject hover preview ----
+    (function() {
+        const card = document.getElementById("ticket-preview-card");
+        if (!card) return;
+        let _timer = null, _mx = 0, _my = 0;
+
+        function _positionCard() {
+            const cw = card.offsetWidth, ch = card.offsetHeight, m = 16;
+            let x = _mx + 14, y = _my + 14;
+            if (x + cw + m > window.innerWidth)  x = _mx - cw - 14;
+            if (y + ch + m > window.innerHeight) y = _my - ch - 14;
+            card.style.left = Math.max(0, x) + "px";
+            card.style.top  = Math.max(0, y) + "px";
+        }
+
+        function _showCard(span) {
+            const s = span.dataset;
+            card.querySelector(".tpc-status").textContent = s.status || '';
+            card.querySelector(".tpc-status").className = "tpc-status status-" + (s.status || '').toLowerCase();
+            card.querySelector(".tpc-subject").textContent = s.subject || '';
+            card.querySelector(".tpc-priority").textContent = s.priority ? "(" + s.priority + ")" : "";
+            card.querySelector(".tpc-desc").textContent = s.description || "";
+            const hasComment = s.lcBody && s.lcBody.trim();
+            card.querySelector(".tpc-comment-section").style.display = hasComment ? "" : "none";
+            if (hasComment) {
+                card.querySelector(".tpc-comment-author").textContent = s.lcAuthor || '';
+                card.querySelector(".tpc-comment-date").textContent = s.lcDate || '';
+                card.querySelector(".tpc-comment-body").textContent = s.lcBody || '';
+            }
+            card.style.display = "block";
+            _positionCard();
+        }
+
+        document.addEventListener("mousemove", function(e) {
+            _mx = e.clientX; _my = e.clientY;
+            if (card.style.display === "block") _positionCard();
+        });
+
+        document.addEventListener("DOMContentLoaded", function() {
+            document.querySelectorAll(".subject-text").forEach(function(span) {
+                span.addEventListener("mouseenter", function() {
+                    clearTimeout(_timer);
+                    _timer = setTimeout(() => _showCard(span), 250);
+                });
+                span.addEventListener("mouseleave", function() {
+                    clearTimeout(_timer);
+                    card.style.display = "none";
+                });
+            });
+        });
+    })();
+
+    function openTicket(ticketId, subject) {
+        const tabText = subject || "Ticket " + ticketId;
         const tabUrl = "{% url 'create_ticket' %}?id=" + ticketId;
         if (window.Tabs && typeof window.Tabs.addTab === 'function') {
             window.Tabs.addTab(tabText, tabUrl);

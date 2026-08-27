@@ -10,6 +10,24 @@
 *.userosscache
 *.sln.docstates
 *.env
+.env
+
+# Django / Python
+staticfiles/
+*.sqlite3
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+env/
+
+# Scripts scratch / one-off y volcados de datos (contienen PII real de clientes).
+# Anclados a la raíz para no pillar __init__.py ni paquetes del proyecto.
+/_*.py
+/_*.json
+
+# Adjuntos subidos por usuarios (datos reales de clientes) — nunca versionar.
+resources/media/
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
