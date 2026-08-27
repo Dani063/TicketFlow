@@ -1,23 +1,86 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 from django.conf import settings
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import SimpleTestCase
 
 
 class StartWebCommandTests(SimpleTestCase):
     @patch("app.management.commands.start_web.os.execvp")
     @patch("app.management.commands.start_web.call_command")
-    def test_collects_static_files_before_starting_gunicorn(self, collectstatic, execvp):
-        call_command("start_web", workers=2, threads=1, timeout=30, bind="127.0.0.1:9000")
+    @patch("app.management.commands.start_web.connection")
+    def test_migrates_and_collects_static_files_before_starting_gunicorn(
+        self, database, management_call, execvp
+    ):
+        database.vendor = "sqlite"
 
-        collectstatic.assert_called_once_with("collectstatic", interactive=False, verbosity=1)
+        call_command(
+            "start_web", workers=2, threads=1, timeout=30, bind="127.0.0.1:9000"
+        )
+
+        self.assertEqual(
+            management_call.call_args_list,
+            [
+                call("migrate", interactive=False, verbosity=1),
+                call("collectstatic", interactive=False, verbosity=1),
+            ],
+        )
         execvp.assert_called_once()
         executable, command = execvp.call_args.args
         self.assertEqual(executable, "gunicorn")
         self.assertEqual(command[:2], ["gunicorn", "TicketFlow.wsgi:application"])
         workers_index = command.index("--workers")
         self.assertEqual(command[workers_index + 1], "2")
+
+    @patch("app.management.commands.start_web.os.execvp")
+    @patch("app.management.commands.start_web.call_command")
+    @patch("app.management.commands.start_web.connection")
+    def test_mysql_migration_lock_is_released_when_migration_fails(
+        self, database, management_call, execvp
+    ):
+        database.vendor = "mysql"
+        acquire_cursor = MagicMock()
+        acquire_cursor.fetchone.return_value = (1,)
+        release_cursor = MagicMock()
+        database.cursor.side_effect = [
+            MagicMock(__enter__=MagicMock(return_value=acquire_cursor)),
+            MagicMock(__enter__=MagicMock(return_value=release_cursor)),
+        ]
+        management_call.side_effect = RuntimeError("migration failed")
+
+        with self.assertRaisesRegex(RuntimeError, "migration failed"):
+            call_command("start_web")
+
+        acquire_cursor.execute.assert_called_once_with(
+            "SELECT GET_LOCK(%s, %s)",
+            ["ticketflow:start_web:migrations", 300],
+        )
+        release_cursor.execute.assert_called_once_with(
+            "SELECT RELEASE_LOCK(%s)", ["ticketflow:start_web:migrations"]
+        )
+        database.close.assert_called_once()
+        execvp.assert_not_called()
+
+    @patch("app.management.commands.start_web.os.execvp")
+    @patch("app.management.commands.start_web.call_command")
+    @patch("app.management.commands.start_web.connection")
+    def test_startup_stops_when_mysql_migration_lock_is_unavailable(
+        self, database, management_call, execvp
+    ):
+        database.vendor = "mysql"
+        acquire_cursor = MagicMock()
+        acquire_cursor.fetchone.return_value = (0,)
+        database.cursor.return_value = MagicMock(
+            __enter__=MagicMock(return_value=acquire_cursor)
+        )
+
+        with self.assertRaisesRegex(CommandError, "migration lock"):
+            call_command("start_web")
+
+        management_call.assert_not_called()
+        database.close.assert_called_once()
+        execvp.assert_not_called()
 
 
 class StaticFilesConfigurationTests(SimpleTestCase):
