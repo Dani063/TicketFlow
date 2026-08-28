@@ -459,12 +459,167 @@
     function init() {
         document.getElementById("refreshFilters").addEventListener("click", () => refreshFilterCounts(true));
 
-        const filters = document.querySelectorAll("#filters li");
         const viewFilters = document.querySelectorAll("#filters li[data-view]");
+        const filterSections = Array.from(document.querySelectorAll(
+            '#filters .filter-section-label[data-filter-section]'
+        ));
         const filtersPanel = document.getElementById('ticketFiltersPanel');
         const filtersToggle = document.getElementById('ticketFiltersToggle');
         const viewTitle = document.getElementById('ticketsViewTitle');
         const filterSearch = document.getElementById('filterViewsSearch');
+        const collapsedSectionsStorageKey = 'ticketflow.filterSections.v1';
+        const reduceFilterMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        let filterAnimationSequence = 0;
+        let collapsedSections = new Set();
+
+        try {
+            const savedSections = JSON.parse(sessionStorage.getItem(collapsedSectionsStorageKey) || '[]');
+            if (Array.isArray(savedSections)) collapsedSections = new Set(savedSections);
+        } catch (error) {
+            console.warn('No se pudo recuperar el estado de los filtros.', error);
+        }
+
+        function getSectionItems(section) {
+            const items = [];
+            let sibling = section.nextElementSibling;
+            while (sibling && !sibling.classList.contains('filter-section-label')) {
+                if (sibling.dataset.view) items.push(sibling);
+                sibling = sibling.nextElementSibling;
+            }
+            return items;
+        }
+
+        function saveCollapsedSections() {
+            try {
+                sessionStorage.setItem(collapsedSectionsStorageKey, JSON.stringify([...collapsedSections]));
+            } catch (error) {
+                console.warn('No se pudo guardar el estado de los filtros.', error);
+            }
+        }
+
+        function stopSectionAnimations(section, items) {
+            section.dataset.filterAnimationToken = String(++filterAnimationSequence);
+            items.forEach(item => item.getAnimations().forEach(animation => animation.cancel()));
+        }
+
+        function animateSectionItems(section, items, isCollapsed) {
+            if (reduceFilterMotion || !items.length || typeof items[0].animate !== 'function') {
+                stopSectionAnimations(section, items);
+                items.forEach(item => { item.hidden = isCollapsed; });
+                return;
+            }
+
+            stopSectionAnimations(section, items);
+            if (!isCollapsed) items.forEach(item => { item.hidden = false; });
+
+            const visibleItems = items.filter(item => !item.hidden);
+            const animationOrder = isCollapsed ? [...visibleItems].reverse() : visibleItems;
+            const token = String(++filterAnimationSequence);
+            section.dataset.filterAnimationToken = token;
+            const animations = animationOrder.map((item, index) => {
+                const styles = window.getComputedStyle(item);
+                const expandedFrame = {
+                    boxSizing: 'border-box',
+                    height: `${item.getBoundingClientRect().height}px`,
+                    marginBottom: styles.marginBottom,
+                    paddingTop: styles.paddingTop,
+                    paddingBottom: styles.paddingBottom,
+                    opacity: '1',
+                    overflow: 'hidden',
+                    transform: 'translateY(0)',
+                };
+                const collapsedFrame = {
+                    boxSizing: 'border-box',
+                    height: '0px',
+                    marginBottom: '0px',
+                    paddingTop: '0px',
+                    paddingBottom: '0px',
+                    opacity: '0',
+                    overflow: 'hidden',
+                    transform: 'translateY(-4px)',
+                };
+                return item.animate(
+                    isCollapsed ? [expandedFrame, collapsedFrame] : [collapsedFrame, expandedFrame],
+                    {
+                        duration: isCollapsed ? 120 : 170,
+                        delay: Math.min(index * 8, 32),
+                        easing: isCollapsed ? 'ease-in' : 'cubic-bezier(.2,.8,.2,1)',
+                        fill: 'both',
+                    }
+                );
+            });
+
+            Promise.allSettled(animations.map(animation => animation.finished)).then(() => {
+                if (section.dataset.filterAnimationToken !== token) return;
+                const hasSearch = !!filterSearch?.value.trim();
+                const remainsCollapsed = collapsedSections.has(section.dataset.filterSection) && !hasSearch;
+                animations.forEach(animation => animation.cancel());
+                items.forEach(item => { item.hidden = remainsCollapsed; });
+            });
+        }
+
+        function renderFilterSections(animatedSectionKey = null) {
+            const term = filterSearch?.value.trim().toLocaleLowerCase('es') || '';
+
+            if (!filterSections.length) {
+                viewFilters.forEach(item => {
+                    const label = item.textContent.toLocaleLowerCase('es');
+                    item.hidden = !!term && !label.includes(term);
+                });
+                return;
+            }
+
+            filterSections.forEach(section => {
+                const button = section.querySelector('.filter-section-toggle');
+                const items = getSectionItems(section);
+
+                if (term) {
+                    stopSectionAnimations(section, items);
+                    const sectionMatches = button.textContent.toLocaleLowerCase('es').includes(term);
+                    let hasVisibleItem = false;
+                    items.forEach(item => {
+                        const itemMatches = sectionMatches
+                            || item.textContent.toLocaleLowerCase('es').includes(term);
+                        item.hidden = !itemMatches;
+                        hasVisibleItem ||= itemMatches;
+                    });
+                    section.hidden = !hasVisibleItem;
+                    section.classList.remove('is-collapsed');
+                    button.setAttribute('aria-expanded', 'true');
+                    return;
+                }
+
+                const isCollapsed = collapsedSections.has(section.dataset.filterSection);
+                section.hidden = false;
+                section.classList.toggle('is-collapsed', isCollapsed);
+                button.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+                if (section.dataset.filterSection === animatedSectionKey) {
+                    animateSectionItems(section, items, isCollapsed);
+                } else {
+                    stopSectionAnimations(section, items);
+                    items.forEach(item => { item.hidden = isCollapsed; });
+                }
+            });
+        }
+
+        filterSections.forEach((section, sectionIndex) => {
+            const button = section.querySelector('.filter-section-toggle');
+            const items = getSectionItems(section);
+            const controlledIds = items.map((item, itemIndex) => {
+                if (!item.id) item.id = `filter-section-${sectionIndex + 1}-item-${itemIndex + 1}`;
+                return item.id;
+            });
+            button.setAttribute('aria-controls', controlledIds.join(' '));
+            button.addEventListener('click', () => {
+                const shouldCollapse = button.getAttribute('aria-expanded') === 'true';
+                if (filterSearch) filterSearch.value = '';
+                if (shouldCollapse) collapsedSections.add(section.dataset.filterSection);
+                else collapsedSections.delete(section.dataset.filterSection);
+                saveCollapsedSections();
+                renderFilterSections(section.dataset.filterSection);
+            });
+        });
+
         let activeView = getUrlParam("view");
         let activePage = parseInt(getUrlParam("page") || "1", 10) || 1;
         let savedSize  = parseInt(getUrlParam("page_size") || "50", 10);
@@ -581,23 +736,10 @@
         }
 
         if (filterSearch) {
-            filterSearch.addEventListener('input', () => {
-                const term = filterSearch.value.trim().toLocaleLowerCase('es');
-                viewFilters.forEach(item => {
-                    const label = item.textContent.toLocaleLowerCase('es');
-                    item.hidden = !!term && !label.includes(term);
-                });
-                document.querySelectorAll('#filters .filter-section-label').forEach(section => {
-                    let sibling = section.nextElementSibling;
-                    let hasVisible = false;
-                    while (sibling && !sibling.classList.contains('filter-section-label')) {
-                        if (sibling.dataset.view && !sibling.hidden) hasVisible = true;
-                        sibling = sibling.nextElementSibling;
-                    }
-                    section.hidden = !hasVisible;
-                });
-            });
+            filterSearch.addEventListener('input', renderFilterSections);
         }
+
+        renderFilterSections();
 
         viewFilters.forEach(f => {
             f.addEventListener("click", () => {

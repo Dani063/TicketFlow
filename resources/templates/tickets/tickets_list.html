@@ -5,7 +5,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'tickets/reporting.css' %}?v=s6.0">
-<link rel="stylesheet" href="{% static 'tickets/tickets_list.css' %}?v=s6.1">
+<link rel="stylesheet" href="{% static 'tickets/tickets_list.css' %}?v=s6.2">
 {% endblock %}
 
 {% block content %}
@@ -96,7 +96,11 @@
             </li>
         {% else %}
             {# Filtros completos para agentes #}
-            <li class="filter-section-label" aria-hidden="true">Prioridad y asignación</li>
+            <li class="filter-section-label" data-filter-section="priority-assignment">
+                <button type="button" class="filter-section-toggle" aria-expanded="true">
+                    <span>Prioridad y asignación</span><i class="fas fa-chevron-down" aria-hidden="true"></i>
+                </button>
+            </li>
             <li data-view="telefonica_mes" class="active">
                 <span class="filter-name">Tickets Telefónica último mes</span>
                 <span class="filter-count">–</span>
@@ -121,7 +125,11 @@
                 <span class="filter-name">Todos los tickets no resueltos (sin tareas)</span>
                 <span class="filter-count">–</span>
             </li>
-            <li class="filter-section-label" aria-hidden="true">Actividad reciente</li>
+            <li class="filter-section-label" data-filter-section="recent-activity">
+                <button type="button" class="filter-section-toggle" aria-expanded="true">
+                    <span>Actividad reciente</span><i class="fas fa-chevron-down" aria-hidden="true"></i>
+                </button>
+            </li>
             <li data-view="recently_updated">
                 <span class="filter-name">Tickets actualizados recientemente</span>
                 <span class="filter-count">–</span>
@@ -146,7 +154,11 @@
                 <span class="filter-name">Tickets valorados en los últimos 7 días</span>
                 <span class="filter-count">–</span>
             </li>
-            <li class="filter-section-label" aria-hidden="true">Servicios y canales</li>
+            <li class="filter-section-label" data-filter-section="services-channels">
+                <button type="button" class="filter-section-toggle" aria-expanded="true">
+                    <span>Servicios y canales</span><i class="fas fa-chevron-down" aria-hidden="true"></i>
+                </button>
+            </li>
             <li data-view="internos_comuny">
                 <span class="filter-name">Tickets internos open de Comunycarse</span>
                 <span class="filter-count">–</span>
@@ -159,7 +171,11 @@
                 <span class="filter-name">Recordia SGSD</span>
                 <span class="filter-count">–</span>
             </li>
-            <li class="filter-section-label" aria-hidden="true">Histórico y otras vistas</li>
+            <li class="filter-section-label" data-filter-section="history-other">
+                <button type="button" class="filter-section-toggle" aria-expanded="true">
+                    <span>Histórico y otras vistas</span><i class="fas fa-chevron-down" aria-hidden="true"></i>
+                </button>
+            </li>
             <li data-view="closed">
                 <span class="filter-name">Tickets en estado closed</span>
                 <span class="filter-count">–</span>
@@ -325,5 +341,5 @@
 <script>
 window.__ticketsData = { createTicketUrl: "{% url 'create_ticket' %}" };
 </script>
-<script src="{% static 'tickets/tickets_list.js' %}?v=s6.2"></script>
+<script src="{% static 'tickets/tickets_list.js' %}?v=s6.4"></script>
 {% endblock %}

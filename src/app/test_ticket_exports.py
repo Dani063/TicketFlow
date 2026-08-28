@@ -148,3 +148,8 @@ class TicketListFilterExportTests(TestCase):
         self.assertContains(response, 'id="ticketsTo"')
         self.assertContains(response, 'id="ticketsExportCsv"')
         self.assertContains(response, 'id="ticketsExportPdf"')
+        self.assertContains(response, 'class="filter-section-toggle"', count=4)
+        self.assertContains(response, 'data-filter-section="priority-assignment"')
+        self.assertContains(response, 'data-filter-section="recent-activity"')
+        self.assertContains(response, 'data-filter-section="services-channels"')
+        self.assertContains(response, 'data-filter-section="history-other"')

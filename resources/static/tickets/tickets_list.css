@@ -25,6 +25,59 @@
     color: var(--color-text, #1e293b);
 }
 
+#filters li.filter-section-label {
+    padding: 0;
+}
+
+#filters li[hidden] {
+    display: none !important;
+}
+
+#filters .filter-section-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2, 8px);
+    width: 100%;
+    padding: 4px 2px 6px;
+    border: 0;
+    border-bottom: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    letter-spacing: inherit;
+    text-align: left;
+    text-transform: inherit;
+}
+
+#filters .filter-section-toggle:hover {
+    color: var(--color-text, #f8fafc);
+    border-bottom-color: color-mix(in srgb, currentColor 48%, transparent);
+}
+
+#filters .filter-section-toggle:focus-visible {
+    border-radius: 3px;
+    outline: 2px solid var(--color-primary, #8b5cf6);
+    outline-offset: 2px;
+}
+
+#filters .filter-section-toggle i {
+    flex: 0 0 auto;
+    font-size: 9px;
+    transition: transform 160ms ease;
+}
+
+#filters .filter-section-label.is-collapsed .filter-section-toggle i {
+    transform: rotate(-90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #filters .filter-section-toggle i {
+        transition: none;
+    }
+}
+
 .tf-ticket-mobile-toolbar-toggle {
     display: none;
 }
