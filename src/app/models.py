@@ -2,6 +2,7 @@
 Definition of models.
 """
 
+import uuid
 from unicodedata import category
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
@@ -716,6 +717,15 @@ class HelpSection(models.Model):
 
 
 class HelpArticle(models.Model):
+    ORIGIN_ZENDESK = "zendesk"
+    ORIGIN_AGENT = "agent"
+    ORIGIN_SYSTEM = "system"
+    ORIGIN_CHOICES = [
+        (ORIGIN_ZENDESK, "Zendesk"),
+        (ORIGIN_AGENT, "Agente"),
+        (ORIGIN_SYSTEM, "Sistema"),
+    ]
+
     section = models.ForeignKey(HelpSection, on_delete=models.CASCADE, related_name="articles")
     source_id = models.BigIntegerField(null=True, blank=True, db_index=True)
     translation_key = models.CharField(max_length=100, blank=True, default="", db_index=True)
@@ -728,6 +738,21 @@ class HelpArticle(models.Model):
     source_url = models.URLField(max_length=1000, blank=True, default="")
     source_updated_at = models.DateTimeField(null=True, blank=True)
     published = models.BooleanField(default=True, db_index=True)
+    origin = models.CharField(max_length=20, choices=ORIGIN_CHOICES, default=ORIGIN_ZENDESK, db_index=True)
+    editorial_override = models.BooleanField(default=False, db_index=True)
+    version = models.PositiveIntegerField(default=1)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="created_help_articles",
+    )
+    updated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="updated_help_articles",
+    )
+    published_revision = models.ForeignKey(
+        "HelpArticleRevision", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="published_for_articles",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -749,6 +774,70 @@ class HelpArticle(models.Model):
 
     def __str__(self):
         return f"{self.title} [{self.locale}]"
+
+
+class HelpArticleRevision(models.Model):
+    STATUS_DRAFT = "draft"
+    STATUS_PUBLISHED = "published"
+    STATUS_SUPERSEDED = "superseded"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Borrador"),
+        (STATUS_PUBLISHED, "Publicada"),
+        (STATUS_SUPERSEDED, "Sustituida"),
+    ]
+
+    article = models.ForeignKey(HelpArticle, on_delete=models.CASCADE, related_name="revisions")
+    number = models.PositiveIntegerField()
+    section = models.ForeignKey(HelpSection, on_delete=models.PROTECT, related_name="article_revisions")
+    slug = models.SlugField(max_length=220)
+    title = models.CharField(max_length=500)
+    body_html = models.TextField(blank=True, default="")
+    body_text = models.TextField(blank=True, default="")
+    promoted = models.BooleanField(default=False)
+    position = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
+    base_version = models.PositiveIntegerField(default=1)
+    change_note = models.CharField(max_length=500, blank=True, default="")
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="help_article_revisions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-number"]
+        constraints = [
+            models.UniqueConstraint(fields=["article", "number"], name="help_article_revision_number_uniq"),
+        ]
+        indexes = [
+            models.Index(fields=["article", "status"], name="help_revision_status_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.article.title} · v{self.number} ({self.status})"
+
+
+class HelpArticleAsset(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    article = models.ForeignKey(HelpArticle, on_delete=models.CASCADE, related_name="assets")
+    original_name = models.CharField(max_length=255)
+    storage_key = models.CharField(max_length=1000)
+    storage_backend = models.CharField(max_length=20, default="local")
+    content_type = models.CharField(max_length=255, blank=True, default="")
+    size = models.PositiveBigIntegerField(default=0)
+    checksum = models.CharField(max_length=64, blank=True, default="")
+    uploaded_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="help_article_assets",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.original_name
 
 
 class PublicTicketAttempt(models.Model):

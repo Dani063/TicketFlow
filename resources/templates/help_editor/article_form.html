@@ -1,0 +1,100 @@
+{% extends 'help_center/base.html' %}
+{% load static %}
+{% block title %}{% if is_new %}Nuevo artículo{% else %}Editar · {{ article.title }}{% endif %} · {{ center.name }}{% endblock %}
+{% block hero %}{% endblock %}
+{% block agent_actions %}
+{% if article %}<a href="{% url 'help_editor_article_history' article.id %}">Historial</a>{% if revision %}<a href="{% url 'help_editor_article_preview' article.id revision.id %}" target="_blank">Previsualizar</a>{% endif %}{% if live_url %}<a href="{{ live_url }}">Ver versión pública</a>{% endif %}{% endif %}
+<a href="{% url 'help_home' center.slug locale %}">Salir del editor</a>
+{% endblock %}
+{% block content %}
+<div class="hce-editor-shell" data-help-editor {% if article %}data-upload-url="{% url 'help_editor_asset_upload' article.id %}"{% endif %}>
+    <header class="hce-editor-heading">
+        <div>
+            <span class="hce-kicker">Mesa editorial · {{ center.name }} / {{ locale|upper }}</span>
+            <h1>{% if is_new %}Construir un artículo{% else %}Editar sin interrumpir lo publicado{% endif %}</h1>
+            <p>{% if is_new %}El primer guardado crea un borrador privado.{% else %}Los cambios quedan en borrador hasta que decidas publicarlos.{% endif %}</p>
+        </div>
+        {% if article %}<span class="hce-status hce-status--{% if article.published %}live{% else %}draft{% endif %}"><i></i>{% if article.published %}Publicado{% else %}Solo borrador{% endif %}</span>{% endif %}
+    </header>
+
+    {% if messages %}<div class="hce-messages" role="status">{% for message in messages %}<p class="hce-message hce-message--{{ message.tags }}">{{ message }}</p>{% endfor %}</div>{% endif %}
+    {% if source_article %}<div class="hce-translation-note"><strong>Base para traducción:</strong> {{ source_article.title }}. Revisa y traduce todo el contenido antes de publicar.</div>{% endif %}
+
+    <form method="post" class="hce-editor-form" id="help-article-form" novalidate>
+        {% csrf_token %}
+        {% if translate_from %}<input type="hidden" name="translate_from" value="{{ translate_from }}">{% endif %}
+        {{ form.expected_version }}
+        {% if form.non_field_errors %}<div class="hce-form-errors" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+
+        <div class="hce-canvas">
+            <section class="hce-document" aria-label="Contenido del artículo">
+                <div class="hce-meta-grid">
+                    <label class="hce-field hce-field--wide"><span>{{ form.title.label }}</span>{{ form.title }}{{ form.title.errors }}</label>
+                    <label class="hce-field"><span>{{ form.section.label }}</span>{{ form.section }}{{ form.section.errors }}</label>
+                    <label class="hce-field"><span>{{ form.slug.label }}</span><span class="hce-slug-input"><small>/articles/</small>{{ form.slug }}</span>{{ form.slug.errors }}<em>{% if article and article.published %}La URL publicada se mantiene estable.{% else %}Déjala vacía para generarla desde el título.{% endif %}</em></label>
+                </div>
+
+                <div class="hce-compose">
+                    <div class="hce-compose__label"><span>Contenido</span><small>El formato se limpia automáticamente al guardar</small></div>
+                    <div class="hce-toolbar" role="toolbar" aria-label="Formato del artículo">
+                        <button type="button" data-command="formatBlock" data-value="p" title="Párrafo">P</button>
+                        <button type="button" data-command="formatBlock" data-value="h2" title="Título de sección">H2</button>
+                        <button type="button" data-command="bold" title="Negrita"><strong>B</strong></button>
+                        <button type="button" data-command="italic" title="Cursiva"><em>I</em></button>
+                        <button type="button" data-command="insertUnorderedList" title="Lista con viñetas">• Lista</button>
+                        <button type="button" data-command="insertOrderedList" title="Lista numerada">1. Lista</button>
+                        <button type="button" data-command="formatBlock" data-value="blockquote" title="Cita">“ Cita</button>
+                        <button type="button" data-command="createLink" title="Añadir enlace">Enlace</button>
+                        <button type="button" data-command="removeFormat" title="Quitar formato">Limpiar</button>
+                        <span class="hce-toolbar__spacer"></span>
+                        <button type="button" data-source-toggle aria-pressed="false">HTML</button>
+                    </div>
+                    <div id="help-rich-editor" class="hce-rich-editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Contenido del artículo">{{ editor_body_html|safe }}</div>
+                    <div class="hce-source-wrap" hidden><label for="id_body_html">Código HTML sanitizado</label>{{ form.body_html }}</div>
+                    {{ form.body_html.errors }}
+                    <noscript><p class="hce-form-errors">El editor visual necesita JavaScript. Puedes editar el campo de contenido HTML directamente.</p>{{ form.body_html }}</noscript>
+                </div>
+            </section>
+
+            <aside class="hce-publish-rail" aria-label="Publicación">
+                <div class="hce-rail-card hce-rail-card--accent">
+                    <span class="hce-rail-index">01</span>
+                    <h2>Estado editorial</h2>
+                    {% if article %}<dl><div><dt>Versión de control</dt><dd>{{ article.version }}</dd></div><div><dt>Revisión abierta</dt><dd>{% if revision %}{{ revision.number }}{% else %}Nueva{% endif %}</dd></div><div><dt>Visible al cliente</dt><dd>{% if article.published %}Sí{% else %}No{% endif %}</dd></div></dl>{% else %}<p>Se creará como borrador. Nada será visible hasta pulsar «Publicar».</p>{% endif %}
+                </div>
+
+                <div class="hce-rail-card">
+                    <span class="hce-rail-index">02</span>
+                    <h2>Presentación</h2>
+                    <label class="hce-check">{{ form.promoted }}<span>Destacar en la portada</span></label>{{ form.promoted.errors }}
+                    <label class="hce-field"><span>{{ form.position.label }}</span>{{ form.position }}{{ form.position.errors }}</label>
+                    <label class="hce-field"><span>{{ form.change_note.label }}</span>{{ form.change_note }}{{ form.change_note.errors }}<em>Ayuda a entender el historial.</em></label>
+                </div>
+
+                {% if article %}
+                <div class="hce-rail-card">
+                    <span class="hce-rail-index">03</span>
+                    <h2>Recursos</h2>
+                    <p>Sube imágenes o documentos y añádelos en el punto actual del texto.</p>
+                    <label class="hce-upload"><input type="file" data-asset-input><span>Seleccionar archivo</span><small>Máx. 20 MB</small></label>
+                    <p class="hce-upload-status" data-upload-status aria-live="polite"></p>
+                    <ul class="hce-assets" data-asset-list>
+                        {% for asset in assets %}<li><span title="{{ asset.original_name }}">{{ asset.original_name }}</span><button type="button" data-insert-asset data-url="{% url 'help_article_asset' asset.id asset.original_name %}" data-type="{{ asset.content_type }}" data-name="{{ asset.original_name }}">Insertar</button></li>{% empty %}<li class="hce-assets__empty">Todavía no hay recursos.</li>{% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+
+                <div class="hce-actions">
+                    <button class="hce-button hce-button--quiet" type="submit" name="intent" value="save">Guardar borrador</button>
+                    <button class="hce-button hce-button--publish" type="submit" name="intent" value="publish">Publicar</button>
+                </div>
+                {% if article %}
+                <a class="hce-history-link" href="{% url 'help_editor_article_history' article.id %}">Consultar las {{ article.revisions.count }} revisiones →</a>
+                <a class="hce-history-link" href="{% url 'help_editor_article_new' center.slug other_locale %}?translate_from={{ article.id }}">Crear traducción {{ other_locale|upper }} →</a>
+                {% endif %}
+            </aside>
+        </div>
+    </form>
+</div>
+<script src="{% static 'help_centers/help_editor.js' %}?v=1.1" defer></script>
+{% endblock %}

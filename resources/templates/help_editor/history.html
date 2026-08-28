@@ -1,0 +1,34 @@
+{% extends 'help_center/base.html' %}
+{% block title %}Historial · {{ article.title }}{% endblock %}
+{% block hero %}{% endblock %}
+{% block agent_actions %}<a href="{% url 'help_editor_article_edit' article.id %}">Volver al editor</a>{% if live_url %}<a href="{{ live_url }}">Ver versión pública</a>{% endif %}{% endblock %}
+{% block content %}
+<div class="hce-history-shell">
+    <header class="hce-editor-heading">
+        <div><span class="hce-kicker">Archivo editorial · {{ center.name }} / {{ locale|upper }}</span><h1>Historial de «{{ article.title }}»</h1><p>Cada guardado conserva una instantánea completa. Restaurar crea un borrador nuevo y no publica por sí solo.</p></div>
+        <span class="hce-status hce-status--{% if article.published %}live{% else %}draft{% endif %}"><i></i>{% if article.published %}Publicado{% else %}Retirado{% endif %}</span>
+    </header>
+    {% if messages %}<div class="hce-messages" role="status">{% for message in messages %}<p class="hce-message hce-message--{{ message.tags }}">{{ message }}</p>{% endfor %}</div>{% endif %}
+    <div class="hce-history-grid">
+        <section class="hce-timeline">
+            {% for item in revisions %}
+            <article class="hce-revision {% if item.id == article.published_revision_id %}hce-revision--current{% endif %}">
+                <div class="hce-revision__marker"><span>{{ item.number }}</span></div>
+                <div class="hce-revision__body">
+                    <header><div><h2>{{ item.title }}</h2><p>{{ item.created_at|date:'d/m/Y H:i' }} · {% if item.created_by %}{{ item.created_by.name|default:item.created_by.email }}{% else %}Sistema{% endif %}</p></div><span class="hce-revision__status hce-revision__status--{{ item.status }}">{{ item.get_status_display }}</span></header>
+                    <p class="hce-revision__note">{{ item.change_note|default:'Sin resumen del cambio' }}</p>
+                    <dl><div><dt>Sección</dt><dd>{{ item.section.name }}</dd></div><div><dt>Base</dt><dd>v{{ item.base_version }}</dd></div></dl>
+                    <div class="hce-revision__actions">
+                        <a href="{% url 'help_editor_article_preview' article.id item.id %}" target="_blank">Previsualizar</a>
+                        <a href="{% url 'help_editor_article_edit' article.id %}?revision={{ item.id }}">Abrir en editor</a>
+                        <form method="post" action="{% url 'help_editor_article_restore' article.id item.id %}">{% csrf_token %}<input type="hidden" name="expected_version" value="{{ article.version }}"><button type="submit">Restaurar como borrador</button></form>
+                        {% if item.status != 'published' %}<form method="post" action="{% url 'help_editor_article_publish' article.id item.id %}">{% csrf_token %}<input type="hidden" name="expected_version" value="{{ article.version }}"><button class="hce-inline-publish" type="submit">Publicar esta revisión</button></form>{% endif %}
+                    </div>
+                </div>
+            </article>
+            {% empty %}<p>No hay revisiones todavía.</p>{% endfor %}
+        </section>
+        <aside class="hce-history-aside"><span class="hce-rail-index">CONTROL</span><h2>Versión {{ article.version }}</h2><p>{% if article.published %}La revisión {{ article.published_revision.number }} es la que ve el cliente.{% else %}El artículo no aparece actualmente en la ayuda pública.{% endif %}</p>{% if article.published %}<form method="post" action="{% url 'help_editor_article_unpublish' article.id %}">{% csrf_token %}<input type="hidden" name="expected_version" value="{{ article.version }}"><button class="hce-danger-button" type="submit">Retirar de la ayuda pública</button></form>{% endif %}</aside>
+    </div>
+</div>
+{% endblock %}

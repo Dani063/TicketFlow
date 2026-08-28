@@ -11,7 +11,7 @@ from django.views.decorators.http import require_GET
 
 from app.api import APIValidationError
 from app.models import Attachment, HelpArticle, HelpCategory, HelpCenter, HelpSection
-from app.permissions import can_view_ticket
+from app.permissions import can_manage_help_content, can_view_ticket
 from app.public_forms import COPY as FORM_COPY, PublicTicketForm
 from app.services.attachments import AttachmentService
 from app.services.help_centers import (
@@ -20,6 +20,7 @@ from app.services.help_centers import (
     normalize_help_locale,
     public_base_url,
 )
+from app.services.help_editor import is_public_help_host
 
 
 UI = {
@@ -93,6 +94,11 @@ def _context(request, center, locale, **extra):
         "other_locale": "en" if locale == "es" else "es",
         "locale_switch_url": reverse("help_home", args=[center.slug, "en" if locale == "es" else "es"]),
         "brand_style": f"--brand-primary:{center.primary_color};--brand-accent:{center.accent_color}",
+        "can_manage_help": (
+            getattr(settings, "HELP_EDITOR_ENABLED", True)
+            and can_manage_help_content(request.user)
+            and not is_public_help_host(request)
+        ),
     }
     context.update(extra)
     return context

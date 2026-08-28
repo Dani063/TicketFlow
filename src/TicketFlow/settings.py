@@ -543,6 +543,7 @@ TICKETFLOW_PUBLIC_URL = os.getenv('TICKETFLOW_PUBLIC_URL', '')
 
 # === Centros de ayuda publicos (eComFax / Recordia) ===
 PUBLIC_HELP_ENABLED = os.getenv('PUBLIC_HELP_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
+HELP_EDITOR_ENABLED = os.getenv('HELP_EDITOR_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
 PUBLIC_TICKET_INTAKE_ENABLED = os.getenv('PUBLIC_TICKET_INTAKE_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
 ECOMFAX_HELP_PUBLIC_URL = os.getenv('ECOMFAX_HELP_PUBLIC_URL', 'https://support.ecomfax.com').rstrip('/')
 RECORDIA_HELP_PUBLIC_URL = os.getenv('RECORDIA_HELP_PUBLIC_URL', 'https://support.recordia.net').rstrip('/')
@@ -572,6 +573,19 @@ PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS = {
     item.strip().lower() for item in os.getenv(
         'PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS',
         'pdf,png,jpg,jpeg,gif,webp,txt,csv,doc,docx,xls,xlsx,zip,log',
+    ).split(',') if item.strip()
+}
+
+# Recursos de artículos: privados en el almacenamiento y servidos por una URL
+# estable de TicketFlow. Si no se configura un bucket específico, reutiliza el
+# bucket privado de adjuntos; en desarrollo usa MEDIA_ROOT.
+HELP_CONTENT_S3_BUCKET = os.getenv('HELP_CONTENT_S3_BUCKET', PUBLIC_ATTACHMENTS_S3_BUCKET)
+HELP_CONTENT_S3_REGION = os.getenv('HELP_CONTENT_S3_REGION', PUBLIC_ATTACHMENTS_S3_REGION)
+HELP_CONTENT_ASSET_MAX_BYTES = int(os.getenv('HELP_CONTENT_ASSET_MAX_BYTES', str(20 * 1024 * 1024)))
+HELP_CONTENT_ALLOWED_EXTENSIONS = {
+    item.strip().lower() for item in os.getenv(
+        'HELP_CONTENT_ALLOWED_EXTENSIONS',
+        'pdf,png,jpg,jpeg,gif,webp,txt,csv,doc,docx,xls,xlsx,zip',
     ).split(',') if item.strip()
 }
 

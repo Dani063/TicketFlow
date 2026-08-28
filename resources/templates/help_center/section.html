@@ -1,7 +1,7 @@
 {% extends 'help_center/base.html' %}
 {% block title %}{{ section.name }} · {{ center.name }}{% endblock %}
+{% block agent_actions %}<a href="{% url 'help_editor_article_new' center.slug locale %}?section={{ section.id }}">Nuevo artículo en esta sección</a>{% endblock %}
 {% block content %}<div class="hc-wrap hc-content-wrap">
 <nav class="hc-breadcrumb" aria-label="Breadcrumb"><a href="{% url 'help_home' center.slug locale %}">{{ ui.home }}</a><span>/</span><a href="{% url 'help_category' center.slug locale section.category.slug %}">{{ section.category.name }}</a><span>/</span><span aria-current="page">{{ section.name }}</span></nav>
 <header class="hc-page-title"><span class="hc-eyebrow">{{ section.category.name }}</span><h1>{{ section.name }}</h1>{% if section.description %}<p>{{ section.description }}</p>{% endif %}</header>
 <ol class="hc-article-list hc-article-list--large">{% for article in section.articles.all %}{% if article.published %}<li><a href="{% url 'help_article' center.slug locale article.slug %}"><span>{{ article.title }}</span><span class="hc-arrow">→</span></a></li>{% endif %}{% endfor %}</ol></div>{% endblock %}
-
