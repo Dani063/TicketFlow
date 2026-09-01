@@ -4,7 +4,7 @@ from django.utils.dateparse import parse_datetime
 
 from app.api import APIValidationError
 from app.constants import CHANNEL_VALUES, LEGACY_CHANNEL_MAP, LEGACY_TYPE_MAP, TICKET_TYPE_VALUES
-from app.models import Brand, Comment, Group, Ticket, TicketEvent, TicketTag, User
+from app.models import Brand, Comment, Group, ProductLine, Ticket, TicketEvent, TicketTag, User
 from app.permissions import can_update_ticket, is_agent
 from app.services.assignment import AssignmentService
 from app.services.automations import AutomationService
@@ -17,12 +17,25 @@ from app.services.sla import SLAService
 class TicketService:
     STATUS_VALUES = {"open", "pending", "closed", "resolved"}
     PRIORITY_VALUES = {"low", "normal", "high", "urgent"}
+    PRODUCT_SERVICE_ALIASES = {
+        "recordia": "recordia",
+        "speech analytics": "speech-analytics",
+        "speech_analytics": "speech-analytics",
+        "speech-analytics": "speech-analytics",
+        "identia": "identia",
+        "ecomfax": "ecomfax",
+        "ecomfaxpro": "ecomfax",
+        "agentia365": "agentia365",
+        "agentia_365": "agentia365",
+        "agentia-365": "agentia365",
+    }
     EVENT_FIELDS = [
         ("status", "status"),
         ("priority", "priority"),
         ("subject", "subject"),
         ("assignee_id", "assignee_id"),
         ("group_id", "assigned_group_id"),
+        ("product_line_id", "product_line_id"),
         ("type", "type"),
         ("problem_id", "problem_id"),
     ]
@@ -41,6 +54,15 @@ class TicketService:
         if not value:
             return None
         return LEGACY_CHANNEL_MAP.get(value) or (value if value in CHANNEL_VALUES else None)
+
+    @staticmethod
+    def product_from_service(service):
+        """Clasifica canales automáticos cuando el servicio es inequívoco."""
+        value = (service or "").strip().lower()
+        if not value:
+            return None
+        code = TicketService.PRODUCT_SERVICE_ALIASES.get(value, "otros-servicios")
+        return ProductLine.objects.filter(code=code, active=True).first()
 
     @staticmethod
     def create_or_update_from_post(actor, post_data, ticket_id=None):
@@ -74,6 +96,16 @@ class TicketService:
             brand = Brand.objects.filter(name=empresa_name).first()
             if brand is None:
                 raise APIValidationError("brand_not_found", f"Empresa desconocida: {empresa_name}", status=400)
+        product_line_id = TicketService._optional_int(post_data.get("producto"))
+        if not product_line_id:
+            raise APIValidationError(
+                "product_required", "Selecciona un producto o servicio.", status=400
+            )
+        product_line = ProductLine.objects.filter(id=product_line_id, active=True).first()
+        if product_line is None:
+            raise APIValidationError(
+                "product_not_found", "El producto o servicio seleccionado no está disponible.", status=400
+            )
         grupo_id = TicketService._optional_int(post_data.get("grupo"))
         asignado_id = TicketService._optional_int(post_data.get("asignado"))
         solicitante_id = TicketService._optional_int(post_data.get("solicitante")) or actor.id
@@ -92,6 +124,7 @@ class TicketService:
             "assignee_id": asignado_id,
             "assigned_group_id": grupo_id,
             "brand": brand,
+            "product_line": product_line,
             "type": TicketService.normalize_type(post_data.get("tipo")),
             "channel": TicketService.normalize_channel(post_data.get("canal")),
             "problem_id": TicketService._optional_int(post_data.get("problem_id")),
@@ -151,6 +184,7 @@ class TicketService:
         problem_id = TicketService._validate_problem_link(payload)
 
         now = timezone.now()
+        product_line = payload.get("product_line") or TicketService.product_from_service(payload.get("service"))
         ticket = Ticket.objects.create(
             subject=payload["subject"],
             description=payload.get("description") or "",
@@ -161,6 +195,7 @@ class TicketService:
             assigned_group_id=payload.get("assigned_group_id"),
             created_by_id=actor.id,
             brand=payload.get("brand"),
+            product_line=product_line,
             type=payload.get("type"),
             problem_id=problem_id,
             channel=payload.get("channel"),
@@ -188,6 +223,15 @@ class TicketService:
             new_value=ticket.status,
             created_at=now,
         )
+        if ticket.product_line_id:
+            TicketEvent.objects.create(
+                ticket=ticket,
+                actor=actor,
+                field_name="product_line_id",
+                old_value=None,
+                new_value=str(ticket.product_line_id),
+                created_at=now,
+            )
         if payload.get("content"):
             CommentService.add_comment(
                 ticket,
@@ -244,6 +288,7 @@ class TicketService:
             "status",
             "priority",
             "brand",
+            "product_line",
             "type",
             "channel",
             "service",

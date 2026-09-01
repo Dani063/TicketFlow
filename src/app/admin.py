@@ -1,26 +1,26 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import Brand, Comment, Group, HelpArticle, HelpArticleAsset, HelpArticleRevision, HelpCategory, HelpCenter, HelpSection, OutboundEmailLog, ResponseTemplate, Role, SatisfactionRating, SatisfactionReason, SLAPolicy, Ticket, TicketAIAnalysis, User
+from .models import Brand, Comment, Group, HelpArticle, HelpArticleAsset, HelpArticleRevision, HelpCategory, HelpCenter, HelpSection, OutboundEmailLog, ProductLine, ResponseTemplate, Role, SatisfactionRating, SatisfactionReason, SLAPolicy, Ticket, TicketAIAnalysis, User
 
 # ====== Ticket ======
 
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
     list_display = (
-        "id", "subject", "status", "priority",
+        "id", "subject", "product_line", "status", "priority",
         "requester", "assignee", "created_at", "updated_at"
     )
-    list_filter = ("status", "priority", "type", "service", "channel", "language")
+    list_filter = ("status", "priority", "product_line", "type", "service", "channel", "language")
     search_fields = ("subject", "description", "requester__email", "assignee__email")
     date_hierarchy = "created_at"
     ordering = ("-updated_at",)
-    list_select_related = ("requester", "assignee")
+    list_select_related = ("requester", "assignee", "product_line")
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         # Evita N+1 al listar tickets
-        return qs.select_related("requester", "assignee")
+        return qs.select_related("requester", "assignee", "product_line")
 
 # ====== Comment ======
 
@@ -62,6 +62,15 @@ class UserAdmin(DjangoUserAdmin):
 # ====== Cat�logos ======
 admin.site.register(Role)
 admin.site.register(Group)
+
+
+@admin.register(ProductLine)
+class ProductLineAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "color", "icon", "sort_order", "active")
+    list_editable = ("color", "icon", "sort_order", "active")
+    list_filter = ("active",)
+    search_fields = ("name", "code")
+    ordering = ("sort_order", "name")
 
 
 @admin.register(Brand)

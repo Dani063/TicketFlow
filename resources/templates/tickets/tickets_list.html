@@ -4,8 +4,7 @@
 {% block title %}TicketFlow – Tickets{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'tickets/reporting.css' %}?v=s6.0">
-<link rel="stylesheet" href="{% static 'tickets/tickets_list.css' %}?v=s6.2">
+<link rel="stylesheet" href="{% static 'tickets/tickets_list.css' %}?v=s6.4">
 {% endblock %}
 
 {% block content %}
@@ -241,7 +240,7 @@
 </aside>
 
 <main class="profile-content tickets-list-content">
-    <div class="stats-group with-pagination" style="width: 100%;">
+    <div class="stats-group with-pagination">
         <div class="list-section-heading">
             <div>
                 <span class="list-section-eyebrow">Vista activa</span>
@@ -275,7 +274,7 @@
             </div>
 
             <div class="tf-filter">
-                <span class="tf-filter-label">Fechas · editar para personalizar</span>
+                <span class="tf-filter-label">Fechas</span>
                 <div class="tf-daterange">
                     <input type="date" class="tf-input tf-report-date" id="ticketsFrom" aria-label="Desde">
                     <span class="tf-daterange-sep">→</span>

@@ -128,6 +128,23 @@ class Group(models.Model):
     def __str__(self):
         return self.group_name
 
+
+class ProductLine(models.Model):
+    """Catálogo estable de producto/servicio para la lectura de negocio."""
+    code = models.SlugField(max_length=64, unique=True)
+    name = models.CharField(max_length=100, unique=True)
+    color = models.CharField(max_length=7, default="#64748b")
+    icon = models.CharField(max_length=64, blank=True, default="fa-cube")
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        ordering = ["sort_order", "name"]
+
+    def __str__(self):
+        return self.name
+
+
 class Ticket(models.Model):
     zendesk_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)
     subject = models.CharField(max_length=255, null=False)
@@ -138,6 +155,12 @@ class Ticket(models.Model):
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='assigned_tickets')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_tickets')
     brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
+    # Dimensión comercial. Se mantiene independiente de ``service``, que sigue
+    # gobernando asignación, SLA y centros de ayuda.
+    product_line = models.ForeignKey(
+        'ProductLine', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tickets',
+    )
     type = models.CharField(max_length=255, null=True, blank=True, choices=TICKET_TYPE_CHOICES)
     # Un problema (type='problem') agrupa los incidentes que provoca (compatible con problem_id de Zendesk).
     problem = models.ForeignKey(
@@ -198,6 +221,8 @@ class Ticket(models.Model):
             models.Index(fields=['is_deleted', 'merged_into', 'service', 'status', 'updated_at'], name='app_ticket_live_service'),
             models.Index(fields=['is_deleted', 'merged_into', 'created_at', 'updated_at'], name='app_ticket_live_created'),
             models.Index(fields=['is_deleted', 'merged_into', 'brand', 'status'], name='app_ticket_live_brand_idx'),
+            models.Index(fields=['is_deleted', 'merged_into', 'product_line', 'created_at'], name='app_ticket_product_created'),
+            models.Index(fields=['is_deleted', 'merged_into', 'product_line', 'status'], name='app_ticket_product_status'),
         ]
 
 

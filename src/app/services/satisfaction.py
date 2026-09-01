@@ -17,7 +17,7 @@ from django.conf import settings
 from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
-from app.models import SatisfactionRating, SatisfactionReason, Ticket
+from app.models import SatisfactionRating, SatisfactionReason, Ticket, TicketEvent
 from app.services.email_outbound import OutboundEmailService
 from app.services.metrics import record_metric
 
@@ -168,6 +168,7 @@ class SatisfactionService:
             raise ValueError(f"score inválido: {score!r}")
         now = now or timezone.now()
 
+        previous_score = rating.score
         rating.score = score
         rating.comment = ((comment or "").strip()[:2000]) or None
         # El motivo solo tiene sentido en un voto negativo; si rectifica a positivo
@@ -182,6 +183,15 @@ class SatisfactionService:
         rating.save(update_fields=[
             "score", "comment", "reason_choice", "responded_at", "updated_at", "assignee",
         ])
+        if rating.ticket_id and previous_score != score:
+            TicketEvent.objects.create(
+                ticket_id=rating.ticket_id,
+                actor=rating.requester,
+                field_name="satisfaction_score",
+                old_value=previous_score,
+                new_value=score,
+                created_at=now,
+            )
         record_metric("satisfaction.voted", labels={
             "score": score,
             "ticket_id": rating.ticket_id or 0,

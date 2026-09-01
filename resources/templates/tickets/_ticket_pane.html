@@ -54,6 +54,15 @@
             <div class="panel-inner" id="panelLeftInner">
             <!-- Campos del Formulario -->
             <div class="form-group">
+                <label for="producto">Producto / servicio <span class="req">*</span></label>
+                <select id="producto" name="producto" class="select2" required>
+                    <option value="" selected>Selecciona un producto</option>
+                    {% for product in product_lines %}
+                    <option value="{{ product.id }}">{{ product.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
                 <label for="empresa">Empresa</label>
                 <select id="empresa" name="empresa" class="select2">
                     <option value="" selected>-</option>

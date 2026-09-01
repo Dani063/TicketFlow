@@ -72,20 +72,30 @@
         return '(function(){\n' + text + '\n;' + exports + '\n})();';
     }
 
-    function _runFragmentScripts(scripts, label) {
+    async function _runFragmentScripts(scripts, label) {
         console.debug('[tabs] re-executing', scripts.length, 'scripts for', label);
-        scripts.forEach((s, idx) => {
+        for (let idx = 0; idx < scripts.length; idx += 1) {
+            const s = scripts[idx];
             try {
-                const ns = document.createElement('script');
-                if (s.src) ns.src = s.src;
-                else ns.textContent = _wrapScriptInIIFE(s.textContent);
-                document.head.appendChild(ns);
-                document.head.removeChild(ns);
+                await new Promise((resolve, reject) => {
+                    const ns = document.createElement('script');
+                    if (s.src) {
+                        ns.src = s.src;
+                        ns.onload = () => { ns.remove(); resolve(); };
+                        ns.onerror = () => { ns.remove(); reject(new Error(`No se pudo cargar ${s.src}`)); };
+                        document.head.appendChild(ns);
+                        return;
+                    }
+                    ns.textContent = _wrapScriptInIIFE(s.textContent);
+                    document.head.appendChild(ns);
+                    ns.remove();
+                    resolve();
+                });
                 console.debug('[tabs]   script', idx, 'executed OK');
             } catch (e) {
                 console.error('[tabs]   script', idx, 'threw:', e);
             }
-        });
+        }
     }
 
     async function _navigateAppContent(url) {
@@ -130,7 +140,7 @@
             //
             // We auto-expose top-level `function` declarations to window so inline
             // event handlers like onclick="toggleSort('id')" still work.
-            _runFragmentScripts(scripts, url);
+            await _runFragmentScripts(scripts, url);
 
             // Highlight active sidebar item
             document.querySelectorAll('.sidebar-navigation li').forEach(li => li.classList.remove('active'));
@@ -295,7 +305,7 @@
 
             if (!isTicketPane) {
                 paneEl.dataset.tfInitialized = '1';
-                _runFragmentScripts(scripts, rawUrl);
+                await _runFragmentScripts(scripts, rawUrl);
                 return paneEl;
             }
 

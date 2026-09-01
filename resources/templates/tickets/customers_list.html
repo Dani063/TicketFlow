@@ -1,11 +1,15 @@
 {% extends base_template %}
 {% load static %}
 
-{% block title %}TicketFlow – Customers{% endblock %}
+{% block title %}TicketFlow – {{ customer_view_label }}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'tickets/customers_list.css' %}?v=s1.0">
+{% endblock %}
 
 {% block content %}
 <div class="title-bar">
-    <h1>Lista de Clientes</h1>
+    <h1>Clientes</h1>
     <button type="button" class="tf-btn tf-btn--secondary tf-btn--sm mobile-filters-toggle" id="customerFiltersToggle" aria-expanded="false" aria-controls="customerFiltersPanel">
         <i class="fas fa-filter"></i> Filtros
     </button>
@@ -16,11 +20,11 @@
 <aside class="left-column customer-filters-panel" id="customerFiltersPanel">
     <h2>Filtros</h2>
     <ul id="customerFilters">
-        <li data-view="all" class="active">
+        <li data-view="all"{% if active_customer_view == 'all' %} class="active" aria-current="true"{% endif %}>
             <span class="filter-name">Todos los clientes</span>
             <span class="filter-count">{{ filtros.all }}</span>
         </li>
-        <li data-view="suspended">
+        <li data-view="suspended"{% if active_customer_view == 'suspended' %} class="active" aria-current="true"{% endif %}>
             <span class="filter-name">Usuarios suspendidos</span>
             <span class="filter-count">{{ filtros.suspended }}</span>
         </li>
@@ -29,13 +33,12 @@
 
 <!-- Columna derecha: tabla -->
 <main class="profile-content customers-list-content">
-    <div class="stats-group with-pagination" style="width: 100%;">
+    <div class="stats-group with-pagination">
         <div class="list-section-heading">
             <div>
-                <span class="list-section-eyebrow">Directorio</span>
-                <h2>Clientes</h2>
+                <span class="list-section-eyebrow">Vista activa</span>
+                <h2 id="customersViewTitle">{{ customer_view_label }}</h2>
             </div>
-            <span class="list-section-hint"><i class="fas fa-external-link-alt"></i> Selecciona una fila para abrir el perfil</span>
         </div>
         <div class="tf-toolbar">
             <input type="text" class="tf-input tf-input--search" id="customersSearch" placeholder="Buscar por nombre o email…">
@@ -89,7 +92,10 @@
 
 {% block extra_js %}
 <script>
-window.__customersData = { customerProfileUrl: "{% url 'customer_profile' %}" };
+window.__customersData = {
+    customerProfileUrl: "{% url 'customer_profile' %}",
+    initialView: "{{ active_customer_view }}"
+};
 </script>
-<script src="{% static 'tickets/customers_list.js' %}?v=s6.1"></script>
+<script src="{% static 'tickets/customers_list.js' %}?v=s6.2"></script>
 {% endblock %}

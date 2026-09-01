@@ -127,15 +127,17 @@ class ZendeskClient:
 # Campos de audits que queremos registrar como TicketEvent
 TRACKED_FIELDS = {"status", "assignee_id", "group_id", "priority", "tags", "subject", "requester_id"}
 
-# Labels legibles para field_name
+# Nombres canonicos compartidos con los eventos nativos. La interfaz traduce las
+# etiquetas al mostrarlas; persistir el nombre tecnico permite calcular historicos
+# sin bifurcar por origen.
 FIELD_LABELS = {
-    "status":       "estado",
-    "assignee_id":  "asignado",
-    "group_id":     "grupo",
-    "priority":     "prioridad",
+    "status":       "status",
+    "assignee_id":  "assignee_id",
+    "group_id":     "group_id",
+    "priority":     "priority",
     "tags":         "tags",
-    "subject":      "asunto",
-    "requester_id": "solicitante",
+    "subject":      "subject",
+    "requester_id": "requester_id",
 }
 
 

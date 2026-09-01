@@ -1,0 +1,48 @@
+/* Vista de clientes: geometría propia para que el contenido no desborde el panel. */
+
+.customers-list-content > .stats-group {
+    box-sizing: border-box;
+    max-width: 100%;
+    min-width: 0;
+    width: 100%;
+}
+
+.customers-list-content .list-section-heading {
+    gap: 16px;
+    min-width: 0;
+}
+
+.customers-list-content .list-section-heading > div {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.customers-list-content .list-section-hint {
+    flex: 0 1 320px;
+    line-height: 1.35;
+    max-width: min(320px, 42%);
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.customers-list-content .tf-toolbar {
+    box-sizing: border-box;
+    max-width: 100%;
+    min-width: 0;
+}
+
+@media (max-width: 900px) {
+    .customers-list-content .list-section-hint {
+        flex-basis: 250px;
+        max-width: 34%;
+    }
+}
+
+@media (max-width: 720px) {
+    .customers-list-content .list-section-hint {
+        flex-basis: auto;
+        max-width: none;
+        text-align: left;
+        width: 100%;
+    }
+}

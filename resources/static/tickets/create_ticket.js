@@ -146,6 +146,11 @@ window.initTicketPane = function (root, ctx) {
     function validateNewTicketRequiredFields() {
         const required = [
             {
+                selector: '#producto',
+                value: (rootEl.querySelector('#producto')?.value || '').trim(),
+                message: 'Selecciona un producto o servicio antes de crear el ticket.',
+            },
+            {
                 selector: '#empresa',
                 value: (rootEl.querySelector('#empresa')?.value || '').trim(),
                 message: 'Selecciona una empresa antes de crear el ticket.',
@@ -845,6 +850,7 @@ window.initTicketPane = function (root, ctx) {
         fetch(`/api/tickets/${ticketId}/`)
             .then(response => response.json())
             .then(data => {
+                $root.find('#producto').val(data.producto || '').trigger('change');
                 $root.find('#empresa').val(data.empresa || '').trigger('change');
                 $root.find('#asignado').val(data.asignado || '').trigger('change');
                 $root.find('#grupo').val(data.grupo || '').trigger('change');

@@ -17,6 +17,7 @@ from app.models import (
     Notification,
     OperationalMetric,
     OutboundEmailLog,
+    ProductLine,
     ResponseTemplate,
     Role,
     SatisfactionRating,
@@ -71,6 +72,7 @@ class TicketFlowBackendTests(TestCase):
         )
         self.admin.role = self.admin_role
         self.admin.save(update_fields=["role"])
+        self.product = ProductLine.objects.get(code="recordia")
 
     def make_ticket(self, **overrides):
         values = {
@@ -81,6 +83,7 @@ class TicketFlowBackendTests(TestCase):
             "requester": self.customer,
             "assignee": self.agent,
             "created_by": self.customer,
+            "product_line": self.product,
         }
         values.update(overrides)
         return Ticket.objects.create(**values)
@@ -157,6 +160,7 @@ class TicketFlowBackendTests(TestCase):
                 "message": "Initial text",
                 "status": "open",
                 "prioridad": "normal",
+                "producto": str(self.product.id),
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -180,7 +184,7 @@ class TicketFlowBackendTests(TestCase):
         self.client.force_login(self.customer)
         response = self.client.post(
             f"{reverse('create_ticket')}?id={ticket.id}",
-            {"subject": "Changed", "message": "Changed"},
+            {"subject": "Changed", "message": "Changed", "producto": str(self.product.id)},
         )
         self.assertEqual(response.status_code, 403)
         ticket.refresh_from_db()
@@ -320,6 +324,7 @@ class TicketFlowBackendTests(TestCase):
                 "message": "Initial text",
                 "status": "open",
                 "solicitante": str(self.customer.id),
+                "producto": str(self.product.id),
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -456,6 +461,7 @@ class TicketFlowBackendTests(TestCase):
                 "subject": "Assigned by rule",
                 "message": "Body",
                 "status": "open",
+                "producto": str(self.product.id),
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -536,6 +542,8 @@ class _BaseFixture(TestCase):
         self.brand_b = Brand.objects.create(
             name="Ecomfax", support_email="helpdesk@ecomfax.example", mailbox_type="ses", language="es"
         )
+        self.product = ProductLine.objects.get(code="recordia")
+        self.product_b = ProductLine.objects.get(code="ecomfax")
 
     def make_ticket(self, **overrides):
         values = {
@@ -546,18 +554,29 @@ class _BaseFixture(TestCase):
             "requester": self.customer,
             "assignee": self.agent,
             "created_by": self.customer,
+            "product_line": self.product,
         }
         values.update(overrides)
         return Ticket.objects.create(**values)
 
 
 class EntityTaxonomyTests(_BaseFixture):
+    def test_product_is_required_for_manual_ticket_creation(self):
+        from app.api import APIValidationError
+        from app.services.tickets import TicketService
+
+        with self.assertRaises(APIValidationError) as ctx:
+            TicketService.create_or_update_from_post(
+                self.agent, {"subject": "Sin producto", "message": "b"}
+            )
+        self.assertEqual(ctx.exception.code, "product_required")
+
     def test_legacy_spanish_type_and_channel_are_normalized_on_create(self):
         from app.services.tickets import TicketService
 
         ticket = TicketService.create_or_update_from_post(
             self.agent,
-            {"subject": "Legacy", "message": "b", "tipo": "incidencia", "canal": "telefono"},
+            {"subject": "Legacy", "message": "b", "tipo": "incidencia", "canal": "telefono", "producto": self.product.id},
         )
         self.assertEqual(ticket.type, "incident")
         self.assertEqual(ticket.channel, "phone")
@@ -566,14 +585,14 @@ class EntityTaxonomyTests(_BaseFixture):
         from app.services.tickets import TicketService
 
         ticket = TicketService.create_or_update_from_post(
-            self.agent, {"subject": "Web ticket", "message": "b"}
+            self.agent, {"subject": "Web ticket", "message": "b", "producto": self.product.id}
         )
         self.assertEqual(ticket.channel, "web")
 
         # En update, canal vacío NO machaca con 'web': queda None (comportamiento previo)
         email_ticket = self.make_ticket(channel="email")
         updated = TicketService.create_or_update_from_post(
-            self.agent, {"subject": "Edited", "message": ""}, ticket_id=email_ticket.id
+            self.agent, {"subject": "Edited", "message": "", "producto": self.product.id}, ticket_id=email_ticket.id
         )
         self.assertIsNone(updated.channel)
 
@@ -583,7 +602,7 @@ class EntityTaxonomyTests(_BaseFixture):
 
         with self.assertRaises(APIValidationError) as ctx:
             TicketService.create_or_update_from_post(
-                self.agent, {"subject": "X", "message": "b", "empresa": "NoExiste S.L."}
+                self.agent, {"subject": "X", "message": "b", "empresa": "NoExiste S.L.", "producto": self.product.id}
             )
         self.assertEqual(ctx.exception.code, "brand_not_found")
         self.assertFalse(Brand.objects.filter(name="NoExiste S.L.").exists())
@@ -597,7 +616,7 @@ class EntityTaxonomyTests(_BaseFixture):
 
         incident = TicketService.create_or_update_from_post(
             self.agent,
-            {"subject": "Incidente", "message": "b", "tipo": "incident", "problem_id": str(problem.id)},
+            {"subject": "Incidente", "message": "b", "tipo": "incident", "problem_id": str(problem.id), "producto": self.product.id},
         )
         self.assertEqual(incident.problem_id, problem.id)
         self.assertIn(incident, problem.incidents.all())
@@ -610,14 +629,14 @@ class EntityTaxonomyTests(_BaseFixture):
         with self.assertRaises(APIValidationError):
             TicketService.create_or_update_from_post(
                 self.agent,
-                {"subject": "Mal vinculo", "message": "b", "tipo": "incident", "problem_id": str(question.id)},
+                {"subject": "Mal vinculo", "message": "b", "tipo": "incident", "problem_id": str(question.id), "producto": self.product.id},
             )
 
         # Solo los incidentes pueden vincularse
         with self.assertRaises(APIValidationError):
             TicketService.create_or_update_from_post(
                 self.agent,
-                {"subject": "Tarea", "message": "b", "tipo": "task", "problem_id": str(problem.id)},
+                {"subject": "Tarea", "message": "b", "tipo": "task", "problem_id": str(problem.id), "producto": self.product.id},
             )
 
     def test_ticket_detail_api_exposes_problem_link_and_incidents(self):
@@ -1345,8 +1364,8 @@ class ReportingTests(_BaseFixture):
             subject="RA2", brand=self.brand_a, status="closed",
             closed_at=timezone.now(), sla_breached_at=timezone.now(),
         )
-        self.t_b = self.make_ticket(subject="RB1", brand=self.brand_b, status="open")
-        self.t_none = self.make_ticket(subject="RN1", brand=None, status="pending")
+        self.t_b = self.make_ticket(subject="RB1", brand=self.brand_b, product_line=self.product_b, status="open")
+        self.t_none = self.make_ticket(subject="RN1", brand=None, product_line=None, status="pending")
 
     def test_reporting_data_requires_agent(self):
         url = reverse("reporting_data")
@@ -1371,7 +1390,7 @@ class ReportingTests(_BaseFixture):
 
     def test_reporting_csv_streams_filtered_rows(self):
         self.client.force_login(self.agent)
-        response = self.client.get(f"{reverse('reporting_export_csv')}?brand={self.brand_a.id}")
+        response = self.client.get(f"{reverse('reporting_export_csv')}?product={self.product.id}")
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/csv", response["Content-Type"])
         content = b"".join(response.streaming_content).decode("utf-8")
@@ -1379,12 +1398,77 @@ class ReportingTests(_BaseFixture):
         self.assertEqual(len(lines), 3)  # cabecera + 2 tickets de la marca A
         self.assertIn("RA1", content)
         self.assertNotIn("RB1", content)
+        self.assertIn("producto_servicio", content)
+        self.assertNotIn(";marca;", content)
 
     def test_reporting_page_renders_for_agent(self):
         self.client.force_login(self.agent)
         response = self.client.get(reverse("reporting"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Reportes por entidad")
+        self.assertContains(response, "Métricas")
+        self.assertNotContains(response, "Informe semanal")
+        self.assertContains(response, "Filtrar por producto o servicio")
+        self.assertNotContains(response, 'id="repProduct"')
+        self.assertContains(response, 'class="tf-product-chip is-selected"')
+        self.assertContains(response, 'data-product-id="unclassified"')
+        self.assertNotContains(response, ">Empresa<")
+
+    def test_product_filter_and_grouping_use_native_ticket_dimension(self):
+        self.client.force_login(self.agent)
+        payload = self.client.get(
+            reverse("reporting_data"),
+            {"section": "tickets", "product": self.product.id},
+        ).json()
+        self.assertTrue(payload["ok"])
+        rows = payload["charts"]["dimensions"]["product"]["summary"]
+        self.assertEqual(rows, [{"label": "Recordia", "n": 2, "pct": 100.0}])
+
+    def test_unclassified_product_button_filters_native_tickets(self):
+        self.client.force_login(self.agent)
+        payload = self.client.get(
+            reverse("reporting_data"),
+            {"section": "tickets", "product": "unclassified"},
+        ).json()
+        self.assertTrue(payload["ok"])
+        rows = payload["charts"]["dimensions"]["product"]["summary"]
+        self.assertEqual(rows, [{"label": "Sin clasificar", "n": 1, "pct": 100.0}])
+
+        executive = self.client.get(
+            reverse("reporting_data"),
+            {"section": "executive", "product": "unclassified"},
+        ).json()
+        self.assertEqual([row["name"] for row in executive["matrix"]], ["Sin clasificar"])
+
+    def test_executive_summary_compares_equivalent_previous_period(self):
+        self.client.force_login(self.agent)
+        payload = self.client.get(reverse("reporting_data"), {"section": "executive"}).json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("comparison", payload)
+        self.assertEqual(len(payload["matrix"]), 7)
+        self.assertTrue(all("comparison" in row for row in payload["matrix"]))
+        self.assertTrue(all("previous" in kpi for kpi in payload["kpis"]))
+
+    def test_weekly_reporting_exposes_all_sections_and_charts(self):
+        self.client.force_login(self.agent)
+        expected_charts = {
+            "executive": 2,
+            "tickets": 5,  # dimensions agrupa los dos gráficos parametrizados
+            "efficiency": 6,
+            "assignee_activity": 3,
+            "agent_updates": 2,
+            "unsolved": 4,
+            "backlog": 4,  # incluye metadatos de cobertura
+            "satisfaction": 6,
+            "sla": 6,
+        }
+        for section, chart_count in expected_charts.items():
+            with self.subTest(section=section):
+                response = self.client.get(reverse("reporting_data"), {"section": section})
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertTrue(payload["ok"])
+                self.assertEqual(payload["section"], section)
+                self.assertEqual(len(payload["charts"]), chart_count)
 
 
 class SLAOrganizationTests(_BaseFixture):
@@ -1708,6 +1792,12 @@ class SatisfactionSurveyTests(_BaseFixture):
         rating.refresh_from_db()
         self.assertEqual(rating.score, "good")
         self.assertIsNone(rating.reason_choice_id)
+        self.assertTrue(TicketEvent.objects.filter(
+            ticket=rating.ticket,
+            field_name="satisfaction_score",
+            old_value="bad",
+            new_value="good",
+        ).exists())
 
     def test_vote_is_attributed_to_the_assignee_at_vote_time(self):
         ticket = self._resolved_ticket()

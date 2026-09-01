@@ -5,7 +5,7 @@ from .models import Ticket, Comment, User
 class TicketForm(forms.ModelForm):
     class Meta:
         model = Ticket
-        fields = ['subject', 'description', 'status', 'priority', 'requester', 'assignee', 'created_by', 'brand', 'type', 'ccs', 'channel', 'service', 'language', 'closed_at']
+        fields = ['subject', 'description', 'status', 'priority', 'requester', 'assignee', 'created_by', 'brand', 'product_line', 'type', 'ccs', 'channel', 'service', 'language', 'closed_at']
 
 class CommentForm(forms.ModelForm):
     class Meta:

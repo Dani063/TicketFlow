@@ -1,12 +1,137 @@
 /* Filtros operativos y exportacion de la lista de tickets. */
 
 .tf-tickets-toolbar {
+    align-items: end;
+    background: var(--color-surface, #fff);
+    border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: 12px;
+    box-sizing: border-box;
+    box-shadow: 0 6px 20px rgba(15, 23, 42, .045);
+    display: grid;
+    gap: 12px 16px;
+    grid-template-columns: minmax(240px, 360px) max-content minmax(320px, 420px) 1fr auto;
     margin: 0 0 var(--space-2, 8px);
+    max-width: 100%;
+    min-width: 0;
+    padding: 14px 16px;
     text-align: left;
+    width: 100%;
+}
+
+.tickets-list-content > .stats-group {
+    box-sizing: border-box;
+    max-width: 100%;
+    min-width: 0;
+    width: 100%;
+}
+
+.tf-tickets-toolbar .tf-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.tf-tickets-toolbar .tf-filter-label {
+    color: var(--color-text-muted, #64748b);
+    font-size: .65rem;
+    font-weight: 750;
+    letter-spacing: .045em;
+    line-height: 1.15;
+    text-transform: uppercase;
+}
+
+.tf-tickets-toolbar .tf-filter-label i {
+    color: var(--color-primary, #5b67ca);
+    margin-right: 4px;
 }
 
 .tf-tickets-toolbar .tf-select {
-    min-width: 190px;
+    box-sizing: border-box;
+    height: 36px;
+    min-width: 0;
+    width: 100%;
+}
+
+.tf-tickets-toolbar .tf-segment {
+    align-items: stretch;
+    background: var(--color-surface-2, #f8fafc);
+    border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: 9px;
+    display: inline-flex;
+    height: 36px;
+    overflow: hidden;
+}
+
+.tf-tickets-toolbar .tf-segment button {
+    background: transparent;
+    border: 0;
+    border-left: 1px solid var(--color-border, #e2e8f0);
+    color: var(--color-text-muted, #64748b);
+    cursor: pointer;
+    font: inherit;
+    font-size: .75rem;
+    font-weight: 750;
+    min-width: 44px;
+    padding: 0 12px;
+}
+
+.tf-tickets-toolbar .tf-segment button:first-child {
+    border-left: 0;
+}
+
+.tf-tickets-toolbar .tf-segment button:hover {
+    background: color-mix(in srgb, var(--color-primary, #5b67ca) 8%, transparent);
+    color: var(--color-primary, #5b67ca);
+}
+
+.tf-tickets-toolbar .tf-segment button:focus-visible {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-primary, #5b67ca) 55%, transparent);
+    outline: none;
+    position: relative;
+    z-index: 1;
+}
+
+.tf-tickets-toolbar .tf-segment button.is-active {
+    background: var(--color-primary, #5b67ca);
+    color: #fff;
+}
+
+.tf-tickets-toolbar .tf-daterange {
+    align-items: center;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(130px, 1fr) auto minmax(130px, 1fr);
+}
+
+.tf-tickets-toolbar .tf-report-date {
+    box-sizing: border-box;
+    height: 36px;
+    max-width: none;
+    min-width: 0;
+    width: 100%;
+}
+
+.tf-tickets-toolbar .tf-daterange-sep {
+    color: var(--color-text-muted, #64748b);
+    font-size: .9rem;
+}
+
+.tf-tickets-toolbar .tf-toolbar-grow {
+    display: block;
+}
+
+.tf-tickets-toolbar .tf-report-actions {
+    align-items: center;
+    align-self: end;
+    display: flex;
+    gap: 8px;
+    justify-self: end;
+    white-space: nowrap;
+}
+
+.tf-tickets-toolbar .tf-report-actions .tf-btn {
+    min-height: 36px;
 }
 
 .tf-tickets-filter-summary {
@@ -86,14 +211,18 @@
     max-height: calc(100vh - 330px);
 }
 
-@media (max-width: 1100px) {
-    .tf-tickets-toolbar .tf-toolbar-grow {
-        display: none;
+@media (max-width: 1280px) {
+    .tf-tickets-toolbar {
+        grid-template-columns: minmax(0, 1fr) max-content;
     }
 
     .tf-tickets-toolbar .tf-report-actions {
-        width: 100%;
         justify-content: flex-end;
+        justify-self: end;
+    }
+
+    .tf-tickets-toolbar .tf-toolbar-grow {
+        display: none;
     }
 }
 
@@ -107,7 +236,12 @@
     }
 
     .tf-tickets-toolbar.is-open {
-        display: flex;
+        display: grid;
+    }
+
+    .tf-tickets-toolbar {
+        grid-template-columns: 1fr;
+        padding: 12px;
     }
 
     .tf-tickets-toolbar .tf-filter,
@@ -115,6 +249,8 @@
     .tf-tickets-toolbar .tf-segment,
     .tf-tickets-toolbar .tf-daterange,
     .tf-tickets-toolbar .tf-report-actions {
+        grid-column: auto;
+        justify-self: stretch;
         width: 100%;
         max-width: none;
         min-width: 0;

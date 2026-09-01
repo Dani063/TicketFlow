@@ -11,7 +11,7 @@ from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse
-from .models import Brand, Organization, Ticket, Comment, User, TicketTag, Attachment, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating, SatisfactionReason, AssignmentRule, AssignmentRuleMember, SLAPolicy, AutomationRule, ResponseTemplate, OutboundEmailLog
+from .models import Brand, Organization, ProductLine, Ticket, Comment, User, TicketTag, Attachment, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating, SatisfactionReason, AssignmentRule, AssignmentRuleMember, SLAPolicy, AutomationRule, ResponseTemplate, OutboundEmailLog
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
@@ -30,7 +30,7 @@ from django.views import View
 from django.views.decorators.http import require_GET
 from django.core.cache import cache
 from .api import APIValidationError, api_login_required, json_error, json_ok, parse_json_body
-from .constants import CHANNEL_CHOICES, SERVICE_CHOICES, SLA_AT_RISK_WINDOW_MINUTES
+from .constants import CHANNEL_CHOICES, SERVICE_CHOICES, SLA_AT_RISK_WINDOW_MINUTES, TICKET_TYPE_CHOICES
 from .permissions import can_manage_users, can_update_ticket, can_view_ticket, is_admin as permission_is_admin, is_agent as permission_is_agent
 from .sanitizers import sanitize_email_html
 from .services.assignment import AssignmentService
@@ -1279,12 +1279,19 @@ def customers_list(request):
     if not _is_admin(request.user):
         role_qs = role_qs.exclude(role_name__in=['admin', 'administrator'])
 
+    active_view = request.GET.get('view')
+    if active_view not in {'all', 'suspended'}:
+        active_view = 'all'
+    view_label = 'Usuarios suspendidos' if active_view == 'suspended' else 'Todos los clientes'
+
     context = {
         'username': request.user.name,
         'email': request.user.email,
         'is_admin': _is_admin(request.user),
         'roles': role_qs,
         'groups': group_qs,
+        'active_customer_view': active_view,
+        'customer_view_label': view_label,
     }
     return render(request, "tickets/customers_list.html", context)
 
@@ -1292,10 +1299,20 @@ def customers_list(request):
 def reporting(request):
     if not _is_agent(request.user) and not _is_admin(request.user):
         return render(request, "tickets/403.html", {"error": "No tienes permisos para ver los reportes."}, status=403)
+    agents = [
+        user for user in User.objects.filter(is_active=True).select_related('role').order_by('name')
+        if permission_is_agent(user)
+    ]
     context = {
         'username': request.user.name,
         'email': request.user.email,
-        'brands': list(Brand.objects.exclude(name='').order_by('name').values('id', 'name')),
+        'product_lines': list(ProductLine.objects.filter(active=True).order_by('sort_order', 'name').values('id', 'code', 'name', 'color', 'icon')),
+        'groups': list(Group.objects.order_by('group_name').values('id', 'group_name')),
+        'agents': agents,
+        'organizations': list(Organization.objects.order_by('name').values('id', 'name')),
+        'channels': CHANNEL_CHOICES,
+        'priorities': Ticket._meta.get_field('priority').choices,
+        'ticket_types': TICKET_TYPE_CHOICES,
     }
     return render(request, "tickets/reporting.html", context)
 
@@ -1315,6 +1332,35 @@ def reporting_data(request):
 
     if not _is_agent(request.user) and not _is_admin(request.user):
         return json_error('forbidden', 'No tienes permisos para ver los reportes.', status=403)
+
+    section = (request.GET.get('section') or '').strip()
+    if section:
+        from .services.reporting_metrics import ReportFilters, SECTION_BUILDERS, build_reporting_section
+
+        if section not in SECTION_BUILDERS:
+            return json_error('invalid_section', 'La zona de reporting no existe.', status=400)
+        brand_id, date_from, date_to, start_dt, end_dt = _reporting_params(request)
+        filters = ReportFilters.from_params(request.GET)
+        cache_key = (
+            f"reporting:product:v3:{section}:{date_from}:{date_to}:"
+            f"{filters.cache_fragment()}"
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return JsonResponse(cached)
+        try:
+            payload = build_reporting_section(
+                section, filters, date_from, date_to, start_dt, end_dt
+            )
+        except Exception:
+            logger.exception('reporting_section_failed', extra={'section': section})
+            return json_error(
+                'reporting_failed',
+                'No se han podido calcular los datos de esta zona.',
+                status=500,
+            )
+        cache.set(cache_key, payload, 60)
+        return JsonResponse(payload)
 
     brand_id, date_from, date_to, start_dt, end_dt = _reporting_params(request)
     cache_key = f"reporting:v2:{brand_id or 0}:{date_from}:{date_to}"
@@ -1587,13 +1633,14 @@ def reporting_export_csv(request):
     if not _is_agent(request.user) and not _is_admin(request.user):
         return json_error('forbidden', 'No tienes permisos para exportar.', status=403)
 
-    brand_id, date_from, date_to, start_dt, end_dt = _reporting_params(request)
-    qs = Ticket.objects.filter(
+    from .services.reporting_metrics import ReportFilters
+
+    _brand_id, date_from, date_to, start_dt, end_dt = _reporting_params(request)
+    filters = ReportFilters.from_params(request.GET)
+    qs = filters.apply(Ticket.objects.filter(
         is_deleted=False, merged_into__isnull=True,
         created_at__range=(start_dt, end_dt),
-    )
-    if brand_id:
-        qs = qs.filter(brand_id=brand_id)
+    ))
     _last_rating = SatisfactionRating.objects.filter(
         ticket=OuterRef('pk'), score__in=['good', 'bad']
     ).order_by('-created_at')
@@ -1602,7 +1649,7 @@ def reporting_export_csv(request):
     reason_sub = _last_rating.values('reason_choice__label')[:1]
     reason_text_sub = _last_rating.values('reason')[:1]
     qs = (
-        qs.select_related('brand', 'requester', 'assignee')
+        qs.select_related('product_line', 'requester', 'assignee')
         .annotate(
             satisfaction=Subquery(rating_sub),
             satisfaction_reason=Subquery(reason_sub),
@@ -1621,7 +1668,7 @@ def reporting_export_csv(request):
         # BOM para que Excel abra acentos en UTF-8 correctamente
         yield '﻿'
         yield writer.writerow([
-            'id', 'asunto', 'marca', 'estado', 'prioridad', 'tipo', 'canal', 'servicio',
+            'id', 'asunto', 'producto_servicio', 'estado', 'prioridad', 'tipo', 'canal',
             'solicitante', 'agente', 'creado', 'cerrado', 'primera_respuesta_ok',
             'sla_incumplido', 'satisfaccion', 'motivo_satisfaccion',
         ])
@@ -1629,12 +1676,11 @@ def reporting_export_csv(request):
             yield writer.writerow([
                 t.id,
                 t.subject,
-                t.brand.name if t.brand else '',
+                t.product_line.name if t.product_line else 'Sin clasificar',
                 t.status,
                 t.priority or '',
                 t.type or '',
                 t.channel or '',
-                t.service or '',
                 t.requester.name if t.requester else '',
                 t.assignee.name if t.assignee else '',
                 t.created_at.strftime('%d/%m/%Y %H:%M') if t.created_at else '',
@@ -1645,10 +1691,10 @@ def reporting_export_csv(request):
                 t.satisfaction_reason or (t.satisfaction_reason_text or ''),
             ])
 
-    brand_part = f'brand{brand_id}' if brand_id else 'todas'
+    product_part = f'producto{filters.product_line_id}' if filters.product_line_id else 'todos-productos'
     response = StreamingHttpResponse(_rows(), content_type='text/csv; charset=utf-8')
     response['Content-Disposition'] = (
-        f'attachment; filename="tickets_{brand_part}_{date_from}_{date_to}.csv"'
+        f'attachment; filename="tickets_{product_part}_{date_from}_{date_to}.csv"'
     )
     return response
 
@@ -1788,7 +1834,7 @@ def ticket_detail(request, pk):
 @api_login_required
 def ticket_detail_api(request, ticket_id):
     ticket = get_object_or_404(
-        Ticket.objects.select_related('brand', 'requester', 'assignee'),
+        Ticket.objects.select_related('brand', 'product_line', 'requester', 'assignee'),
         id=ticket_id,
     )
     if not can_view_ticket(request.user, ticket):
@@ -1800,6 +1846,8 @@ def ticket_detail_api(request, ticket_id):
     data = {
         'empresa': ticket.brand.name if ticket.brand else '',
         'brand_id': ticket.brand_id,
+        'producto': ticket.product_line_id,
+        'producto_name': ticket.product_line.name if ticket.product_line else '',
         'solicitante': ticket.requester_id,
         'solicitante_name': ticket.requester.name if ticket.requester else '',
         'asignado': ticket.assignee_id,
@@ -1910,6 +1958,7 @@ def create_ticket(request):
     grupos = Group.objects.all().order_by('group_name')
 
     empresas = list(Brand.objects.order_by('name').values_list('name', flat=True))
+    product_lines = list(ProductLine.objects.filter(active=True).order_by('sort_order', 'name'))
 
     ticket_obj = get_object_or_404(Ticket, id=int(id_param)) if id_param and id_param.isdigit() else None
 
@@ -1948,7 +1997,7 @@ def create_ticket(request):
     _FIELD_LABEL = {
         'status': 'estado', 'assignee_id': 'asignado', 'group_id': 'grupo',
         'priority': 'prioridad', 'tags': 'tags', 'subject': 'asunto',
-        'requester_id': 'solicitante',
+        'requester_id': 'solicitante', 'product_line_id': 'producto / servicio',
     }
     if ticket_obj:
         if _is_agent(request.user):
@@ -1987,6 +2036,7 @@ def create_ticket(request):
         'tags': tags,
         'todos': todos,
         'empresas': empresas,
+        'product_lines': product_lines,
         'grupos': grupos,
         'username': request.user.name,
         'email': request.user.email,

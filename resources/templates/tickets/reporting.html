@@ -1,165 +1,96 @@
 {% extends base_template %}
 {% load static %}
 
-{% block title %}TicketFlow – Reportes{% endblock %}
+{% block title %}TicketFlow – Métricas{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'tickets/reporting.css' %}?v=s6.0">
+<link rel="stylesheet" href="{% static 'tickets/reporting.css' %}?v=s8.1">
 {% endblock %}
 
 {% block content %}
-<div class="title-bar">
-    <h1>Reportes por entidad</h1>
+<div class="title-bar tf-report-titlebar">
+    <div>
+        <h1>Métricas</h1>
+        <p>Lectura ejecutiva y operativa por producto o servicio</p>
+    </div>
     <button type="button" class="tf-btn tf-btn--secondary tf-btn--sm tf-report-mobile-toggle"
             id="repToolbarToggle" aria-controls="repToolbar" aria-expanded="false">
-        <i class="fas fa-sliders-h"></i> Filtros y exportación
+        <i class="fas fa-sliders-h"></i> Filtros
     </button>
 </div>
 
-<div class="tf-report-wrap">
-    <div class="tf-report-toolbar" id="repToolbar">
-        <div class="tf-filter">
-            <label class="tf-filter-label" for="repBrand"><i class="fas fa-building"></i> Empresa</label>
-            <select class="tf-select" id="repBrand">
-                <option value="">Todas las empresas</option>
-                {% for b in brands %}
-                <option value="{{ b.id }}">{{ b.name }}</option>
-                {% endfor %}
-            </select>
+<main class="tf-report-wrap" aria-label="Métricas de soporte">
+    <section class="tf-report-toolbar" id="repToolbar" aria-label="Filtros del informe">
+        <div class="tf-report-filter-grid">
+            <label class="tf-filter"><span>Grupo</span><select class="tf-select" id="repGroup">
+                <option value="">Todos</option>{% for item in groups %}<option value="{{ item.id }}">{{ item.group_name }}</option>{% endfor %}
+            </select></label>
+            <label class="tf-filter"><span>Agente</span><select class="tf-select" id="repAssignee">
+                <option value="">Todos</option>{% for item in agents %}<option value="{{ item.id }}">{{ item.name|default:item.email }}</option>{% endfor %}
+            </select></label>
+            <label class="tf-filter"><span>Organización</span><select class="tf-select" id="repOrganization">
+                <option value="">Todas</option>{% for item in organizations %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}
+            </select></label>
+            <label class="tf-filter"><span>Canal</span><select class="tf-select" id="repChannel">
+                <option value="">Todos</option>{% for value, label in channels %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+            </select></label>
+            <label class="tf-filter"><span>Prioridad</span><select class="tf-select" id="repPriority">
+                <option value="">Todas</option>{% for value, label in priorities %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+            </select></label>
+            <label class="tf-filter"><span>Tipo</span><select class="tf-select" id="repType">
+                <option value="">Todos</option>{% for value, label in ticket_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+            </select></label>
         </div>
 
-        <div class="tf-filter">
-            <span class="tf-filter-label"><i class="far fa-calendar"></i> Rango</span>
-            <div class="tf-segment tf-report-presets" role="group" aria-label="Rango predefinido">
-                <button type="button" data-days="7" aria-pressed="false">7d</button>
-                <button type="button" data-days="30" class="is-active" aria-pressed="true">30d</button>
-                <button type="button" data-days="90" aria-pressed="false">90d</button>
-                <button type="button" data-days="365" aria-pressed="false">1a</button>
+        <div class="tf-report-range-row">
+            <div class="tf-report-period-control">
+                <span class="tf-report-control-label">Rango</span>
+                <div class="tf-segment tf-report-presets" role="group" aria-label="Rango predefinido">
+                    <button type="button" data-days="7" class="is-active" aria-pressed="true">7d</button>
+                    <button type="button" data-days="30" aria-pressed="false">30d</button>
+                    <button type="button" data-days="90" aria-pressed="false">90d</button>
+                    <button type="button" data-days="365" aria-pressed="false">1a</button>
+                </div>
             </div>
-        </div>
-
-        <div class="tf-filter">
-            <span class="tf-filter-label">Fechas · editar para personalizar</span>
             <div class="tf-daterange">
-                <input type="date" class="tf-input tf-report-date" id="repFrom" aria-label="Desde">
-                <span class="tf-daterange-sep">→</span>
-                <input type="date" class="tf-input tf-report-date" id="repTo" aria-label="Hasta">
+                <label><span>Desde</span><input type="date" class="tf-input" id="repFrom"></label>
+                <span aria-hidden="true">→</span>
+                <label><span>Hasta</span><input type="date" class="tf-input" id="repTo"></label>
             </div>
+            <p class="tf-report-range-mode" id="repRangeMode" aria-live="polite"></p>
+            <div class="tf-toolbar-grow"></div>
+            <button class="tf-btn tf-btn--secondary tf-btn--sm" id="repExport"><i class="fas fa-file-csv"></i> CSV</button>
+            <button class="tf-btn tf-btn--primary tf-btn--sm" id="repExportPdf"><i class="fas fa-file-pdf"></i> Exportar PDF</button>
         </div>
+    </section>
 
-        <div class="tf-toolbar-grow"></div>
-        <div class="tf-report-actions" aria-label="Exportar reporte">
-            <button class="tf-btn tf-btn--secondary tf-btn--sm" id="repExport"><i class="fas fa-file-csv"></i> Exportar CSV</button>
-            <button class="tf-btn tf-btn--secondary tf-btn--sm" id="repExportPdf"><i class="fas fa-file-pdf"></i> Exportar PDF</button>
-        </div>
-    </div>
+    <section class="tf-product-rail" id="repProductRail" aria-label="Filtrar por producto o servicio">
+        <span class="tf-product-rail-label">Productos</span>
+        <button type="button" class="tf-product-chip is-selected" data-product-id="" aria-pressed="true"
+                style="--product-color: #5b67ca">
+            <i class="fas fa-layer-group" aria-hidden="true"></i>Todos
+        </button>
+        {% for item in product_lines %}
+        <button type="button" class="tf-product-chip" data-product-id="{{ item.id }}" aria-pressed="false"
+                style="--product-color: {{ item.color }}">
+            <i class="fas {{ item.icon }}" aria-hidden="true"></i>{{ item.name }}
+        </button>
+        {% endfor %}
+        <button type="button" class="tf-product-chip" data-product-id="unclassified" aria-pressed="false"
+                style="--product-color: #b45309">
+            <i class="fas fa-triangle-exclamation" aria-hidden="true"></i>Sin clasificar
+        </button>
+    </section>
 
-    <p class="tf-report-range-mode" id="repRangeMode" aria-live="polite">Periodo activo: últimos 30 días</p>
-
-    <div id="repLoading" class="tf-spinner tf-spinner--overlay" style="display:none;"></div>
-
-    <div class="tf-report-kpis" id="repKpis">
-        <div class="tf-kpi-card tf-kpi--primary">
-            <div class="tf-kpi-top"><span class="tf-kpi-ico"><i class="fas fa-inbox"></i></span><span class="tf-kpi-delta" id="kpiCreatedDelta"></span></div>
-            <span class="tf-kpi-value" id="kpiCreated">–</span><span class="tf-kpi-label">Creados</span>
-        </div>
-        <div class="tf-kpi-card tf-kpi--success">
-            <div class="tf-kpi-top"><span class="tf-kpi-ico"><i class="fas fa-check-circle"></i></span><span class="tf-kpi-delta" id="kpiResolvedDelta"></span></div>
-            <span class="tf-kpi-value" id="kpiResolved">–</span><span class="tf-kpi-label">Resueltos</span>
-        </div>
-        <div class="tf-kpi-card">
-            <div class="tf-kpi-top"><span class="tf-kpi-ico"><i class="fas fa-layer-group"></i></span></div>
-            <span class="tf-kpi-value" id="kpiBacklog">–</span><span class="tf-kpi-label">Backlog abierto</span>
-        </div>
-        <div class="tf-kpi-card tf-kpi--warn">
-            <div class="tf-kpi-top"><span class="tf-kpi-ico"><i class="fas fa-user-slash"></i></span></div>
-            <span class="tf-kpi-value" id="kpiUnassigned">–</span><span class="tf-kpi-label">Sin asignar</span>
-        </div>
-        <div class="tf-kpi-card">
-            <div class="tf-kpi-top"><span class="tf-kpi-ico"><i class="fas fa-shield-alt"></i></span></div>
-            <span class="tf-kpi-value" id="kpiSla">–</span><span class="tf-kpi-label">Cumplimiento SLA</span>
-        </div>
-        <div class="tf-kpi-card tf-kpi--danger">
-            <div class="tf-kpi-top"><span class="tf-kpi-ico"><i class="fas fa-exclamation-triangle"></i></span></div>
-            <span class="tf-kpi-value" id="kpiBreached">–</span><span class="tf-kpi-label">SLA incumplidos</span>
-        </div>
-        <div class="tf-kpi-card">
-            <div class="tf-kpi-top"><span class="tf-kpi-ico"><i class="fas fa-clock"></i></span></div>
-            <span class="tf-kpi-value" id="kpiResolution">–</span><span class="tf-kpi-label">T. medio resolución</span>
-        </div>
-        <div class="tf-kpi-card" id="kpiSatisfactionCard">
-            <div class="tf-kpi-top"><span class="tf-kpi-ico"><i class="fas fa-meh" id="kpiSatisfactionIco"></i></span></div>
-            <span class="tf-kpi-value" id="kpiSatisfaction">–</span><span class="tf-kpi-label" id="kpiSatisfactionLabel">Satisfacción</span>
-        </div>
-    </div>
-
-    <div class="tf-report-grid">
-        <div class="tf-report-panel tf-report-panel--wide">
-            <h3>Evolución diaria (creados vs cerrados)</h3>
-            <div class="tf-report-canvas"><canvas id="chartVolume"></canvas></div>
-        </div>
-        <div class="tf-report-panel">
-            <h3>Creados por hora del día</h3>
-            <div class="tf-report-canvas"><canvas id="chartHour"></canvas></div>
-        </div>
-        <div class="tf-report-panel">
-            <h3>Creados por día de la semana</h3>
-            <div class="tf-report-canvas"><canvas id="chartWeekday"></canvas></div>
-        </div>
-        <div class="tf-report-panel">
-            <h3>Por estado</h3>
-            <div class="tf-report-canvas"><canvas id="chartStatus"></canvas></div>
-        </div>
-        <div class="tf-report-panel">
-            <h3>Por prioridad</h3>
-            <div class="tf-report-canvas"><canvas id="chartPriority"></canvas></div>
-        </div>
-        <div class="tf-report-panel">
-            <h3>Por tipo (ITIL)</h3>
-            <div class="tf-report-canvas"><canvas id="chartType"></canvas></div>
-        </div>
-        <div class="tf-report-panel">
-            <h3>Por canal</h3>
-            <div class="tf-report-canvas"><canvas id="chartChannel"></canvas></div>
-        </div>
-        <div class="tf-report-panel">
-            <h3>Satisfacción por agente</h3>
-            <span class="tf-report-note" id="repSatResponse">–</span>
-            <div class="tf-report-canvas"><canvas id="chartSatAgent"></canvas></div>
-        </div>
-        <div class="tf-report-panel">
-            <h3>Motivos de insatisfacción</h3>
-            <span class="tf-report-note">Sobre las valoraciones negativas del periodo.</span>
-            <div class="tf-report-canvas"><canvas id="chartSatReasons"></canvas></div>
-        </div>
-        <div class="tf-report-panel tf-report-panel--wide">
-            <h3>Tickets abiertos más antiguos</h3>
-            <div class="tf-admin-table-area" tabindex="0" aria-label="Tickets abiertos más antiguos">
-                <table class="tf-admin-table tf-report-table">
-                    <thead>
-                        <tr><th>#</th><th>Asunto</th><th>Estado</th><th>Agente</th><th>Antigüedad</th></tr>
-                    </thead>
-                    <tbody id="repOldestTbody"><tr><td colspan="5">–</td></tr></tbody>
-                </table>
-            </div>
-        </div>
-        <div class="tf-report-panel tf-report-panel--wide">
-            <h3>Desglose por empresa</h3>
-            <div class="tf-admin-table-area" tabindex="0" aria-label="Desglose por empresa">
-                <table class="tf-admin-table">
-                    <thead>
-                        <tr><th>Empresa</th><th>Creados</th><th>Abiertos/Pendientes</th><th>SLA incumplidos</th></tr>
-                    </thead>
-                    <tbody id="repBrandTbody"><tr><td colspan="4">–</td></tr></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
+    <nav class="tf-report-zones" id="repZones" aria-label="Zonas del informe"></nav>
+    <div id="repLoading" class="tf-spinner tf-spinner--overlay" style="display:none"></div>
+    <div id="repStatus" class="tf-report-status" role="status" aria-live="polite"></div>
+    <div id="repSections" class="tf-report-sections"></div>
+</main>
 {% endblock %}
 
 {% block extra_js %}
 <script src="{% static 'tickets/vendor/chart.umd.min.js' %}"></script>
 <script src="{% static 'tickets/vendor/jspdf.umd.min.js' %}"></script>
-<script src="{% static 'tickets/reporting.js' %}?v=s6.0"></script>
+<script src="{% static 'tickets/reporting.js' %}?v=s8.2"></script>
 {% endblock %}
