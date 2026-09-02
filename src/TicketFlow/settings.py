@@ -456,6 +456,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'app.tasks.offer_satisfaction_surveys',
         'schedule': 900.0,  # Cada 15 min; el retardo real lo fija SATISFACTION_SURVEY_DELAY_HOURS
     },
+    'cleanup-orphan-attachments': {
+        'task': 'app.tasks.cleanup_orphan_attachments',
+        'schedule': 3600.0,
+    },
 }
 
 # === Azure AD (lectura buzones M365 + envío via Graph sendMail) ===
@@ -573,10 +577,21 @@ PUBLIC_CLIENT_IP_HEADER = os.getenv('PUBLIC_CLIENT_IP_HEADER', 'REMOTE_ADDR')
 
 # Adjuntos privados: local en desarrollo, S3 privado en produccion cuando se
 # define el bucket. Nunca se expone la URL de almacenamiento directamente.
+ATTACHMENT_STORAGE_BACKEND = os.getenv('ATTACHMENT_STORAGE_BACKEND', 'auto').strip().lower()
+ATTACHMENT_STORAGE_PREFIX = os.getenv('ATTACHMENT_STORAGE_PREFIX', '').strip('/ ')
 PUBLIC_ATTACHMENTS_S3_BUCKET = os.getenv('PUBLIC_ATTACHMENTS_S3_BUCKET', '')
 PUBLIC_ATTACHMENTS_S3_REGION = os.getenv('PUBLIC_ATTACHMENTS_S3_REGION', os.getenv('AWS_REGION', 'eu-west-1'))
 PUBLIC_ATTACHMENT_MAX_FILES = int(os.getenv('PUBLIC_ATTACHMENT_MAX_FILES', '5'))
 PUBLIC_ATTACHMENT_MAX_BYTES = int(os.getenv('PUBLIC_ATTACHMENT_MAX_BYTES', str(15 * 1024 * 1024)))
+PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES = int(os.getenv('PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES', str(25 * 1024 * 1024)))
+ATTACHMENT_ORPHAN_MAX_AGE_HOURS = int(os.getenv('ATTACHMENT_ORPHAN_MAX_AGE_HOURS', '24'))
+ATTACHMENT_DOWNLOAD_URL_TTL_SECONDS = int(os.getenv('ATTACHMENT_DOWNLOAD_URL_TTL_SECONDS', '300'))
+OUTBOUND_EMAIL_ATTACHMENT_MAX_BYTES = int(os.getenv(
+    'OUTBOUND_EMAIL_ATTACHMENT_MAX_BYTES', str(PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES),
+))
+GRAPH_SIMPLE_ATTACHMENT_MAX_BYTES = int(os.getenv(
+    'GRAPH_SIMPLE_ATTACHMENT_MAX_BYTES', str(3 * 1024 * 1024),
+))
 PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS = {
     item.strip().lower() for item in os.getenv(
         'PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS',

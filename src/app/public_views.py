@@ -32,7 +32,7 @@ UI = {
         "try_request": "Si no encuentras la respuesta, envíanos una solicitud.", "home": "Inicio",
         "related": "Artículos relacionados", "request_title": "Contacta con soporte",
         "request_intro": "Describe tu duda o incidencia. Recibirás la confirmación por correo y podrás responder a ese mensaje para aportar más información.",
-        "attachments_help": "Hasta 5 archivos de 15 MB. PDF, imágenes, Office, CSV, TXT, ZIP o LOG.",
+        "attachments_help": "Hasta 5 archivos de 15 MB cada uno (25 MB en total). PDF, imágenes, Office, CSV, TXT, ZIP o LOG.",
         "send": "Enviar solicitud", "sending": "Enviando...", "success_title": "Hemos recibido tu solicitud",
         "success_body": "Nuestro equipo la revisará lo antes posible. Te hemos enviado un correo de confirmación; puedes responder a ese mensaje para añadir información.",
         "reference": "Tu referencia", "back_help": "Volver al centro de ayuda", "language": "Idioma",
@@ -45,7 +45,7 @@ UI = {
         "try_request": "If you cannot find the answer, send us a request.", "home": "Home",
         "related": "Related articles", "request_title": "Contact support",
         "request_intro": "Describe your question or issue. You will receive confirmation by email and can reply to that message with more information.",
-        "attachments_help": "Up to 5 files of 15 MB. PDF, images, Office, CSV, TXT, ZIP or LOG.",
+        "attachments_help": "Up to 5 files of 15 MB each (25 MB total). PDF, images, Office, CSV, TXT, ZIP or LOG.",
         "send": "Submit request", "sending": "Sending...", "success_title": "We've received your request",
         "success_body": "Our team will review it as soon as possible. We sent you a confirmation email; reply to it if you need to add information.",
         "reference": "Your reference", "back_help": "Back to help centre", "language": "Language",
@@ -57,6 +57,7 @@ PUBLIC_ERROR_EN = {
     "too_many_files": "You can attach up to five files.",
     "file_type_not_allowed": "One of the selected file types is not allowed.",
     "file_too_large": "Each attachment must be no larger than 15 MB.",
+    "attachments_too_large": "All attachments together must be no larger than 25 MB.",
     "rate_limited": "You have submitted too many requests. Wait a few minutes before trying again.",
     "portal_brand_missing": "This support portal is temporarily unavailable. Please try again later.",
 }
@@ -271,12 +272,19 @@ def attachment_download(request, attachment_id):
     if not attachment.ticket_id or not can_view_ticket(request.user, attachment.ticket):
         raise Http404
     if attachment.storage_backend == "s3":
-        return redirect(AttachmentService.presigned_url(attachment))
+        try:
+            return redirect(AttachmentService.presigned_url(attachment))
+        except APIValidationError as exc:
+            return HttpResponse(exc.message, status=exc.status, content_type="text/plain; charset=utf-8")
     if not attachment.storage_key:
         # Adjuntos heredados conservan la URL original.
         return redirect(attachment.file_url)
     content_type = attachment.file_type or mimetypes.guess_type(attachment.original_name)[0] or "application/octet-stream"
+    try:
+        stored = AttachmentService.open_local(attachment)
+    except APIValidationError as exc:
+        return HttpResponse(exc.message, status=exc.status, content_type="text/plain; charset=utf-8")
     return FileResponse(
-        AttachmentService.open_local(attachment), as_attachment=True,
-        filename=attachment.original_name or "attachment", content_type=content_type,
+        stored, as_attachment=True, filename=attachment.original_name or "attachment",
+        content_type=content_type,
     )

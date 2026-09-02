@@ -2299,6 +2299,30 @@ def upload_attachment(request, ticket_id):
 
     from app.services.attachments import AttachmentService
     try:
+        pending_count = Attachment.objects.filter(
+            ticket=ticket,
+            uploaded_by=request.user,
+            comment__isnull=True,
+        ).count()
+        max_files = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_FILES', 5)
+        if pending_count >= max_files:
+            raise APIValidationError(
+                'too_many_files',
+                f'Puedes adjuntar un máximo de {max_files} archivos por respuesta.',
+                status=400,
+            )
+        pending_bytes = sum(Attachment.objects.filter(
+            ticket=ticket,
+            uploaded_by=request.user,
+            comment__isnull=True,
+        ).values_list('size', flat=True))
+        max_total_bytes = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES', 25 * 1024 * 1024)
+        if pending_bytes + getattr(f, 'size', 0) > max_total_bytes:
+            raise APIValidationError(
+                'attachments_too_large',
+                f'El conjunto de adjuntos debe ocupar como máximo {max_total_bytes // (1024 * 1024)} MB.',
+                status=400,
+            )
         att = AttachmentService.save(f, ticket, request.user)
     except APIValidationError as exc:
         return json_error(exc.code, exc.message, status=exc.status)
@@ -2310,6 +2334,32 @@ def upload_attachment(request, ticket_id):
         'filename': att.original_name,
         'size': getattr(f, 'size', 0),
     })
+
+
+@api_login_required
+@require_POST
+def delete_pending_attachment(request, attachment_id):
+    attachment = get_object_or_404(
+        Attachment.objects.select_related('ticket'),
+        id=attachment_id,
+    )
+    if not attachment.ticket_id or not can_view_ticket(request.user, attachment.ticket):
+        return json_error('forbidden', 'No tienes acceso a este adjunto.', status=403)
+    if attachment.uploaded_by_id != request.user.id:
+        return json_error('forbidden', 'Solo puede retirarlo quien lo adjuntó.', status=403)
+    if attachment.comment_id:
+        return json_error(
+            'attachment_already_sent',
+            'El adjunto ya forma parte de una respuesta y no puede retirarse desde el editor.',
+            status=409,
+        )
+
+    from app.services.attachments import AttachmentService
+    try:
+        AttachmentService.delete(attachment)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+    return json_ok({'deleted': True, 'attachment_id': attachment_id})
 
 @api_login_required
 @require_GET

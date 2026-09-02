@@ -31,6 +31,7 @@ urlpatterns = [
     path('api/tags/', views.tags_api, name='tags_api'),
     path('api/users/search/', views.users_search_api, name='users_search_api'),
     path('tickets/<int:ticket_id>/attachments/upload/', views.upload_attachment, name='upload_attachment'),
+    path('attachments/<int:attachment_id>/pending/delete/', views.delete_pending_attachment, name='delete_pending_attachment'),
     path('attachments/<int:attachment_id>/download/', public_views.attachment_download, name='attachment_download'),
 
     path("customers/filter/", views.filter_customers, name="filter_customers"),

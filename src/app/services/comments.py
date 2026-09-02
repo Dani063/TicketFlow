@@ -91,6 +91,7 @@ class CommentService:
                 id__in=attachment_ids,
                 ticket=ticket,
                 comment__isnull=True,
+                uploaded_by=actor,
             ).update(comment=comment)
 
         SLAService.record_first_response(ticket, actor, comment_is_public=final_is_public)

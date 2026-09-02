@@ -64,7 +64,7 @@ Variables principales:
 - `ECOMFAX_HELP_PUBLIC_URL` y `RECORDIA_HELP_PUBLIC_URL`: bases usadas en correos y encuestas.
 - `PUBLIC_ECOMFAX_BRAND_NAME`: por defecto `eComFax`.
 - `PUBLIC_RECORDIA_BRAND_NAME`: por defecto `Comunycarse Helpdesk`; cambiarlo si se crea una marca/buzón Recordia específico.
-- `PUBLIC_ATTACHMENTS_S3_BUCKET`: obligatorio en producción con varias réplicas. El bucket debe ser privado y el rol del pod necesita `s3:PutObject`/`s3:GetObject` sobre `attachments/tickets/*`.
+- `PUBLIC_ATTACHMENTS_S3_BUCKET`: obligatorio en producción con varias réplicas. El bucket debe ser privado y el rol del pod necesita `s3:PutObject`/`s3:GetObject`/`s3:DeleteObject` sobre `<ATTACHMENT_STORAGE_PREFIX>/attachments/tickets/*` (sin el primer segmento si el prefijo está vacío). El procedimiento completo está en `docs/attachment-storage.md`.
 - `HELP_EDITOR_ENABLED`: interruptor del editor, activo por defecto. Desactivarlo no afecta a la consulta pública.
 - `HELP_CONTENT_S3_BUCKET`: bucket privado para recursos editoriales; por defecto reutiliza `PUBLIC_ATTACHMENTS_S3_BUCKET`. El rol del pod necesita `s3:PutObject`/`s3:GetObject` sobre `help-content/*`.
 - `HELP_CONTENT_ASSET_MAX_BYTES` y `HELP_CONTENT_ALLOWED_EXTENSIONS`: límite y lista de tipos admitidos por el editor.

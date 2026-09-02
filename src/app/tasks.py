@@ -1,8 +1,12 @@
 import logging
+import os
+from urllib.parse import quote
+
 import requests
 from django.conf import settings
 from celery import shared_task
 from app.services.assignment import AssignmentService
+from app.services.attachments import AttachmentService
 from app.services.email_ingestion import EmailIngestionService
 from app.services.metrics import record_metric
 from app.services.msgraph import GRAPH_BASE, get_graph_token
@@ -21,8 +25,74 @@ def _get_graph_token():
     return get_graph_token()
 
 
-def _process_message(message, brand):
-    return EmailIngestionService.process_message(message, brand)
+def _process_message(message, brand, attachments=None):
+    return EmailIngestionService.process_message(message, brand, attachments=attachments)
+
+
+def _fetch_m365_attachments(mailbox, message_id, headers):
+    """Descarga adjuntos de archivo de Graph antes de procesar el mensaje.
+
+    Las imágenes inline suelen ser logotipos de firma y se omiten. Los tipos o
+    tamaños no admitidos tampoco bloquean la creación del ticket.
+    """
+    mailbox_path = quote(mailbox, safe="@")
+    message_path = quote(message_id, safe="")
+    base = f'{GRAPH_BASE}/users/{mailbox_path}/messages/{message_path}/attachments'
+    response = requests.get(
+        f'{base}?$select=id,name,contentType,size,isInline&$top=25',
+        headers=headers,
+        timeout=30,
+    )
+    response.raise_for_status()
+
+    max_files = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_FILES', 5)
+    max_bytes = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_BYTES', 15 * 1024 * 1024)
+    max_total = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES', 25 * 1024 * 1024)
+    allowed = getattr(settings, 'PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS', set())
+    accepted = []
+    total = 0
+    for item in response.json().get('value', []):
+        if item.get('isInline') or item.get('@odata.type') not in (
+            None, '#microsoft.graph.fileAttachment',
+        ):
+            continue
+        name = os.path.basename((item.get('name') or 'archivo').replace('\\', '/'))
+        extension = os.path.splitext(name)[1].lower().lstrip('.')
+        declared_size = int(item.get('size') or 0)
+        if (
+            len(accepted) >= max_files
+            or not extension
+            or extension not in allowed
+            or declared_size > max_bytes
+            or total + declared_size > max_total
+        ):
+            logger.warning(
+                'poll_m365 attachment skipped by policy',
+                extra={'message_id': message_id, 'attachment_name': name, 'size': declared_size},
+            )
+            continue
+
+        attachment_id = quote(item['id'], safe='')
+        content_response = requests.get(
+            f'{base}/{attachment_id}/$value',
+            headers=headers,
+            timeout=60,
+        )
+        content_response.raise_for_status()
+        content = content_response.content
+        if len(content) > max_bytes or total + len(content) > max_total:
+            logger.warning(
+                'poll_m365 attachment skipped after download',
+                extra={'message_id': message_id, 'attachment_name': name, 'size': len(content)},
+            )
+            continue
+        accepted.append({
+            'name': name,
+            'content_type': item.get('contentType') or 'application/octet-stream',
+            'content': content,
+        })
+        total += len(content)
+    return accepted
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +124,7 @@ def poll_m365_mailboxes():
         url = (
             f'{GRAPH_BASE}/users/{mailbox}/mailFolders/Inbox/messages'
             '?$filter=isRead eq false'
-            '&$select=id,subject,from,body,receivedDateTime,conversationId,internetMessageHeaders'
+            '&$select=id,subject,from,body,receivedDateTime,conversationId,internetMessageHeaders,hasAttachments'
             '&$top=50'
             '&$orderby=receivedDateTime asc'
         )
@@ -68,7 +138,12 @@ def poll_m365_mailboxes():
         for msg in resp.json().get('value', []):
             msg_id = msg['id']
             try:
-                result = _process_message(msg, brand)
+                attachments = (
+                    _fetch_m365_attachments(mailbox, msg_id, headers)
+                    if msg.get('hasAttachments')
+                    else []
+                )
+                result = _process_message(msg, brand, attachments=attachments)
                 logger.info('poll_m365 [%s] %s… → %s', mailbox, msg_id[:16], result)
             except Exception as exc:
                 logger.error('poll_m365 [%s] %s… error: %s', mailbox, msg_id[:16], exc)
@@ -84,6 +159,20 @@ def poll_m365_mailboxes():
                 )
             except Exception as exc:
                 logger.warning('poll_m365 [%s] mark-read failed %s…: %s', mailbox, msg_id[:16], exc)
+
+
+@shared_task(name='app.tasks.cleanup_orphan_attachments')
+def cleanup_orphan_attachments():
+    """Retira subidas abandonadas que nunca llegaron a enviarse en un comentario."""
+    totals = {"deleted": 0, "failed": 0}
+    while True:
+        result = AttachmentService.cleanup_orphans(batch_size=250)
+        totals["deleted"] += result["deleted"]
+        totals["failed"] += result["failed"]
+        if result["deleted"] < 250:
+            break
+    logger.info("attachment_orphan_cleanup_completed", extra=totals)
+    return totals
 
 
 @shared_task(name='app.tasks.auto_assign_unassigned_tickets')

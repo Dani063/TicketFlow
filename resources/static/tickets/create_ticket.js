@@ -221,8 +221,15 @@ window.initTicketPane = function (root, ctx) {
                     headers: { 'X-CSRFToken': getCookie('csrftoken') }, // NO pongas Content-Type aquí
                     body: fd
                 });
-                const data = await res.json();
-                if (!res.ok) { window.toast.error(data.error || 'Error al subir adjunto'); continue; }
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    const message = data.detail
+                        || (data.error && data.error.message)
+                        || (typeof data.error === 'string' ? data.error : '')
+                        || 'Error al subir adjunto';
+                    window.toast.error(message);
+                    continue;
+                }
 
                 window.pendingAttachmentIds.push(data.id);
                 const pill = document.createElement('div');
@@ -238,9 +245,30 @@ window.initTicketPane = function (root, ctx) {
   <button type="button" class="remove" aria-label="Quitar adjunto">&times;</button>
 `;
 
-                pill.querySelector('.remove').addEventListener('click', () => {
-                    window.pendingAttachmentIds = window.pendingAttachmentIds.filter(id => id !== data.id);
-                    pill.remove();
+                pill.querySelector('.remove').addEventListener('click', async (event) => {
+                    const button = event.currentTarget;
+                    button.disabled = true;
+                    try {
+                        const response = await fetch(`/attachments/${data.id}/pending/delete/`, {
+                            method: 'POST',
+                            headers: { 'X-CSRFToken': getCookie('csrftoken') }
+                        });
+                        const result = await response.json().catch(() => ({}));
+                        if (!response.ok) {
+                            const message = result.detail
+                                || (result.error && result.error.message)
+                                || 'No se pudo retirar el adjunto.';
+                            window.toast.error(message);
+                            return;
+                        }
+                        window.pendingAttachmentIds = window.pendingAttachmentIds.filter(id => id !== data.id);
+                        pill.remove();
+                    } catch (err) {
+                        console.error('Attachment delete error', err);
+                        window.toast.error('No se pudo retirar el adjunto.');
+                    } finally {
+                        button.disabled = false;
+                    }
                 });
 
                 pendingBox && pendingBox.appendChild(pill);

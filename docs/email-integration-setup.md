@@ -189,6 +189,13 @@ Implementadas como tareas periódicas de Celery Beat:
   solo si el autor es agente y el comentario es público. Notas internas, mensajes del
   cliente y la descripción inicial nunca generan este correo. La deduplicación es por
   comentario y el worker revalida los interruptores antes de cada entrega.
+- **Adjuntos**: la respuesta del agente conserva los identificadores de los adjuntos
+  asociados al comentario y el worker los lee del almacenamiento privado al entregar.
+  SES los envía con la API SESv2; Graph usa `sendMail` hasta 3 MB y, para cargas
+  mayores, crea un borrador y una upload session. Este último camino requiere
+  `Mail.ReadWrite` además de `Mail.Send` (ambos permisos de aplicación con admin
+  consent). Los correos entrantes M365 guardan los adjuntos de archivo en el ticket y
+  omiten recursos inline de firma.
 - **Anti-bucles** (defensa en profundidad): detección de cabeceras de auto-respuesta
   entrantes (`Auto-Submitted`, `X-Auto-Response-Suppress`, `Precedence`, `List-Id`),
   blocklist de buzones propios, patrones noreply, dedup por (plantilla, ticket,
@@ -205,7 +212,9 @@ Implementadas como tareas periódicas de Celery Beat:
 | Azure AD App Registration | ✅ Completado |
 | Exchange Online Access Policy | ✅ Completado |
 | Lectura buzones M365 (Graph API) | ✅ Completado — poll Celery cada 2 min |
+| Adjuntos entrantes M365 | ✅ Implementado — requiere almacenamiento S3 activado en Kubernetes |
 | Email saliente (código: SESv2 + Graph sendMail) | ✅ Implementado — tras kill switch `OUTBOUND_EMAIL_ENABLED` |
+| Adjuntos en respuestas de agente | ✅ Implementado — SESv2 / Graph; Graph grande requiere `Mail.ReadWrite` |
 | Permiso Graph `Mail.Send` + admin consent | ⏳ Pendiente (bloquea envío M365) |
 | SES production access + identidades DKIM + IAM `ses:SendEmail` | ⏳ Pendiente (bloquea envío SES) |
 | Confirmación de creación al cliente (acuse de recibo ES/EN) | ✅ Implementado — `OUTBOUND_TICKET_CREATED_ENABLED` |
