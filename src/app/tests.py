@@ -848,9 +848,10 @@ class SLAEnhancementTests(_BaseFixture):
 
 class ResponseTemplateTests(_BaseFixture):
     def test_seed_templates_exist_with_threading_token(self):
-        for lang in ("es", "en"):
-            tpl = ResponseTemplate.objects.get(key="ticket_created", brand__isnull=True, language=lang)
-            self.assertIn("[Ticket #{{ticket_id}}]", tpl.subject)
+        for key in ("ticket_created", "agent_reply"):
+            for lang in ("es", "en"):
+                tpl = ResponseTemplate.objects.get(key=key, brand__isnull=True, language=lang)
+                self.assertIn("[Ticket #{{ticket_id}}]", tpl.subject)
 
     def test_language_pick_normalizes_zendesk_values(self):
         from app.services.email_templates import ResponseTemplateService
@@ -948,7 +949,11 @@ class ResponseTemplateTests(_BaseFixture):
         self.assertFalse(ResponseTemplate.objects.get(id=tpl_id).active)
 
 
-@override_settings(OUTBOUND_EMAIL_ENABLED=True)
+@override_settings(
+    OUTBOUND_EMAIL_ENABLED=True,
+    OUTBOUND_TICKET_CREATED_ENABLED=True,
+    OUTBOUND_AGENT_REPLY_ENABLED=True,
+)
 class OutboundEmailTests(_BaseFixture):
     def _create_ticket_via_service(self, **extra):
         from app.services.tickets import TicketService
@@ -1022,6 +1027,95 @@ class OutboundEmailTests(_BaseFixture):
         ticket = Ticket.objects.get(email_message_id="normal-1")
         log = OutboundEmailLog.objects.get(ticket=ticket)
         self.assertEqual(log.status, OutboundEmailLog.STATUS_QUEUED)
+
+    def test_public_agent_reply_is_queued_with_the_comment_body(self):
+        from app.services.comments import CommentService
+
+        ticket = self.make_ticket(brand=self.brand_a)
+        comment, _ = CommentService.add_comment(
+            ticket,
+            self.agent,
+            "La incidencia ha quedado resuelta.",
+            html_body="<p>La incidencia ha quedado <strong>resuelta</strong>.</p>",
+            is_public=True,
+        )
+
+        log = OutboundEmailLog.objects.get(
+            ticket=ticket,
+            template_key="agent_reply",
+        )
+        self.assertEqual(log.status, OutboundEmailLog.STATUS_QUEUED)
+        self.assertIn(f"[Ticket #{ticket.id}]", log.subject)
+        self.assertIn("<strong>resuelta</strong>", log.payload["body_html"])
+        self.assertIn("La incidencia ha quedado resuelta.", log.payload["body_text"])
+        self.assertIn(self.agent.name, log.payload["body_html"])
+        self.assertIn(str(comment.id), log.dedup_key)
+
+    def test_private_notes_and_customer_comments_never_email_the_requester(self):
+        from app.services.comments import CommentService
+
+        private_ticket = self.make_ticket(brand=self.brand_a)
+        CommentService.add_comment(
+            private_ticket,
+            self.agent,
+            "Nota interna",
+            is_public=False,
+        )
+        self.assertFalse(
+            OutboundEmailLog.objects.filter(ticket=private_ticket, template_key="agent_reply").exists()
+        )
+
+        customer_ticket = self.make_ticket(brand=self.brand_a)
+        CommentService.add_comment(
+            customer_ticket,
+            self.customer,
+            "Añado información",
+            is_public=True,
+        )
+        self.assertFalse(
+            OutboundEmailLog.objects.filter(ticket=customer_ticket, template_key="agent_reply").exists()
+        )
+
+    def test_initial_ticket_description_is_not_treated_as_an_agent_reply(self):
+        ticket = self._create_ticket_via_service(content="Descripción inicial")
+        self.assertFalse(
+            OutboundEmailLog.objects.filter(ticket=ticket, template_key="agent_reply").exists()
+        )
+
+    @override_settings(OUTBOUND_TICKET_CREATED_ENABLED=False)
+    def test_reply_can_be_enabled_while_confirmation_stays_disabled(self):
+        from app.services.comments import CommentService
+
+        ticket = self._create_ticket_via_service()
+        confirmation = OutboundEmailLog.objects.get(ticket=ticket, template_key="ticket_created")
+        self.assertEqual(confirmation.status, OutboundEmailLog.STATUS_SUPPRESSED)
+        self.assertEqual(confirmation.result, "ticket_created_disabled")
+
+        CommentService.add_comment(ticket, self.agent, "Respuesta humana", is_public=True)
+        reply = OutboundEmailLog.objects.get(ticket=ticket, template_key="agent_reply")
+        self.assertEqual(reply.status, OutboundEmailLog.STATUS_QUEUED)
+
+    @override_settings(OUTBOUND_TICKET_CREATED_ENABLED=False)
+    def test_worker_rechecks_trigger_before_sending_an_old_queued_email(self):
+        from app.tasks import send_outbound_email
+
+        ticket = self.make_ticket(brand=self.brand_a)
+        log = OutboundEmailLog.objects.create(
+            brand=self.brand_a,
+            ticket=ticket,
+            template_key="ticket_created",
+            provider="m365",
+            to_email=self.customer.email,
+            subject="No debe salir",
+            payload={"body_html": "<p>No</p>"},
+        )
+        with patch("app.services.email_outbound.OutboundEmailService.deliver") as mock_deliver:
+            result = send_outbound_email.apply(args=(log.id,)).result
+        self.assertEqual(result, "suppressed")
+        mock_deliver.assert_not_called()
+        log.refresh_from_db()
+        self.assertEqual(log.status, OutboundEmailLog.STATUS_SUPPRESSED)
+        self.assertEqual(log.result, "ticket_created_disabled")
 
     def test_deliver_routes_by_mailbox_type(self):
         from app.services.email_outbound import OutboundEmailService

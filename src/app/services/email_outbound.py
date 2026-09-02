@@ -22,7 +22,22 @@ NO_REPLY_RE = re.compile(r"(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bo
 
 class OutboundEmailService:
     TEMPLATE_TICKET_CREATED = "ticket_created"
+    TEMPLATE_AGENT_REPLY = "agent_reply"
     TEMPLATE_SATISFACTION_SURVEY = "satisfaction_survey"
+    TEMPLATE_SWITCHES = {
+        TEMPLATE_TICKET_CREATED: (
+            "OUTBOUND_TICKET_CREATED_ENABLED",
+            "ticket_created_disabled",
+        ),
+        TEMPLATE_AGENT_REPLY: (
+            "OUTBOUND_AGENT_REPLY_ENABLED",
+            "agent_reply_disabled",
+        ),
+        TEMPLATE_SATISFACTION_SURVEY: (
+            "SATISFACTION_SURVEY_ENABLED",
+            "satisfaction_survey_disabled",
+        ),
+    }
 
     @staticmethod
     def _own_mailboxes():
@@ -55,14 +70,32 @@ class OutboundEmailService:
         )
 
     @staticmethod
-    def blocking_reason(ticket):
+    def blocking_reason(ticket, template_key=None):
         """Motivo por el que un envío a este ticket no saldría, o None.
 
         Permite decidir ANTES de crear efectos secundarios (p.ej. la oferta de
         encuesta) si merece la pena intentarlo.
         """
         brand, to_email = OutboundEmailService._recipient(ticket)
-        return OutboundEmailService._delivery_block(brand, to_email)
+        return (
+            OutboundEmailService._delivery_block(brand, to_email)
+            or OutboundEmailService._template_block(template_key)
+        )
+
+    @staticmethod
+    def blocking_reason_for_log(log):
+        """Revalida los kill switches justo antes de entregar una fila encolada."""
+        return (
+            OutboundEmailService._delivery_block(log.brand, log.to_email)
+            or OutboundEmailService._template_block(log.template_key)
+        )
+
+    @staticmethod
+    def _template_block(template_key):
+        switch = OutboundEmailService.TEMPLATE_SWITCHES.get(template_key)
+        if switch and not getattr(settings, switch[0], False):
+            return switch[1]
+        return None
 
     @staticmethod
     def _delivery_block(brand, to_email):
@@ -94,6 +127,20 @@ class OutboundEmailService:
         )
 
     @staticmethod
+    def queue_agent_reply(ticket, comment):
+        """Encola una respuesta pública escrita por un agente.
+
+        La deduplicación usa el comentario: reintentar una petición o una entrega
+        no puede generar dos correos, pero dos respuestas distintas sí.
+        """
+        return OutboundEmailService._queue(
+            ticket,
+            OutboundEmailService.TEMPLATE_AGENT_REPLY,
+            dedup_suffix=str(comment.id),
+            context_builder=lambda tkt: ResponseTemplateService.context_for_agent_reply(tkt, comment),
+        )
+
+    @staticmethod
     def queue_satisfaction_survey(ticket, rating):
         """Encola la encuesta de satisfacción al solicitante.
 
@@ -112,7 +159,10 @@ class OutboundEmailService:
     def _queue(ticket, template_key, dedup_suffix, context_builder):
         brand, to_email = OutboundEmailService._recipient(ticket)
 
-        blocked = OutboundEmailService._delivery_block(brand, to_email)
+        blocked = (
+            OutboundEmailService._delivery_block(brand, to_email)
+            or OutboundEmailService._template_block(template_key)
+        )
         if blocked:
             return OutboundEmailService._suppress(ticket, brand, to_email, template_key, blocked)
 

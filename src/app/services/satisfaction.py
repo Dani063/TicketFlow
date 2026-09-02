@@ -93,7 +93,10 @@ class SatisfactionService:
             record_metric("satisfaction.offer_skipped", labels={"ticket_id": ticket.id, "reason": "no_public_url"})
             return None
 
-        blocked = OutboundEmailService.blocking_reason(ticket)
+        blocked = OutboundEmailService.blocking_reason(
+            ticket,
+            OutboundEmailService.TEMPLATE_SATISFACTION_SURVEY,
+        )
         if blocked:
             record_metric("satisfaction.offer_skipped", labels={"ticket_id": ticket.id, "reason": blocked})
             return None
