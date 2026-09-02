@@ -1556,6 +1556,32 @@ class ReportingTests(_BaseFixture):
         self.assertEqual(states[self.t_a1.id], "open")
         self.assertEqual(states[self.t_a2.id], "closed")
 
+    def test_historical_snapshot_projects_latest_status_without_loading_all_audits(self):
+        from app.services.reporting_metrics import _states_at
+
+        now = timezone.now()
+        Ticket.objects.filter(id=self.t_a1.id).update(created_at=now - timedelta(days=20))
+        self.t_a1.refresh_from_db()
+        TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="description",
+            old_value="", new_value="x" * 10000, created_at=now - timedelta(days=12),
+        )
+        TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="status",
+            old_value="open", new_value="pending", created_at=now - timedelta(days=10),
+        )
+        TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="status",
+            old_value="pending", new_value="closed", created_at=now - timedelta(days=2),
+        )
+
+        with patch("app.services.reporting_metrics._ticket_events") as event_loader:
+            with self.assertNumQueries(1):
+                states = _states_at([self.t_a1], now - timedelta(days=5))
+
+        event_loader.assert_not_called()
+        self.assertEqual(states[self.t_a1.id], "pending")
+
     def test_reporting_event_loader_excludes_irrelevant_large_audits(self):
         from app.services.reporting_metrics import STATE_EVENT_NAMES, _ticket_events
 

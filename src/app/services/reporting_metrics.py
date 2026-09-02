@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from statistics import median
 
-from django.db.models import Q
+from django.db.models import OuterRef, Q, Subquery
 from django.utils import timezone
 
 from app.models import Comment, ProductLine, SatisfactionRating, Ticket, TicketEvent
@@ -920,15 +920,74 @@ def _states_at(tickets, sample_at):
         return {}
     if sample_at >= timezone.now():
         return {ticket.id: _status(ticket.status) for ticket in tickets}
-    events = _ticket_events(
-        [ticket.id for ticket in tickets],
-        field_names=STATE_EVENT_NAMES,
-        include_actor=False,
+
+    ticket_ids = [ticket.id for ticket in tickets]
+    status_events = TicketEvent.objects.filter(
+        ticket_id=OuterRef("pk"),
+        field_name__in=STATUS_EVENT_NAMES,
+        created_at__lte=sample_at,
     )
-    return {
-        ticket.id: _state_at(ticket, events.get(ticket.id, []), sample_at)
-        for ticket in tickets
-    }
+    latest_status = (
+        status_events.exclude(Q(new_value__isnull=True) | Q(new_value=""))
+        .order_by("-created_at", "-id")
+    )
+    first_status = status_events.order_by("created_at", "id")
+    latest_status_event = status_events.order_by("-created_at", "-id")
+    created_event = (
+        TicketEvent.objects.filter(
+            ticket_id=OuterRef("pk"),
+            field_name="created",
+            created_at__lte=sample_at,
+        )
+        .exclude(Q(new_value__isnull=True) | Q(new_value=""))
+        .order_by("created_at", "id")
+    )
+
+    # Un corte ejecutivo puede abarcar todo el histórico de tickets. Cargar
+    # cada auditoría de estado en Python provocaba picos de memoria y timeouts
+    # en DEV. Estas subconsultas, respaldadas por app_evt_tkt_field_time,
+    # proyectan como máximo un valor relevante por ticket en una sola query.
+    rows = (
+        Ticket.objects.filter(id__in=ticket_ids)
+        .annotate(
+            snapshot_status=Subquery(latest_status.values("new_value")[:1]),
+            snapshot_first_status=Subquery(first_status.values("old_value")[:1]),
+            snapshot_status_event_id=Subquery(latest_status_event.values("id")[:1]),
+            snapshot_created_status=Subquery(created_event.values("new_value")[:1]),
+        )
+        .values(
+            "id", "status", "created_at", "resolved_at", "closed_at",
+            "snapshot_status", "snapshot_first_status",
+            "snapshot_status_event_id", "snapshot_created_status",
+        )
+    )
+
+    states = {}
+    for row in rows:
+        if not row["created_at"] or row["created_at"] > sample_at:
+            states[row["id"]] = None
+            continue
+
+        has_status_events = row["snapshot_status_event_id"] is not None
+        state = (
+            _status(row["snapshot_status"])
+            or _status(row["snapshot_created_status"])
+            or _status(row["snapshot_first_status"])
+            or "open"
+        )
+
+        # Mantener el fallback de _state_at para imports antiguos sin audits.
+        if not has_status_events:
+            solved_at = row["resolved_at"] or row["closed_at"]
+            if solved_at and sample_at >= solved_at:
+                persisted = _status(row["status"])
+                state = persisted if persisted in SOLVED_STATUSES else "resolved"
+            elif solved_at and sample_at < solved_at:
+                state = "open"
+            elif sample_at.date() >= timezone.localdate():
+                state = _status(row["status"])
+        states[row["id"]] = state
+    return states
 
 
 def _states_at_samples(ticket, events, samples):
