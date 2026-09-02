@@ -1190,7 +1190,10 @@ def filter_customers(request):
         page = 1
     page_size = _parse_page_size(request.GET.get("page_size"))
 
-    base_queryset = User.objects.select_related('role', 'group').order_by('name')
+    # 'id' como desempate: sin una clave única el ORDER BY no es determinista y
+    # LIMIT/OFFSET puede repetir u omitir filas al cambiar de página (hay nombres
+    # duplicados de sobra en la tabla de usuarios).
+    base_queryset = User.objects.select_related('role', 'group').order_by('name', 'id')
     if not _is_admin(request.user):
          base_queryset = base_queryset.exclude(role__role_name__in=['admin', 'administrator'])
 
@@ -1213,7 +1216,7 @@ def filter_customers(request):
 
     db_sort = _CUSTOMER_SORT_FIELDS.get(sort_by)
     if db_sort:
-        users = users.order_by(f'-{db_sort}' if sort_dir == 'desc' else db_sort)
+        users = users.order_by(f'-{db_sort}' if sort_dir == 'desc' else db_sort, 'id')
 
     total = users.count()
     total_pages = max(1, (total + page_size - 1) // page_size)
@@ -3198,9 +3201,25 @@ def admin_response_templates_api(request):
         brand_id = _as_int_or_none(data.get('brand_id'))
         duplicate = ResponseTemplate.objects.filter(
             key=key, brand_id=brand_id, language=language
-        ).exclude(id=tpl.id or 0).exists()
+        ).exclude(id=tpl.id or 0).select_related('brand').first()
+        reused = False
         if duplicate:
-            return json_error('duplicate_template', 'Ya existe una plantilla con esa key/marca/idioma', status=400)
+            if request.method == 'POST' and not duplicate.active:
+                # Desactivar no borra, asi que la fila sigue ocupando la clave y
+                # crear "la misma" plantilla era un callejon sin salida: se revive
+                # esa fila con los datos nuevos. En PUT no, ahi fusionar dos filas
+                # existentes seria destructivo y el aviso es lo correcto.
+                tpl = duplicate
+                reused = True
+            else:
+                # La key se normaliza con slugify, asi que hay que decir cual quedo.
+                marca = duplicate.brand.name if duplicate.brand_id and duplicate.brand else 'Global'
+                return json_error(
+                    'duplicate_template',
+                    f'Ya existe una plantilla con la clave "{key}" para '
+                    f'{marca} en {language.upper()}.',
+                    status=400,
+                )
 
         tpl.key = key
         tpl.brand_id = brand_id
@@ -3210,7 +3229,7 @@ def admin_response_templates_api(request):
         tpl.body_text = (data.get('body_text') or '').strip()
         tpl.active = bool(data.get('active', True))
         tpl.save()
-        return JsonResponse({'ok': True, 'template': _serialize_response_template(tpl)})
+        return JsonResponse({'ok': True, 'template': _serialize_response_template(tpl), 'reused': reused})
 
     if request.method == 'DELETE':
         tpl_id = _as_int_or_none(request.GET.get('id'))
@@ -3276,9 +3295,24 @@ def admin_satisfaction_reasons_api(request):
             return json_error('code_required', 'code requerido', status=400)
         duplicate = SatisfactionReason.objects.filter(
             code=code, language=language
-        ).exclude(id=reason.id or 0).exists()
+        ).exclude(id=reason.id or 0).first()
+        reused = False
         if duplicate:
-            return json_error('duplicate_reason', 'Ya existe un motivo con ese code/idioma', status=400)
+            if request.method == 'POST' and not duplicate.active:
+                # Mismo caso que en las plantillas: el code de un motivo
+                # desactivado sigue ocupado, asi que crear "el mismo" motivo
+                # revive esa fila en vez de dejar al admin sin salida.
+                reason = duplicate
+                reused = True
+            else:
+                # El code puede venir derivado de la etiqueta, asi que hay que
+                # decir cual es o el aviso no se entiende.
+                return json_error(
+                    'duplicate_reason',
+                    f'Ya existe el motivo "{duplicate.label}" con el codigo '
+                    f'"{code}" en {language.upper()}.',
+                    status=400,
+                )
 
         reason.code = code
         reason.label = label[:255]
@@ -3286,7 +3320,7 @@ def admin_satisfaction_reasons_api(request):
         reason.position = max(_as_int_or_none(data.get('position')) or 0, 0)
         reason.active = bool(data.get('active', True))
         reason.save()
-        return JsonResponse({'ok': True, 'reason': _serialize_satisfaction_reason(reason)})
+        return JsonResponse({'ok': True, 'reason': _serialize_satisfaction_reason(reason), 'reused': reused})
 
     return json_error('method_not_allowed', 'Metodo no permitido', status=405)
 

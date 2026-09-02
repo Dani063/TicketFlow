@@ -136,7 +136,12 @@
             });
         }
 
-        document.querySelectorAll(".subject-text").forEach(_attachHover);
+        // Expuesto para que _profile_tickets.html reenganche el hover en las filas
+        // que llegan por AJAX al filtrar o paginar (son nodos nuevos).
+        window.__tfProfileHoverAttach = function (root) {
+            (root || document).querySelectorAll(".subject-text").forEach(_attachHover);
+        };
+        window.__tfProfileHoverAttach();
     })();
 
 function openTicket(ticketId, subject) {

@@ -307,7 +307,15 @@
             </div>
             <div class="tf-field">
                 <label>Contraseña (opcional)</label>
-                <input type="password" class="tf-input" id="userModalPassword" placeholder="Vacío si usa SSO" autocomplete="new-password">
+                {% comment %}
+                Nace como type="text" y pasa a "password" al enfocarlo (admin_panel.js).
+                Con un campo de contraseña en el DOM, Chrome clasifica la página como
+                formulario de acceso, autorrellena credenciales guardadas en un modal que
+                ni siquiera está abierto y ofrece «Guardar contraseña» al hacer cualquier
+                otra cosa en el panel (crear un motivo, por ejemplo).
+                {% endcomment %}
+                <input type="text" class="tf-input" id="userModalPassword" placeholder="Vacío si usa SSO"
+                       autocomplete="new-password" spellcheck="false" data-lpignore="true" data-1p-ignore>
             </div>
         </div>
         <div class="dialog__footer">
@@ -546,5 +554,5 @@
 <script>
 window.__adminPanelData = { currentUserId: {{ request.user.id }} };
 </script>
-<script src="{% static 'tickets/admin_panel.js' %}?v=s6.2"></script>
+<script src="{% static 'tickets/admin_panel.js' %}?v=s6.9"></script>
 {% endblock %}

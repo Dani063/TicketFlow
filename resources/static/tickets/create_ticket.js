@@ -67,10 +67,17 @@ window.tfApplyPaneSelect2 = function (paneEl, opts) {
                     },
                 });
             } else {
+                // La cruz de «limpiar» solo se ofrece donde el vacío es un valor
+                // válido: el select tiene opción vacía y no es obligatorio
+                // (#producto lo es). Sin opción vacía, Select2 dejaría el campo
+                // en la primera opción real al pulsar la cruz.
+                const clearable = !this.multiple
+                    && !this.required
+                    && !!this.querySelector('option[value=""]');
                 window.jQuery(this).select2({
                     width: '100%',
                     placeholder: window.jQuery(this).attr('placeholder') || 'Selecciona una opción',
-                    allowClear: false,
+                    allowClear: clearable,
                 });
             }
             inited++;
@@ -511,6 +518,70 @@ window.initTicketPane = function (root, ctx) {
         }
     };
 
+    // ---- Guardado de los campos del ticket ----
+    // "Publicar como <estado>" solo publicaba el comentario en tickets ya
+    // existentes: el <form id="ticket-form"> nunca se enviaba, así que cualquier
+    // cambio en Asignado, Solicitante, Empresa, Tipo... se perdía en silencio (el
+    // pane seguía mostrando el valor elegido porque nunca se recarga).
+    //
+    // Se envía el formulario solo si algo cambió respecto a como se cargó: así un
+    // ticket sin producto —los que entran por email— sigue admitiendo respuestas
+    // sin que la validación de "producto obligatorio" bloquee la publicación.
+    let _formBaseline = null;
+
+    function serializeTicketForm() {
+        const form = rootEl.querySelector('#ticket-form');
+        if (!form) return null;
+        const params = new URLSearchParams(new FormData(form));
+        params.delete('message');               // el cuerpo del comentario no es metadato
+        params.delete('csrfmiddlewaretoken');
+        return JSON.stringify([...params.entries()].sort(
+            (a, b) => (a[0] === b[0] ? (a[1] > b[1] ? 1 : -1) : (a[0] > b[0] ? 1 : -1))
+        ));
+    }
+
+    function hasTicketFieldChanges() {
+        if (_formBaseline === null) return false;   // la carga inicial falló: no tocamos nada
+        return serializeTicketForm() !== _formBaseline;
+    }
+
+    async function saveTicketFields(status) {
+        const form = rootEl.querySelector('#ticket-form');
+        if (!form || !hasTicketFieldChanges()) return true;
+
+        const fd = new FormData(form);
+        // El comentario lo publica add_comment (con HTML, adjuntos y visibilidad).
+        // Si 'message' viajara aquí, update_ticket crearía un segundo comentario.
+        fd.delete('message');
+        // Sin 'status' explícito el backend cae a "open" y reabriría el ticket.
+        fd.set('status', status || rootEl.querySelector('#selected-status')?.textContent?.trim() || 'open');
+
+        try {
+            const res = await fetch(form.action, {
+                method: 'POST',
+                body: fd,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            if (!res.ok) {
+                let msg = 'No se pudieron guardar los cambios del ticket.';
+                // json_error() responde {ok, error:{code,message}, detail}: 'error' es
+                // un objeto, no una cadena.
+                try {
+                    const data = await res.json();
+                    msg = data.detail || data.error?.message || (typeof data.error === 'string' ? data.error : '') || msg;
+                } catch (_) { /* respuesta no JSON */ }
+                window.toast.error(msg);
+                return false;
+            }
+            _formBaseline = serializeTicketForm();
+            return true;
+        } catch (err) {
+            console.error('Error guardando los campos del ticket:', err);
+            window.toast.error('Error de red al guardar los cambios del ticket.');
+            return false;
+        }
+    }
+
     async function publishComment(ev) {
         if (ev) { ev.preventDefault(); ev.stopPropagation(); }
 
@@ -532,10 +603,21 @@ window.initTicketPane = function (root, ctx) {
 
         const textarea = rootEl.querySelector('#new-message');
         const content = (textarea?.value || '').trim();
-        if (!content) { warnMessageRequired('publicar'); return; }
+        const newStatus = (rootEl.querySelector('#selected-status')?.textContent || 'open').trim().toLowerCase();
+
+        if (!content) {
+            // Sin mensaje pero con campos tocados: guardar es lo que el usuario
+            // espera del único botón que hay; avisar solo si tampoco hay cambios.
+            if (!hasTicketFieldChanges()) { warnMessageRequired('publicar'); return; }
+            if (await saveTicketFields(newStatus)) {
+                window.toast.success('Cambios del ticket guardados.');
+            }
+            return;
+        }
+
+        if (!await saveTicketFields(newStatus)) return;
 
         const isPublic = (typeof isPublicInput !== 'undefined') ? (isPublicInput.value === 'true') : true;
-        const newStatus = (rootEl.querySelector('#selected-status')?.textContent || 'open').trim().toLowerCase();
 
         const payload = { content, is_public: isPublic, new_status: newStatus };
         const _html2 = window.QuillComposer?.getHtml?.();
@@ -900,6 +982,9 @@ window.initTicketPane = function (root, ctx) {
                     });
                     $ccs.trigger('change');
                 }
+                // Estado "tal como se cargó": referencia para saber al publicar
+                // qué campos tocó el usuario.
+                _formBaseline = serializeTicketForm();
             })
             .catch(error => console.error('Error al cargar el ticket:', error));
     }

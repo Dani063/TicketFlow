@@ -33,6 +33,7 @@ class TicketService:
         ("status", "status"),
         ("priority", "priority"),
         ("subject", "subject"),
+        ("requester_id", "requester_id"),
         ("assignee_id", "assignee_id"),
         ("group_id", "assigned_group_id"),
         ("product_line_id", "product_line_id"),
@@ -108,7 +109,10 @@ class TicketService:
             )
         grupo_id = TicketService._optional_int(post_data.get("grupo"))
         asignado_id = TicketService._optional_int(post_data.get("asignado"))
-        solicitante_id = TicketService._optional_int(post_data.get("solicitante")) or actor.id
+        # Sin `or actor.id`: en una actualización eso convertiría un select vacío en
+        # «el solicitante pasa a ser el agente». create_ticket() aplica su propio
+        # fallback a actor.id al crear.
+        solicitante_id = TicketService._optional_int(post_data.get("solicitante"))
 
         content = ((post_data.get("content") or post_data.get("message")) or "").strip()
         due_at_raw = (post_data.get("due_at") or "").strip()
@@ -304,6 +308,19 @@ class TicketService:
         ):
             setattr(ticket, field, payload.get(field))
         ticket.problem_id = TicketService._validate_problem_link(payload, ticket_id=ticket.id)
+        # El solicitante se editaba en el formulario pero no se aplicaba nunca: el
+        # cambio se perdía en silencio y la lista, el dashboard y el hover de
+        # «Actualizaciones recientes» seguían mostrando el anterior. Vacío conserva
+        # el que ya tiene; reasignarlo es cosa de agentes, igual que al crear.
+        requester_id = payload.get("requester_id")
+        if requester_id and requester_id != ticket.requester_id:
+            if not is_agent(actor):
+                raise APIValidationError(
+                    "invalid_requester", "No puedes cambiar el solicitante del ticket.", status=403
+                )
+            if not User.objects.filter(id=requester_id, is_active=True).exists():
+                raise APIValidationError("requester_not_found", "Solicitante no encontrado.", status=400)
+            ticket.requester_id = requester_id
         ticket.assignee_id = payload.get("assignee_id")
         ticket.assigned_group_id = payload.get("assigned_group_id")
         if ticket.status == "closed" and not ticket.closed_at:

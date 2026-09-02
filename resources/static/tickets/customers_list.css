@@ -46,3 +46,19 @@
         width: 100%;
     }
 }
+
+/* La barra de paginación de esta vista se salía del viewport: la regla genérica
+   de home.css (`.with-pagination .tabla { max-height: calc(100vh - 200px) }`)
+   asume una cabecera más baja que la de aquí (título + «Vista activa» +
+   toolbar), así que la tabla crecía hasta empujar la paginación fuera de la
+   pantalla y no había forma de cambiar de página. Mismo patrón de ajuste que
+   `.tickets-list-content` en tickets_list.css. */
+.customers-list-content .with-pagination .tabla {
+    max-height: calc(100vh - 285px);
+}
+
+@media (max-width: 768px) {
+    .customers-list-content .with-pagination .tabla {
+        max-height: none;
+    }
+}
