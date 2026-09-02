@@ -1,7 +1,9 @@
 import json
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -867,9 +869,10 @@ class SLAEnhancementTests(_BaseFixture):
 
 class ResponseTemplateTests(_BaseFixture):
     def test_seed_templates_exist_with_threading_token(self):
-        for lang in ("es", "en"):
-            tpl = ResponseTemplate.objects.get(key="ticket_created", brand__isnull=True, language=lang)
-            self.assertIn("[Ticket #{{ticket_id}}]", tpl.subject)
+        for key in ("ticket_created", "agent_reply"):
+            for lang in ("es", "en"):
+                tpl = ResponseTemplate.objects.get(key=key, brand__isnull=True, language=lang)
+                self.assertIn("[Ticket #{{ticket_id}}]", tpl.subject)
 
     def test_language_pick_normalizes_zendesk_values(self):
         from app.services.email_templates import ResponseTemplateService
@@ -967,7 +970,11 @@ class ResponseTemplateTests(_BaseFixture):
         self.assertFalse(ResponseTemplate.objects.get(id=tpl_id).active)
 
 
-@override_settings(OUTBOUND_EMAIL_ENABLED=True)
+@override_settings(
+    OUTBOUND_EMAIL_ENABLED=True,
+    OUTBOUND_TICKET_CREATED_ENABLED=True,
+    OUTBOUND_AGENT_REPLY_ENABLED=True,
+)
 class OutboundEmailTests(_BaseFixture):
     def _create_ticket_via_service(self, **extra):
         from app.services.tickets import TicketService
@@ -1041,6 +1048,95 @@ class OutboundEmailTests(_BaseFixture):
         ticket = Ticket.objects.get(email_message_id="normal-1")
         log = OutboundEmailLog.objects.get(ticket=ticket)
         self.assertEqual(log.status, OutboundEmailLog.STATUS_QUEUED)
+
+    def test_public_agent_reply_is_queued_with_the_comment_body(self):
+        from app.services.comments import CommentService
+
+        ticket = self.make_ticket(brand=self.brand_a)
+        comment, _ = CommentService.add_comment(
+            ticket,
+            self.agent,
+            "La incidencia ha quedado resuelta.",
+            html_body="<p>La incidencia ha quedado <strong>resuelta</strong>.</p>",
+            is_public=True,
+        )
+
+        log = OutboundEmailLog.objects.get(
+            ticket=ticket,
+            template_key="agent_reply",
+        )
+        self.assertEqual(log.status, OutboundEmailLog.STATUS_QUEUED)
+        self.assertIn(f"[Ticket #{ticket.id}]", log.subject)
+        self.assertIn("<strong>resuelta</strong>", log.payload["body_html"])
+        self.assertIn("La incidencia ha quedado resuelta.", log.payload["body_text"])
+        self.assertIn(self.agent.name, log.payload["body_html"])
+        self.assertIn(str(comment.id), log.dedup_key)
+
+    def test_private_notes_and_customer_comments_never_email_the_requester(self):
+        from app.services.comments import CommentService
+
+        private_ticket = self.make_ticket(brand=self.brand_a)
+        CommentService.add_comment(
+            private_ticket,
+            self.agent,
+            "Nota interna",
+            is_public=False,
+        )
+        self.assertFalse(
+            OutboundEmailLog.objects.filter(ticket=private_ticket, template_key="agent_reply").exists()
+        )
+
+        customer_ticket = self.make_ticket(brand=self.brand_a)
+        CommentService.add_comment(
+            customer_ticket,
+            self.customer,
+            "Añado información",
+            is_public=True,
+        )
+        self.assertFalse(
+            OutboundEmailLog.objects.filter(ticket=customer_ticket, template_key="agent_reply").exists()
+        )
+
+    def test_initial_ticket_description_is_not_treated_as_an_agent_reply(self):
+        ticket = self._create_ticket_via_service(content="Descripción inicial")
+        self.assertFalse(
+            OutboundEmailLog.objects.filter(ticket=ticket, template_key="agent_reply").exists()
+        )
+
+    @override_settings(OUTBOUND_TICKET_CREATED_ENABLED=False)
+    def test_reply_can_be_enabled_while_confirmation_stays_disabled(self):
+        from app.services.comments import CommentService
+
+        ticket = self._create_ticket_via_service()
+        confirmation = OutboundEmailLog.objects.get(ticket=ticket, template_key="ticket_created")
+        self.assertEqual(confirmation.status, OutboundEmailLog.STATUS_SUPPRESSED)
+        self.assertEqual(confirmation.result, "ticket_created_disabled")
+
+        CommentService.add_comment(ticket, self.agent, "Respuesta humana", is_public=True)
+        reply = OutboundEmailLog.objects.get(ticket=ticket, template_key="agent_reply")
+        self.assertEqual(reply.status, OutboundEmailLog.STATUS_QUEUED)
+
+    @override_settings(OUTBOUND_TICKET_CREATED_ENABLED=False)
+    def test_worker_rechecks_trigger_before_sending_an_old_queued_email(self):
+        from app.tasks import send_outbound_email
+
+        ticket = self.make_ticket(brand=self.brand_a)
+        log = OutboundEmailLog.objects.create(
+            brand=self.brand_a,
+            ticket=ticket,
+            template_key="ticket_created",
+            provider="m365",
+            to_email=self.customer.email,
+            subject="No debe salir",
+            payload={"body_html": "<p>No</p>"},
+        )
+        with patch("app.services.email_outbound.OutboundEmailService.deliver") as mock_deliver:
+            result = send_outbound_email.apply(args=(log.id,)).result
+        self.assertEqual(result, "suppressed")
+        mock_deliver.assert_not_called()
+        log.refresh_from_db()
+        self.assertEqual(log.status, OutboundEmailLog.STATUS_SUPPRESSED)
+        self.assertEqual(log.result, "ticket_created_disabled")
 
     def test_deliver_routes_by_mailbox_type(self):
         from app.services.email_outbound import OutboundEmailService
@@ -1447,6 +1543,78 @@ class ReportingTests(_BaseFixture):
         self.assertEqual(len(payload["matrix"]), 7)
         self.assertTrue(all("comparison" in row for row in payload["matrix"]))
         self.assertTrue(all("previous" in kpi for kpi in payload["kpis"]))
+
+    def test_current_snapshot_uses_persisted_status_without_loading_audits(self):
+        from app.services.reporting_metrics import _states_at
+
+        with patch("app.services.reporting_metrics._ticket_events") as event_loader:
+            states = _states_at(
+                [self.t_a1, self.t_a2], timezone.now() + timedelta(seconds=1)
+            )
+
+        event_loader.assert_not_called()
+        self.assertEqual(states[self.t_a1.id], "open")
+        self.assertEqual(states[self.t_a2.id], "closed")
+
+    def test_reporting_event_loader_excludes_irrelevant_large_audits(self):
+        from app.services.reporting_metrics import STATE_EVENT_NAMES, _ticket_events
+
+        TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="description",
+            old_value="", new_value="x" * 10000, created_at=timezone.now(),
+        )
+        status_event = TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="status",
+            old_value="open", new_value="pending", created_at=timezone.now(),
+        )
+
+        grouped = _ticket_events(
+            [self.t_a1.id], field_names=STATE_EVENT_NAMES, include_actor=False
+        )
+
+        self.assertEqual([event.id for event in grouped[self.t_a1.id]], [status_event.id])
+
+    def test_multi_snapshot_backlog_replay_matches_single_snapshot_logic(self):
+        from app.services.reporting_metrics import (
+            STATE_EVENT_NAMES, _state_at, _states_at_samples, _ticket_events,
+        )
+
+        now = timezone.now()
+        Ticket.objects.filter(id=self.t_a1.id).update(created_at=now - timedelta(days=20))
+        self.t_a1.refresh_from_db()
+        TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="status",
+            old_value="open", new_value="pending", created_at=now - timedelta(days=10),
+        )
+        TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="status",
+            old_value="pending", new_value="closed", created_at=now - timedelta(days=2),
+        )
+        events = _ticket_events(
+            [self.t_a1.id], field_names=STATE_EVENT_NAMES, include_actor=False
+        )[self.t_a1.id]
+        samples = [now - timedelta(days=15), now - timedelta(days=5), now + timedelta(days=1)]
+
+        expected = [_state_at(self.t_a1, events, sample) for sample in samples]
+        actual = list(_states_at_samples(self.t_a1, events, samples))
+
+        self.assertEqual(actual, expected)
+
+    def test_reporting_cache_outage_is_non_blocking(self):
+        from app import views
+
+        with patch.object(views.cache, "get", side_effect=RuntimeError("cache down")):
+            self.assertIsNone(views._reporting_cache_get("reporting:test"))
+        with patch.object(views.cache, "set", side_effect=RuntimeError("cache down")):
+            self.assertIsNone(views._reporting_cache_set("reporting:test", {"ok": True}))
+
+    def test_pdf_export_loads_reporting_zones_sequentially(self):
+        asset = Path(settings.BASE_DIR).parent / "resources" / "static" / "tickets" / "reporting.js"
+        script = asset.read_text(encoding="utf-8")
+
+        self.assertIn("for (let index = 0; index < ZONES.length; index += 1)", script)
+        self.assertNotIn("Promise.all(ZONES.map(zone => loadSection(zone.key)))", script)
+        self.assertIn("El servicio de métricas no está disponible", script)
 
     def test_weekly_reporting_exposes_all_sections_and_charts(self):
         self.client.force_login(self.agent)

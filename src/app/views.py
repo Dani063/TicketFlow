@@ -1324,6 +1324,22 @@ def _reporting_params(request):
     return brand_id, date_from, date_to, start_dt, end_dt
 
 
+def _reporting_cache_get(key):
+    """La caché acelera el informe, pero nunca debe decidir su disponibilidad."""
+    try:
+        return cache.get(key)
+    except Exception:
+        logger.exception('reporting_cache_get_failed')
+        return None
+
+
+def _reporting_cache_set(key, payload, timeout=60):
+    try:
+        cache.set(key, payload, timeout)
+    except Exception:
+        logger.exception('reporting_cache_set_failed')
+
+
 @api_login_required
 def reporting_data(request):
     """KPIs, series y distribuciones por entidad para /reporting/."""
@@ -1345,7 +1361,7 @@ def reporting_data(request):
             f"reporting:product:v3:{section}:{date_from}:{date_to}:"
             f"{filters.cache_fragment()}"
         )
-        cached = cache.get(cache_key)
+        cached = _reporting_cache_get(cache_key)
         if cached is not None:
             return JsonResponse(cached)
         try:
@@ -1359,12 +1375,12 @@ def reporting_data(request):
                 'No se han podido calcular los datos de esta zona.',
                 status=500,
             )
-        cache.set(cache_key, payload, 60)
+        _reporting_cache_set(cache_key, payload, 60)
         return JsonResponse(payload)
 
     brand_id, date_from, date_to, start_dt, end_dt = _reporting_params(request)
     cache_key = f"reporting:v2:{brand_id or 0}:{date_from}:{date_to}"
-    cached = cache.get(cache_key)
+    cached = _reporting_cache_get(cache_key)
     if cached is not None:
         return JsonResponse(cached)
 
@@ -1620,7 +1636,7 @@ def reporting_data(request):
         },
         'by_brand': brand_rows,
     }
-    cache.set(cache_key, payload, 60)
+    _reporting_cache_set(cache_key, payload, 60)
     return JsonResponse(payload)
 
 
@@ -3127,6 +3143,10 @@ _TEMPLATE_PREVIEW_CONTEXT = {
     'from_name': 'Soporte Mi Marca',
     'ticket_url': 'https://ticketflow.example.com/tickets/create/?id=12345',
     'created_at': '10/06/2026 15:30',
+    'agent_name': 'Agente Ejemplo',
+    'reply_html': '<p>Hemos revisado tu solicitud y ya puedes volver a acceder.</p>',
+    'reply_text': 'Hemos revisado tu solicitud y ya puedes volver a acceder.',
+    'responded_at': '10/06/2026 16:10',
 }
 
 
@@ -3170,10 +3190,10 @@ def admin_response_templates_api(request):
         body_html = sanitize_email_html(data.get('body_html') or '')
         if not subject or not body_html:
             return json_error('subject_body_required', 'subject y body_html son obligatorios', status=400)
-        if key == 'ticket_created' and '{{ticket_id}}' not in subject.replace(' ', ''):
+        if key in {'ticket_created', 'agent_reply', 'satisfaction_survey'} and '{{ticket_id}}' not in subject.replace(' ', ''):
             # El token [Ticket #N] del subject es el mecanismo de threading de
             # las respuestas; avisamos pero no bloqueamos.
-            logger.warning('response_template ticket_created sin {{ticket_id}} en subject')
+            logger.warning('response_template %s sin {{ticket_id}} en subject', key)
 
         brand_id = _as_int_or_none(data.get('brand_id'))
         duplicate = ResponseTemplate.objects.filter(

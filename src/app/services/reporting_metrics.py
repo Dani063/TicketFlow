@@ -17,6 +17,12 @@ SOLVED_STATUSES = ("resolved", "closed")
 STATUS_EVENT_NAMES = ("status", "estado")
 ASSIGNEE_EVENT_NAMES = ("assignee_id", "assignee", "asignado")
 GROUP_EVENT_NAMES = ("group_id", "group", "grupo")
+STATE_EVENT_NAMES = STATUS_EVENT_NAMES + ("created",)
+LIFECYCLE_EVENT_NAMES = (
+    "status", "estado", "created",
+    "assignee_id", "assignee", "asignado",
+    "group_id", "group", "grupo",
+)
 
 STATUS_ALIASES = {
     "new": "open",
@@ -100,6 +106,13 @@ def live_ticket_queryset(filters):
     return qs.select_related(
         "product_line", "assigned_group", "assignee", "assignee__role",
         "requester", "requester__organization", "created_by", "created_by__role",
+    ).defer(
+        # El reporting nunca representa estos cuerpos. Evitar que MySQL los
+        # materialice es especialmente importante para los tickets importados,
+        # cuyos textos y notas pueden ocupar varios MB por consulta agregada.
+        "description", "requester__notes", "assignee__notes", "created_by__notes",
+        "assigned_group__description", "assignee__role__description",
+        "created_by__role__description",
     )
 
 
@@ -180,14 +193,23 @@ def _month_key(value):
     return f"{day.year:04d}-{day.month:02d}" if day else None
 
 
-def _ticket_events(ticket_ids):
+def _ticket_events(ticket_ids, field_names=None, include_actor=True):
     if not ticket_ids:
         return defaultdict(list)
-    rows = (
-        TicketEvent.objects.filter(ticket_id__in=ticket_ids)
-        .select_related("actor", "actor__role")
-        .order_by("created_at", "id")
-    )
+    rows = TicketEvent.objects.filter(ticket_id__in=ticket_ids)
+    if field_names:
+        rows = rows.filter(field_name__in=field_names)
+    if include_actor:
+        rows = rows.select_related("actor", "actor__role").only(
+            "id", "ticket_id", "actor_id", "field_name", "old_value", "new_value",
+            "created_at", "actor__id", "actor__name", "actor__email",
+            "actor__role_id", "actor__role__role_name",
+        )
+    else:
+        rows = rows.only(
+            "id", "ticket_id", "field_name", "old_value", "new_value", "created_at",
+        )
+    rows = rows.order_by("created_at", "id")
     grouped = defaultdict(list)
     for event in rows:
         grouped[event.ticket_id].append(event)
@@ -201,6 +223,11 @@ def _agent_comments(ticket_ids):
     rows = (
         Comment.objects.filter(ticket_id__in=ticket_ids)
         .select_related("user", "user__role")
+        .only(
+            "id", "ticket_id", "user_id", "created_at", "is_public",
+            "user__id", "user__name", "user__email", "user__role_id",
+            "user__role__role_name",
+        )
         .order_by("created_at", "id")
     )
     for comment in rows:
@@ -217,7 +244,7 @@ def _lifecycle_facts(tickets, now=None):
     """
     now = now or timezone.now()
     ids = [ticket.id for ticket in tickets]
-    events = _ticket_events(ids)
+    events = _ticket_events(ids, field_names=LIFECYCLE_EVENT_NAMES)
     comments = _agent_comments(ids)
     facts = {}
 
@@ -783,11 +810,7 @@ def build_agent_updates(filters, date_from, date_to, start_dt, end_dt):
 
 def build_unsolved(filters, date_from, date_to, start_dt, end_dt):
     candidates = list(live_ticket_queryset(filters).filter(created_at__lte=end_dt))
-    events = _ticket_events([ticket.id for ticket in candidates])
-    states = {
-        ticket.id: _state_at(ticket, events.get(ticket.id, []), end_dt)
-        for ticket in candidates
-    }
+    states = _states_at(candidates, end_dt)
     tickets = [ticket for ticket in candidates if states[ticket.id] in UNSOLVED_STATUSES]
     facts = _lifecycle_facts(tickets)
     now = end_dt
@@ -886,6 +909,64 @@ def _state_at(ticket, events, sample_at):
     return state
 
 
+def _states_at(tickets, sample_at):
+    """Reconstruye un corte cargando solo los eventos que pueden cambiar estado.
+
+    Para el corte actual no hace falta leer auditorías: ``Ticket.status`` ya es
+    la fuente de verdad. Los cortes históricos conservan la misma lógica de
+    ``_state_at`` pero dejan fuera cambios de asunto, prioridad, etiquetas, etc.
+    """
+    if not tickets:
+        return {}
+    if sample_at >= timezone.now():
+        return {ticket.id: _status(ticket.status) for ticket in tickets}
+    events = _ticket_events(
+        [ticket.id for ticket in tickets],
+        field_names=STATE_EVENT_NAMES,
+        include_actor=False,
+    )
+    return {
+        ticket.id: _state_at(ticket, events.get(ticket.id, []), sample_at)
+        for ticket in tickets
+    }
+
+
+def _states_at_samples(ticket, events, samples):
+    """Devuelve varios cortes de un ticket aplicando cada evento una sola vez."""
+    created_events = [event for event in events if _event_kind(event.field_name) == "created"]
+    status_events = [event for event in events if _event_kind(event.field_name) == "status"]
+    first_created = created_events[0] if created_events else None
+    status_index = 0
+    current_state = ""
+    seen_status = False
+
+    for sample_at in samples:
+        if not ticket.created_at or ticket.created_at > sample_at:
+            yield None
+            continue
+        created_state = ""
+        if first_created and first_created.created_at <= sample_at:
+            created_state = _status(first_created.new_value)
+        while status_index < len(status_events) and status_events[status_index].created_at <= sample_at:
+            event = status_events[status_index]
+            if not seen_status:
+                current_state = created_state or _status(event.old_value) or "open"
+            current_state = _status(event.new_value) or current_state
+            seen_status = True
+            status_index += 1
+
+        state = current_state if seen_status else (created_state or "open")
+        if not seen_status:
+            solved_at = ticket.resolved_at or ticket.closed_at
+            if solved_at and sample_at >= solved_at:
+                state = ticket.status if ticket.status in SOLVED_STATUSES else "resolved"
+            elif solved_at and sample_at < solved_at:
+                state = "open"
+            elif sample_at.date() >= timezone.localdate():
+                state = ticket.status
+        yield state
+
+
 def _sample_at(day):
     return timezone.make_aware(datetime.combine(day, time.max), timezone.get_current_timezone())
 
@@ -896,30 +977,51 @@ def build_backlog(filters, date_from, date_to, start_dt, end_dt):
     weekly_days = [anchor - timedelta(days=7 * offset) for offset in reversed(range(12))]
     oldest = min(daily_days + weekly_days)
 
-    tickets = list(
-        live_ticket_queryset(filters).filter(created_at__date__lte=anchor)
+    tickets = list(live_ticket_queryset(filters).filter(created_at__lte=_sample_at(anchor)))
+    events = _ticket_events(
+        [ticket.id for ticket in tickets],
+        field_names=STATE_EVENT_NAMES,
+        include_actor=False,
     )
-    events = _ticket_events([ticket.id for ticket in tickets])
 
-    def snapshot(day):
-        at = _sample_at(day)
-        rows = []
-        for ticket in tickets:
-            state = _state_at(ticket, events.get(ticket.id, []), at)
-            if state in UNSOLVED_STATUSES:
-                rows.append((ticket, state))
-        return rows
-
-    daily_snapshots = {day: snapshot(day) for day in daily_days}
-    weekly_snapshots = {day: snapshot(day) for day in weekly_days}
+    # Guardamos contadores, no listas completas de tickets por cada uno de los
+    # 42 cortes. En un histórico grande esto evita multiplicar la memoria por
+    # el número de puntos del gráfico.
+    sample_days = sorted(set(daily_days + weekly_days))
+    sample_datetimes = [_sample_at(day) for day in sample_days]
+    daily_counts = {}
+    weekly_counts = {}
+    weekly_dimensions = {}
+    daily_day_set = set(daily_days)
+    weekly_day_set = set(weekly_days)
+    for day in sample_days:
+        if day in daily_day_set:
+            daily_counts[day] = Counter()
+        if day in weekly_day_set:
+            weekly_counts[day] = Counter()
+            weekly_dimensions[day] = {key: Counter() for key in DIMENSION_LABELS}
+    for ticket in tickets:
+        ticket_events = events.get(ticket.id, [])
+        for day, state in zip(
+            sample_days,
+            _states_at_samples(ticket, ticket_events, sample_datetimes),
+        ):
+            if state not in UNSOLVED_STATUSES:
+                continue
+            if day in daily_day_set:
+                daily_counts[day][state] += 1
+            if day in weekly_day_set:
+                weekly_counts[day][state] += 1
+                for key in DIMENSION_LABELS:
+                    weekly_dimensions[day][key][_dimension_value(ticket, key)] += 1
 
     dimensions = {}
     for key in DIMENSION_LABELS:
-        latest_counts = Counter(_dimension_value(ticket, key) for ticket, _ in weekly_snapshots[weekly_days[-1]])
+        latest_counts = weekly_dimensions[weekly_days[-1]][key]
         top_labels = [label for label, _ in latest_counts.most_common(10)]
         series = []
-        for day, rows in weekly_snapshots.items():
-            counts = Counter(_dimension_value(ticket, key) for ticket, _ in rows)
+        for day in weekly_days:
+            counts = weekly_dimensions[day][key]
             series.append({"day": str(day), "values": {label: counts[label] for label in top_labels}})
         dimensions[key] = {"label": DIMENSION_LABELS[key], "series": series, "labels": top_labels}
 
@@ -928,18 +1030,18 @@ def build_backlog(filters, date_from, date_to, start_dt, end_dt):
         "daily_by_status": [
             {
                 "day": str(day),
-                "open": sum(1 for _, status in rows if status == "open"),
-                "pending": sum(1 for _, status in rows if status == "pending"),
+                "open": daily_counts[day]["open"],
+                "pending": daily_counts[day]["pending"],
             }
-            for day, rows in daily_snapshots.items()
+            for day in daily_days
         ],
         "weekly_by_status": [
             {
                 "day": str(day),
-                "open": sum(1 for _, status in rows if status == "open"),
-                "pending": sum(1 for _, status in rows if status == "pending"),
+                "open": weekly_counts[day]["open"],
+                "pending": weekly_counts[day]["pending"],
             }
-            for day, rows in weekly_snapshots.items()
+            for day in weekly_days
         ],
         "dimensions": dimensions,
         "coverage": {"from": str(oldest), "to": str(anchor)},
@@ -1249,10 +1351,10 @@ def build_executive(filters, date_from, date_to, start_dt, end_dt):
     solved = _solved_tickets(base, start_dt, end_dt)
 
     candidates = list(base.filter(created_at__lte=end_dt))
-    events = _ticket_events([ticket.id for ticket in candidates])
+    states = _states_at(candidates, end_dt)
     backlog = [
         ticket for ticket in candidates
-        if _state_at(ticket, events.get(ticket.id, []), end_dt) in UNSOLVED_STATUSES
+        if states[ticket.id] in UNSOLVED_STATUSES
     ]
 
     solved_ids = [ticket.id for ticket in solved]

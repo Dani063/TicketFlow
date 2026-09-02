@@ -31,8 +31,8 @@ case "$ROLE" in
   web)
     exec gunicorn TicketFlow.wsgi:application \
       --bind 0.0.0.0:8000 \
-      --workers 3 \
-      --timeout 60 \
+      --workers "${WEB_CONCURRENCY:-2}" \
+      --timeout "${GUNICORN_TIMEOUT:-60}" \
       --access-logfile - \
       --error-logfile - \
       --logger-class TicketFlow.gunicorn_logging.JsonLogger

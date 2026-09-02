@@ -279,6 +279,12 @@ class TicketEvent(models.Model):
 
     class Meta:
         ordering = ['created_at']
+        indexes = [
+            models.Index(
+                fields=['ticket', 'field_name', 'created_at'],
+                name='app_evt_tkt_field_time',
+            ),
+        ]
 
 class Attachment(models.Model):
     file_url = models.URLField(null=False, help_text='URL of the attached file')

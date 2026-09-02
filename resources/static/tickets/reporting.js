@@ -599,6 +599,23 @@
         ZONES.forEach(zone => { $(`kpis-${zone.key}`).innerHTML = ''; });
     }
 
+    async function readReportingResponse(response) {
+        const contentType = (response.headers.get('content-type') || '').toLowerCase();
+        if (!contentType.includes('application/json')) {
+            // Los proxies devuelven HTML para 502/503. No intentamos parsearlo
+            // como JSON porque eso ocultaba el estado HTTP real tras un
+            // "Unexpected token '<'" poco útil para soporte.
+            await response.text();
+            throw new Error(`El servicio de métricas no está disponible (HTTP ${response.status}).`);
+        }
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+            const message = data && data.error && (data.error.message || data.error.detail);
+            throw new Error(message || `Error HTTP ${response.status}`);
+        }
+        return data;
+    }
+
     async function loadSection(section, force) {
         if (state.data[section] && !force) return state.data[section];
         if (state.requests[section] && !force) return state.requests[section];
@@ -608,8 +625,7 @@
         $('repStatus').textContent = '';
         const request = fetch(`/reporting/data/?${params(section)}`, { headers: { Accept: 'application/json' } })
             .then(async response => {
-                const data = await response.json();
-                if (!response.ok || !data.ok) throw new Error(data.error || `Error HTTP ${response.status}`);
+                const data = await readReportingResponse(response);
                 state.data[section] = data;
                 renderSection(section);
                 return data;
@@ -678,7 +694,16 @@
         button.disabled = true;
         button.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i> Preparando ${ZONES.length} zonas…`;
         try {
-            await Promise.all(ZONES.map(zone => loadSection(zone.key)));
+            // Cada zona reconstruye métricas históricas. Lanzarlas todas a la
+            // vez agotaba los workers y la memoria del pod en DEV. La carga
+            // secuencial mantiene un único cálculo pesado en vuelo y reutiliza
+            // las zonas que el usuario ya hubiera visitado.
+            for (let index = 0; index < ZONES.length; index += 1) {
+                const zone = ZONES[index];
+                button.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i> ` +
+                    `Preparando ${index + 1}/${ZONES.length}: ${esc(zone.title)}`;
+                await loadSection(zone.key);
+            }
             ZONES.forEach(zone => renderSection(zone.key));
             await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 

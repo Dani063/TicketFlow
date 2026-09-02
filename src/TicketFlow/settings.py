@@ -536,6 +536,14 @@ AI_REQUEST_TIMEOUT_SECONDS = int(os.getenv('AI_REQUEST_TIMEOUT_SECONDS', '30'))
 # SES autentica con el rol IAM del pod (como SQS/SSM): sin credenciales SMTP.
 # Kill switch global; en local conviene dejarlo a false (BBDD compartida).
 OUTBOUND_EMAIL_ENABLED = os.getenv('OUTBOUND_EMAIL_ENABLED', 'false').lower() in ('1', 'true', 'yes', 'on')
+# Interruptores por tipo de mensaje. Son opt-in para que activar el transporte no
+# habilite accidentalmente automatizaciones que el entorno no quiere usar.
+OUTBOUND_TICKET_CREATED_ENABLED = os.getenv(
+    'OUTBOUND_TICKET_CREATED_ENABLED', 'false'
+).lower() in ('1', 'true', 'yes', 'on')
+OUTBOUND_AGENT_REPLY_ENABLED = os.getenv(
+    'OUTBOUND_AGENT_REPLY_ENABLED', 'false'
+).lower() in ('1', 'true', 'yes', 'on')
 AWS_SES_REGION = os.getenv('AWS_SES_REGION', 'eu-west-1')
 SES_CONFIGURATION_SET = os.getenv('SES_CONFIGURATION_SET', '')  # opcional: tracking de bounces/quejas
 # Base de los enlaces {{ticket_url}} en plantillas (sin barra final)

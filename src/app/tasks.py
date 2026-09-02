@@ -173,6 +173,15 @@ def send_outbound_email(self, log_id):
     if log.status == OutboundEmailLog.STATUS_SUPPRESSED:
         return 'suppressed'
 
+    blocked = OutboundEmailService.blocking_reason_for_log(log)
+    if blocked:
+        log.status = OutboundEmailLog.STATUS_SUPPRESSED
+        log.result = blocked
+        log.error = None
+        log.save(update_fields=['status', 'result', 'error'])
+        record_metric('email.outbound.suppressed', labels={'log_id': log.id, 'reason': blocked})
+        return 'suppressed'
+
     log.attempts += 1
     log.save(update_fields=['attempts'])
 

@@ -1,3 +1,5 @@
+import logging
+
 from django.db import transaction
 from django.utils import timezone
 
@@ -8,6 +10,9 @@ from app.sanitizers import sanitize_email_html
 from app.services.metrics import record_metric
 from app.services.notifications import NotificationService
 from app.services.sla import SLAService
+
+
+logger = logging.getLogger(__name__)
 
 
 class CommentService:
@@ -24,6 +29,7 @@ class CommentService:
         via_channel=None,
         email_message_id=None,
         notify=True,
+        send_requester_email=True,
     ):
         if not can_comment_ticket(actor, ticket):
             raise APIValidationError("forbidden", "No tienes acceso a este ticket.", status=403)
@@ -88,6 +94,23 @@ class CommentService:
             ).update(comment=comment)
 
         SLAService.record_first_response(ticket, actor, comment_is_public=final_is_public)
+
+        if send_requester_email and final_is_public and is_agent(actor):
+            try:
+                from app.services.email_outbound import OutboundEmailService
+
+                OutboundEmailService.queue_agent_reply(ticket, comment)
+            except Exception:
+                # El comentario ya es la operación principal: un error de plantilla
+                # o de encolado no debe impedir que el agente responda al ticket.
+                logger.exception(
+                    "agent_reply_email_queue_failed",
+                    extra={"ticket_id": ticket.id, "comment_id": comment.id},
+                )
+                record_metric(
+                    "email.outbound.agent_reply_queue_failed",
+                    labels={"ticket_id": ticket.id, "comment_id": comment.id},
+                )
 
         if notify:
             NotificationService.notify_ticket_users(ticket, f"Nuevo comentario en ticket #{ticket.id}", actor=actor)

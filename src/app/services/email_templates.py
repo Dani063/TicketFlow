@@ -1,7 +1,7 @@
 """Resolución y renderizado de plantillas de respuesta al cliente (ES/EN, por marca)."""
 
 from django.template import engines
-from django.utils.html import strip_tags
+from django.utils.html import escape, linebreaks, strip_tags
 
 from app.constants import normalize_language
 from app.models import ResponseTemplate
@@ -85,6 +85,24 @@ class ResponseTemplateService:
             "ticket_url": f"{base_url}/help/{center.slug}/{locale}/" if base_url and center else "",
             "created_at": ticket.created_at.strftime("%d/%m/%Y %H:%M") if ticket.created_at else "",
         }
+
+    @staticmethod
+    def context_for_agent_reply(ticket, comment):
+        """Contexto seguro para la respuesta pública escrita por un agente."""
+        context = ResponseTemplateService.context_for_ticket(ticket)
+        if comment.html_body:
+            reply_html = comment.html_body
+            reply_text = strip_tags(comment.html_body).strip()
+        else:
+            reply_text = (comment.content or "").strip()
+            reply_html = str(linebreaks(escape(reply_text)))
+        context.update({
+            "agent_name": comment.user.name if comment.user_id and comment.user else "",
+            "reply_html": reply_html,
+            "reply_text": reply_text,
+            "responded_at": comment.created_at.strftime("%d/%m/%Y %H:%M") if comment.created_at else "",
+        })
+        return context
 
     @staticmethod
     def context_for_survey(ticket, rating):

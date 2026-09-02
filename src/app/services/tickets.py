@@ -241,6 +241,7 @@ class TicketService:
                 via_channel=payload.get("via_channel"),
                 email_message_id=payload.get("email_message_id"),
                 notify=False,
+                send_requester_email=False,
             )
         NotificationService.notify_ticket_users(ticket, f"Nuevo ticket #{ticket.id}: {ticket.subject}", actor=actor)
         AutomationService.run_for_ticket(ticket, actor=actor, event="ticket_created", event_key=f"ticket_created:{ticket.id}")
