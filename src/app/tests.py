@@ -1097,10 +1097,54 @@ class OutboundEmailTests(_BaseFixture):
             OutboundEmailLog.objects.filter(ticket=customer_ticket, template_key="agent_reply").exists()
         )
 
-    def test_initial_ticket_description_is_not_treated_as_an_agent_reply(self):
+    def test_initial_public_agent_message_is_queued_as_an_agent_reply(self):
         ticket = self._create_ticket_via_service(content="Descripción inicial")
+        comment = Comment.objects.get(ticket=ticket, content="Descripción inicial")
+        reply = OutboundEmailLog.objects.get(ticket=ticket, template_key="agent_reply")
+
+        self.assertEqual(reply.status, OutboundEmailLog.STATUS_QUEUED)
+        self.assertIn("Descripción inicial", reply.payload["body_text"])
+        self.assertIn(str(comment.id), reply.dedup_key)
+
+    def test_create_ticket_form_queues_its_first_public_message(self):
+        self.client.force_login(self.agent)
+        response = self.client.post(
+            reverse("create_ticket"),
+            {
+                "subject": "Primer mensaje por formulario",
+                "message": "Este mensaje también debe enviarse.",
+                "status": "open",
+                "solicitante": str(self.customer.id),
+                "empresa": self.brand_a.name,
+                "producto": str(self.product.id),
+                "is_public": "true",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        ticket = Ticket.objects.get(subject="Primer mensaje por formulario")
+        reply = OutboundEmailLog.objects.get(ticket=ticket, template_key="agent_reply")
+        self.assertEqual(reply.to_email, self.customer.email)
+        self.assertIn("Este mensaje también debe enviarse.", reply.payload["body_text"])
+
+    def test_initial_private_note_and_suppressed_flow_do_not_queue_agent_reply(self):
+        private_ticket = self._create_ticket_via_service(
+            content="Nota interna inicial",
+            is_public=False,
+        )
         self.assertFalse(
-            OutboundEmailLog.objects.filter(ticket=ticket, template_key="agent_reply").exists()
+            OutboundEmailLog.objects.filter(
+                ticket=private_ticket,
+                template_key="agent_reply",
+            ).exists()
+        )
+
+        suppressed_ticket = self._create_ticket_via_service(
+            content="Carga silenciosa",
+            suppress_requester_email=True,
+        )
+        self.assertFalse(
+            OutboundEmailLog.objects.filter(ticket=suppressed_ticket).exists()
         )
 
     @override_settings(OUTBOUND_TICKET_CREATED_ENABLED=False)

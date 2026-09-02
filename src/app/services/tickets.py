@@ -245,7 +245,13 @@ class TicketService:
                 via_channel=payload.get("via_channel"),
                 email_message_id=payload.get("email_message_id"),
                 notify=False,
-                send_requester_email=False,
+                # Un ticket creado manualmente por un agente ya contiene una
+                # respuesta pública para el solicitante. Debe enviarse igual
+                # que cualquier comentario posterior. Los flujos de ingesta o
+                # importación pueden conservar el silencio explícito mediante
+                # suppress_requester_email; CommentService también excluye las
+                # notas privadas y los comentarios escritos por clientes.
+                send_requester_email=not payload.get("suppress_requester_email"),
             )
         NotificationService.notify_ticket_users(ticket, f"Nuevo ticket #{ticket.id}: {ticket.subject}", actor=actor)
         AutomationService.run_for_ticket(ticket, actor=actor, event="ticket_created", event_key=f"ticket_created:{ticket.id}")
