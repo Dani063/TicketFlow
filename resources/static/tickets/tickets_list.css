@@ -207,8 +207,12 @@
     display: none;
 }
 
+/* El descuento tiene que cubrir cabecera + toolbar + la propia barra de
+   paginacion (43px) o esta acaba fuera del viewport, que no tiene scroll: con
+   330px la tabla llena la dejaba 7px por debajo del borde y no habia forma de
+   cambiar de pagina. Mismo ajuste que en .customers-list-content. */
 .tickets-list-content .with-pagination .tabla {
-    max-height: calc(100vh - 330px);
+    max-height: calc(100vh - 360px);
 }
 
 @media (max-width: 1280px) {

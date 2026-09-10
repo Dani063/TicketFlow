@@ -93,10 +93,15 @@ class PublicHelpCenterTests(TestCase):
         self.assertRedirects(internal, reverse("help_home", args=["ecomfax", "es"]), fetch_redirect_response=False)
 
     def test_anonymous_request_creates_normal_ticket_and_private_attachment(self):
+        from app.services.attachments import AttachmentService
+
+        # Contrato nuevo: nombre visible y descarga conservan Unicode/espacios;
+        # solo la clave de almacenamiento se sanea. La autorización no cambia.
+        filename = "captura técnica prueba.txt"
         url = reverse("help_request", args=["ecomfax", "es"])
         payload = self._valid_payload(url)
         payload["service"] = "recordia"  # nunca debe fiarse de este valor
-        payload["attachments"] = SimpleUploadedFile("captura prueba.txt", b"evidence", content_type="text/plain")
+        payload["attachments"] = SimpleUploadedFile(filename, b"evidence", content_type="text/plain")
         response = self.client.post(url, payload, HTTP_HOST="localhost")
         self.assertEqual(response.status_code, 302)
         self.assertIn("/requests/success/", response.url)
@@ -113,7 +118,12 @@ class PublicHelpCenterTests(TestCase):
         self.assertFalse(ticket.requester.has_usable_password())
         attachment = Attachment.objects.get(ticket=ticket)
         self.assertTrue(attachment.is_private)
-        self.assertEqual(attachment.original_name, "captura-prueba.txt")
+        self.assertEqual(attachment.original_name, filename)
+        self.assertEqual(attachment.filename, filename)
+        self.assertEqual(AttachmentService.metadata(attachment)["filename"], filename)
+        self.assertNotIn(" ", attachment.storage_key)
+        self.assertNotIn("é", attachment.storage_key)
+        self.assertRegex(Path(attachment.storage_key).name, r"^[A-Za-z0-9._-]+\.txt$")
         self.assertEqual(attachment.size, 8)
 
         anonymous = self.client.get(attachment.file_url, HTTP_HOST="localhost")
@@ -121,7 +131,10 @@ class PublicHelpCenterTests(TestCase):
         self.client.force_login(ticket.requester)
         authorized = self.client.get(attachment.file_url, HTTP_HOST="localhost")
         self.assertEqual(authorized.status_code, 200)
-        self.assertEqual(authorized["Content-Disposition"], 'attachment; filename="captura-prueba.txt"')
+        self.assertEqual(authorized["Content-Disposition"], "attachment; filename*=utf-8''captura%20t%C3%A9cnica%20prueba.txt")
+        self.assertEqual(authorized["Content-Type"], "application/octet-stream")
+        self.assertEqual(authorized["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(b"".join(authorized.streaming_content), b"evidence")
         authorized.close()
 
     def test_invalid_extension_does_not_create_ticket(self):

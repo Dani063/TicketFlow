@@ -1,17 +1,15 @@
-import mimetypes
-
 from django.conf import settings
 from django.core import signing
 from django.db.models import Count, Q
-from django.http import FileResponse, Http404, HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET
 
-from app.api import APIValidationError
+from app.api import APIValidationError, json_error
 from app.models import Attachment, HelpArticle, HelpCategory, HelpCenter, HelpSection
-from app.permissions import can_manage_help_content, can_view_ticket
+from app.permissions import can_manage_help_content
 from app.public_forms import COPY as FORM_COPY, PublicTicketForm
 from app.services.attachments import AttachmentService
 from app.services.help_centers import (
@@ -268,23 +266,21 @@ def help_robots(request):
 
 @require_GET
 def attachment_download(request, attachment_id):
-    attachment = get_object_or_404(Attachment.objects.select_related("ticket"), id=attachment_id)
-    if not attachment.ticket_id or not can_view_ticket(request.user, attachment.ticket):
+    attachment = get_object_or_404(Attachment.objects.select_related('ticket', 'comment'), id=attachment_id)
+    if not AttachmentService.can_access(request.user, attachment):
         raise Http404
-    if attachment.storage_backend == "s3":
-        try:
-            return redirect(AttachmentService.presigned_url(attachment))
-        except APIValidationError as exc:
-            return HttpResponse(exc.message, status=exc.status, content_type="text/plain; charset=utf-8")
-    if not attachment.storage_key:
-        # Adjuntos heredados conservan la URL original.
-        return redirect(attachment.file_url)
-    content_type = attachment.file_type or mimetypes.guess_type(attachment.original_name)[0] or "application/octet-stream"
     try:
-        stored = AttachmentService.open_local(attachment)
+        return AttachmentService.download_response(attachment)
     except APIValidationError as exc:
-        return HttpResponse(exc.message, status=exc.status, content_type="text/plain; charset=utf-8")
-    return FileResponse(
-        stored, as_attachment=True, filename=attachment.original_name or "attachment",
-        content_type=content_type,
-    )
+        return AttachmentService.secure_response(json_error(exc.code, exc.message, status=exc.status))
+
+
+@require_GET
+def attachment_preview(request, attachment_id):
+    attachment = get_object_or_404(Attachment.objects.select_related('ticket', 'comment'), id=attachment_id)
+    if not AttachmentService.can_access(request.user, attachment):
+        raise Http404
+    try:
+        return AttachmentService.preview_response(attachment, thumbnail=request.GET.get('thumbnail') == '1')
+    except APIValidationError as exc:
+        return AttachmentService.secure_response(json_error(exc.code, exc.message, status=exc.status))

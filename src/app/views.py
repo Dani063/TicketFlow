@@ -34,6 +34,7 @@ from .constants import CHANNEL_CHOICES, SERVICE_CHOICES, SLA_AT_RISK_WINDOW_MINU
 from .permissions import can_manage_users, can_update_ticket, can_view_ticket, is_admin as permission_is_admin, is_agent as permission_is_agent
 from .sanitizers import sanitize_email_html
 from .services.assignment import AssignmentService
+from .services.attachments import AttachmentService
 from .services.comments import CommentService
 from .services.merge import MergeService
 from .services.notifications import NotificationService
@@ -1958,7 +1959,10 @@ def create_ticket(request):
             return json_error(exc.code, exc.message, status=exc.status)
         except Ticket.DoesNotExist:
             return json_error('ticket_not_found', 'Ticket no encontrado', status=404)
-        return redirect(f'{request.path}?id={ticket.id}')
+        url = f'{request.path}?id={ticket.id}'
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'ticket_id': ticket.id, 'url': url})
+        return redirect(url)
 
     # GET .
     # Gate: end users only see tickets they are involved in (requester / cc / created_by).
@@ -2021,17 +2025,19 @@ def create_ticket(request):
     if ticket_obj:
         if _is_agent(request.user):
             comments_list = list(
-                ticket_obj.comment_set.select_related('user', 'user__role').order_by('created_at')
+                ticket_obj.comment_set.select_related('user', 'user__role').prefetch_related('attachment_set').order_by('created_at')
             )
         else:
             comments_list = list(
                 ticket_obj.comment_set.filter(is_public=True)
-                .select_related('user', 'user__role').order_by('created_at')
+                .select_related('user', 'user__role').prefetch_related('attachment_set').order_by('created_at')
             )
         events_list = list(ticket_obj.events.select_related('actor').order_by('created_at'))
 
         feed = []
         for c in comments_list:
+            c.attachment_cards = [AttachmentService.metadata(a) for a in c.attachment_set.all()
+                                  if a.ticket_id == ticket_obj.id]
             feed.append({'item_type': 'comment', 'obj': c})
         for e in events_list:
             feed.append({'item_type': 'event', 'obj': e,
@@ -2065,6 +2071,7 @@ def create_ticket(request):
         'user_timeline': user_timeline,
         'ticket_satisfaction': ticket_satisfaction,
         'current_user_id': request.user.id,
+        'attachment_limits': AttachmentService.limits(),
     }
     # Fragment mode: ?fragment=1 returns only the ticket pane HTML (no base template).
     # Used by tabs.js to swap panes in-place without full page reload.
@@ -2148,6 +2155,8 @@ def take_ticket(request, ticket_id):
 def add_comment(request, ticket_id):
     try:
         data = parse_json_body(request)
+        if not isinstance(data, dict):
+            raise APIValidationError('invalid_json', 'Se requiere un objeto JSON.', status=400)
         ticket = get_object_or_404(Ticket, id=ticket_id)
         comment, applied_status = CommentService.add_comment(
             ticket=ticket,
@@ -2156,13 +2165,14 @@ def add_comment(request, ticket_id):
             is_public=data.get('is_public', True),
             html_body=data.get('html_body') or '',
             new_status=data.get('new_status') or '',
-            attachment_ids=data.get('attachment_ids') or [],
+            attachment_ids=data.get('attachment_ids'),
+            request_id=data.get('request_id'),
         )
     except APIValidationError as exc:
         return json_error(exc.code, exc.message, status=exc.status)
 
     # adjuntos del comentario para el frontend
-    atts = Attachment.objects.filter(comment=comment).values('id', 'file_url', 'file_type')
+    atts = [AttachmentService.metadata(a) for a in comment.attachment_set.order_by('id')]
     return JsonResponse({
         'id': comment.id,
         'content': comment.content,
@@ -2293,70 +2303,54 @@ def upload_attachment(request, ticket_id):
     ticket = get_object_or_404(Ticket, id=ticket_id)
     if not can_view_ticket(request.user, ticket):
         return json_error('forbidden', 'No tienes acceso a este ticket.', status=403)
-    f = request.FILES.get('file')
-    if not f:
-        return JsonResponse({'error': 'No se recibió ningún archivo.'}, status=400)
-
-    from app.services.attachments import AttachmentService
     try:
-        pending_count = Attachment.objects.filter(
-            ticket=ticket,
-            uploaded_by=request.user,
-            comment__isnull=True,
-        ).count()
-        max_files = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_FILES', 5)
-        if pending_count >= max_files:
-            raise APIValidationError(
-                'too_many_files',
-                f'Puedes adjuntar un máximo de {max_files} archivos por respuesta.',
-                status=400,
-            )
-        pending_bytes = sum(Attachment.objects.filter(
-            ticket=ticket,
-            uploaded_by=request.user,
-            comment__isnull=True,
-        ).values_list('size', flat=True))
-        max_total_bytes = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES', 25 * 1024 * 1024)
-        if pending_bytes + getattr(f, 'size', 0) > max_total_bytes:
-            raise APIValidationError(
-                'attachments_too_large',
-                f'El conjunto de adjuntos debe ocupar como máximo {max_total_bytes // (1024 * 1024)} MB.',
-                status=400,
-            )
-        att = AttachmentService.save(f, ticket, request.user)
+        att = AttachmentService.upload(_single_attachment_file(request), request.user, ticket=ticket,
+                                       upload_key=request.POST.get('upload_key'), draft_key=request.POST.get('draft_key'))
     except APIValidationError as exc:
         return json_error(exc.code, exc.message, status=exc.status)
 
-    return JsonResponse({
-        'id': att.id,
-        'file_url': att.file_url,
-        'file_type': att.file_type or '',
-        'filename': att.original_name,
-        'size': getattr(f, 'size', 0),
-    })
+    return JsonResponse(AttachmentService.metadata(att))
+
+
+def _single_attachment_file(request):
+    files = [f for key in request.FILES for f in request.FILES.getlist(key)]
+    if len(files) != 1 or len(request.FILES.getlist('file')) != 1:
+        raise APIValidationError('invalid_file', 'Se requiere exactamente un archivo en file.', status=400)
+    return files[0]
+
+
+@api_login_required
+@require_POST
+def upload_draft_attachment(request):
+    try:
+        att = AttachmentService.upload(_single_attachment_file(request), request.user,
+                                       draft_key=request.POST.get('draft_key'), upload_key=request.POST.get('upload_key'))
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+    return JsonResponse(AttachmentService.metadata(att))
+
+
+@api_login_required
+@require_POST
+def cancel_attachment_upload(request):
+    try:
+        data = parse_json_body(request)
+        if not isinstance(data, dict):
+            raise APIValidationError('invalid_json', 'Se requiere un objeto JSON.', status=400)
+        AttachmentService.cancel_upload(request.user, data.get('upload_key'),
+                                        draft_key=data.get('draft_key'), ticket_id=data.get('ticket_id'))
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+    return json_ok({'cancelled': True, 'upload_key': data['upload_key']})
 
 
 @api_login_required
 @require_POST
 def delete_pending_attachment(request, attachment_id):
-    attachment = get_object_or_404(
-        Attachment.objects.select_related('ticket'),
-        id=attachment_id,
-    )
-    if not attachment.ticket_id or not can_view_ticket(request.user, attachment.ticket):
-        return json_error('forbidden', 'No tienes acceso a este adjunto.', status=403)
-    if attachment.uploaded_by_id != request.user.id:
-        return json_error('forbidden', 'Solo puede retirarlo quien lo adjuntó.', status=403)
-    if attachment.comment_id:
-        return json_error(
-            'attachment_already_sent',
-            'El adjunto ya forma parte de una respuesta y no puede retirarse desde el editor.',
-            status=409,
-        )
-
-    from app.services.attachments import AttachmentService
     try:
-        AttachmentService.delete(attachment)
+        AttachmentService.delete_pending(attachment_id, request.user)
+    except Attachment.DoesNotExist:
+        return json_error('attachment_not_found', 'Adjunto no encontrado.', status=404)
     except APIValidationError as exc:
         return json_error(exc.code, exc.message, status=exc.status)
     return json_ok({'deleted': True, 'attachment_id': attachment_id})

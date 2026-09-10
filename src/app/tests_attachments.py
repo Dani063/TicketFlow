@@ -160,20 +160,46 @@ class AttachmentStorageTests(TestCase):
 
     @override_settings(ATTACHMENT_STORAGE_BACKEND="local", PUBLIC_ATTACHMENTS_S3_BUCKET="")
     def test_pending_attachment_can_be_removed_by_its_uploader(self):
+        from django.core.files.storage import default_storage
+        from django.db import transaction
+
+        # Contrato nuevo: el blob se borra tras commit para que un rollback
+        # conserve registro y bytes. TestCase simula el commit con los callbacks.
         attachment = AttachmentService.save(self._file(), self.ticket, self.agent)
         stored_path = attachment.storage_key
         self.assertTrue(Attachment.objects.filter(id=attachment.id).exists())
 
         self.client.force_login(self.agent)
-        response = self.client.post(reverse("delete_pending_attachment", args=[attachment.id]))
+        url = reverse("delete_pending_attachment", args=[attachment.id])
+        with self.captureOnCommitCallbacks(execute=True) as rolled_back_callbacks:
+            with self.assertRaisesMessage(RuntimeError, "rollback de retirada"):
+                with transaction.atomic():
+                    response = self.client.post(url)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertFalse(Attachment.objects.filter(id=attachment.id).exists())
+                    self.assertTrue(default_storage.exists(stored_path))
+                    raise RuntimeError("rollback de retirada")
+        self.assertEqual(rolled_back_callbacks, [])
+        self.assertTrue(Attachment.objects.filter(id=attachment.id).exists())
+        self.assertEqual(AttachmentService.read(attachment), b"evidence")
 
-        self.assertEqual(response.status_code, 200)
+        with self.captureOnCommitCallbacks(execute=True) as committed_callbacks:
+            response = self.client.post(url)
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(Attachment.objects.filter(id=attachment.id).exists())
+            self.assertTrue(default_storage.exists(stored_path))
+
+        self.assertEqual(len(committed_callbacks), 1)
         self.assertFalse(Attachment.objects.filter(id=attachment.id).exists())
-        from django.core.files.storage import default_storage
         self.assertFalse(default_storage.exists(stored_path))
 
     @override_settings(ATTACHMENT_STORAGE_BACKEND="local", PUBLIC_ATTACHMENTS_S3_BUCKET="")
     def test_comment_cannot_claim_another_agents_pending_attachment(self):
+        import uuid
+        from app.models import AttachmentRequest
+
+        # Contrato nuevo: un ID ajeno rechaza toda la publicación, en vez de
+        # ignorarse. Ni adjuntos propios, estado, correo ni request_id se consumen.
         role = Role.objects.get(role_name="agent")
         other_agent = User.objects.create_user(
             email="other-attachment-agent@example.com",
@@ -183,17 +209,54 @@ class AttachmentStorageTests(TestCase):
         other_agent.role = role
         other_agent.save(update_fields=["role"])
         attachment = AttachmentService.save(self._file(), self.ticket, other_agent)
+        own_attachment = AttachmentService.save(self._file("own.txt"), self.ticket, self.agent)
+        request_id = uuid.uuid4()
+        original_updated_at = self.ticket.updated_at
 
-        comment, _ = CommentService.add_comment(
+        for ids in ([attachment.id], [own_attachment.id, attachment.id]):
+            with self.subTest(attachment_ids=ids), patch.object(OutboundEmailService, "queue_agent_reply") as queue:
+                with self.assertRaises(APIValidationError) as raised:
+                    CommentService.add_comment(
+                        ticket=self.ticket,
+                        actor=self.agent,
+                        content="Respuesta sin apropiarse del fichero ajeno",
+                        new_status="pending",
+                        attachment_ids=ids,
+                        request_id=request_id,
+                    )
+                self.assertEqual(raised.exception.code, "invalid_attachments")
+                self.assertEqual(raised.exception.status, 400)
+                queue.assert_not_called()
+                self.assertFalse(Comment.objects.filter(ticket=self.ticket).exists())
+                self.assertFalse(OutboundEmailLog.objects.filter(ticket=self.ticket).exists())
+                self.assertFalse(AttachmentRequest.objects.filter(actor=self.agent, operation="comment", key=request_id).exists())
+                self.ticket.refresh_from_db()
+                self.assertEqual(self.ticket.status, "open")
+                self.assertEqual(self.ticket.updated_at, original_updated_at)
+                self.assertFalse(self.ticket.events.exists())
+                self.assertFalse(self.ticket.notification_set.exists())
+                for item, uploader in ((attachment, other_agent), (own_attachment, self.agent)):
+                    item.refresh_from_db()
+                    self.assertIsNone(item.comment_id)
+                    self.assertEqual(item.uploaded_by_id, uploader.id)
+                    self.assertEqual(AttachmentService.read(item), b"evidence")
+
+        # La petición rechazada no reserva la clave: se puede corregir y publicar.
+        comment, applied_status = CommentService.add_comment(
             ticket=self.ticket,
             actor=self.agent,
-            content="Respuesta sin apropiarse del fichero ajeno",
-            attachment_ids=[attachment.id],
+            content="Respuesta con el archivo propio",
+            new_status="pending",
+            attachment_ids=[own_attachment.id],
+            request_id=request_id,
+            notify=False,
+            send_requester_email=False,
         )
-
+        self.assertEqual(applied_status, "pending")
+        self.assertEqual(list(comment.attachment_set.values_list("id", flat=True)), [own_attachment.id])
+        self.assertEqual(AttachmentRequest.objects.get(actor=self.agent, operation="comment", key=request_id).comment_id, comment.id)
         attachment.refresh_from_db()
         self.assertIsNone(attachment.comment_id)
-        self.assertFalse(comment.attachment_set.exists())
 
     @override_settings(ATTACHMENT_STORAGE_BACKEND="local", PUBLIC_ATTACHMENTS_S3_BUCKET="")
     def test_cleanup_removes_only_old_unattached_files(self):

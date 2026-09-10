@@ -277,7 +277,8 @@
             // path to set window.ticketId / window.urls — both now passed via
             // ctx parameter to initTicketPane. Re-executing them was causing
             // global state thrash that broke widget init across panes.
-            if (isTicketPane) paneEl.querySelectorAll('script').forEach(s => s.remove());
+            // Keep inert attachment metadata; it is data, not a legacy initializer.
+            if (isTicketPane) paneEl.querySelectorAll('script:not([type="application/json"])').forEach(s => s.remove());
             else scripts.forEach(s => s.remove());
 
             ws.appendChild(paneEl);
@@ -377,6 +378,19 @@
         }
 
         return false;
+    }
+
+    // Segunda linea de la pestana: el numero de ticket, que sale de la propia URL
+    // (no hace falta consultar nada al servidor para pintarla). En las pestanas de
+    // cliente se deja vacia: su id no es un "#numero" que el agente reconozca.
+    function _tabSubtitle(url) {
+        let id = '';
+        try { id = new URL(String(url), window.location.origin).searchParams.get('id') || ''; }
+        catch (_) { /* url rara: sin numero */ }
+        const norm = normalizeUrl(url);
+        const perfil = window.urls && window.urls.customer_profile
+            && norm.startsWith(normalizeUrl(window.urls.customer_profile));
+        return (!perfil && /^\d+$/.test(id)) ? '#' + id : '';
     }
 
     function normalizeUrl(u) {
@@ -542,6 +556,7 @@
             if (tab.classList.contains('active')) item.classList.add('active');
             item.setAttribute('role', 'menuitem');
 
+            const sub = _tabSubtitle(tab.dataset.url || '');
             const icon = document.createElement('img');
             icon.className = 'item-icon';
             icon.alt = '';
@@ -550,8 +565,8 @@
             const text = document.createElement('span');
             text.className = 'item-text';
             const txt = tab.querySelector('.tab-text')?.textContent || '';
-            text.textContent = txt;
-            text.title = txt;
+            text.textContent = sub ? `${txt} ${sub}` : txt;
+            text.title = text.textContent;
 
             const closeBtn = document.createElement('button');
             closeBtn.type = 'button';
@@ -680,14 +695,30 @@
         tab.className = 'tab';
         tab.dataset.url = url;
 
+        const subtitulo = _tabSubtitle(url);
+
         const img = document.createElement('img');
         img.src = (window.static_urls && window.static_urls.logo) || '';
-        img.alt = 'Icono';
+        img.alt = '';
         img.className = 'tab-icon';
+
+        // .tab-text sigue siendo solo el titulo: saveTabs() y el popup de
+        // desbordamiento leen su texto para persistir y listar las pestanas.
+        const labels = document.createElement('span');
+        labels.className = 'tab-labels';
 
         const tabText = document.createElement('span');
         tabText.className = 'tab-text';
         tabText.innerText = text;
+        tabText.title = text;
+        labels.appendChild(tabText);
+
+        if (subtitulo) {
+            const sub = document.createElement('span');
+            sub.className = 'tab-sub';
+            sub.textContent = subtitulo;
+            labels.appendChild(sub);
+        }
 
         const closeButton = document.createElement('button');
         closeButton.type = 'button';
@@ -695,13 +726,34 @@
         closeButton.className = 'close-tab';
         closeButton.setAttribute('aria-label', 'Cerrar pestaña ' + text);
 
-        closeButton.addEventListener('click', (e) => {
+        closeButton.addEventListener('click', async (e) => {
             e.stopPropagation();
+            if (closeButton.disabled) return;
+            const closedNorm = normalizeUrl(tab.dataset.url || '');
+
+            // Each pane can guard its own uploads; switching tabs never clears them.
+            const closingPane = _paneCache.get(closedNorm)?.$pane;
+            const pendingCleanup = [];
+            const closeEvent = new CustomEvent('tf:before-pane-close', {
+                cancelable: true,
+                detail: {waitUntil: promise => pendingCleanup.push(Promise.resolve(promise))},
+            });
+            if (closingPane && !closingPane.dispatchEvent(closeEvent)) return;
+            closeButton.disabled = true;
+            try {
+                if ((await Promise.all(pendingCleanup)).some(result => result !== true)) return;
+            } catch (error) {
+                console.warn('[tabs] Pending attachments could not be cleaned up', error);
+                return;
+            } finally {
+                closeButton.disabled = false;
+            }
+            // Selection may have changed while cleanup was in progress.
             const wasActive = tab.classList.contains('active');
             const container = getContainer();
             const siblings = container ? [...container.querySelectorAll('.tab')] : [];
             const idx = siblings.indexOf(tab);
-            const closedNorm = normalizeUrl(tab.dataset.url || '');
+            closingPane?.dispatchEvent(new CustomEvent('tf:pane-dispose'));
 
             tab.remove();
             saveTabs();
@@ -740,7 +792,7 @@
         });
 
         tab.appendChild(img);
-        tab.appendChild(tabText);
+        tab.appendChild(labels);
         tab.appendChild(closeButton);
 
         // Note: tab click + close handlers are added below; the actual DOM

@@ -4,11 +4,12 @@ from django.utils.dateparse import parse_datetime
 
 from app.api import APIValidationError
 from app.constants import CHANNEL_VALUES, LEGACY_CHANNEL_MAP, LEGACY_TYPE_MAP, TICKET_TYPE_VALUES
-from app.models import Brand, Comment, Group, ProductLine, Ticket, TicketEvent, TicketTag, User
+from app.models import Attachment, AttachmentDraft, Brand, Comment, Group, ProductLine, Ticket, TicketEvent, TicketTag, User
 from app.permissions import can_update_ticket, is_agent
 from app.services.assignment import AssignmentService
 from app.services.automations import AutomationService
 from app.services.comments import CommentService
+from app.services.attachments import AttachmentService, retry_attachment_mutation
 from app.services.metrics import record_metric
 from app.services.notifications import NotificationService
 from app.services.sla import SLAService
@@ -144,6 +145,10 @@ class TicketService:
             "ccs_ids": TicketService._get_list(post_data, "ccs"),
             "tags": TicketService._get_list(post_data, "tags"),
             "is_public": str((post_data.get("is_public") or "true")).lower() in ("true", "1", "yes", "on"),
+            "html_body": post_data.get("html_body") or "",
+            "attachment_ids": AttachmentService.parse_ids(post_data.get("attachment_ids"), from_post=True),
+            "draft_key": post_data.get("draft_key"),
+            "request_id": post_data.get("request_id"),
         }
 
     @staticmethod
@@ -168,8 +173,30 @@ class TicketService:
         return target.id
 
     @staticmethod
+    @retry_attachment_mutation
     @transaction.atomic
     def create_ticket(actor, payload):
+        AttachmentService.lock_actor(actor)
+        payload = dict(payload)
+        attachment_ids = AttachmentService.parse_ids(payload.get('attachment_ids'))
+        draft_key = AttachmentService.parse_uuid(payload.get('draft_key'), 'draft_key', required=bool(attachment_ids))
+        request_id = AttachmentService.parse_uuid(payload.get('request_id'), 'request_id', required=draft_key is not None)
+        payload.update(attachment_ids=attachment_ids, draft_key=draft_key)
+        fingerprint = AttachmentService.fingerprint({k: v for k, v in payload.items() if k != 'request_id'})
+        previous = AttachmentService.replay(actor, 'ticket', request_id, fingerprint)
+        if previous:
+            if previous.ticket_id is None:
+                raise APIValidationError('ticket_gone', 'El ticket ya no está disponible.', status=410)
+            from app.permissions import can_view_ticket
+            if not can_view_ticket(actor, previous.ticket):
+                raise APIValidationError('forbidden', 'No tienes acceso a este ticket.', status=403)
+            return previous.ticket
+        draft = None
+        if draft_key:
+            draft, _ = AttachmentDraft.objects.get_or_create(uploaded_by=actor, key=draft_key)
+            if draft.published_at:
+                raise APIValidationError('draft_already_published', 'Este borrador ya se publicó.', status=409)
+        attachments = AttachmentService.pending_for_publish(actor, attachment_ids, draft=draft)
         requester_id = payload.get("requester_id") or actor.id
         if not is_agent(actor) and requester_id != actor.id:
             raise APIValidationError("invalid_requester", "No puedes crear tickets para otro solicitante.", status=403)
@@ -236,11 +263,19 @@ class TicketService:
                 new_value=str(ticket.product_line_id),
                 created_at=now,
             )
-        if payload.get("content"):
+        if draft:
+            draft.ticket = ticket
+            draft.published_at = timezone.now()
+            draft.save(update_fields=['ticket', 'published_at'])
+        if attachments:
+            Attachment.objects.filter(id__in=attachment_ids).update(ticket=ticket)
+        if payload.get("content") or payload.get('html_body') or attachments:
             CommentService.add_comment(
                 ticket,
                 actor,
-                payload.get("content"),
+                payload.get("content") or '',
+                html_body=payload.get('html_body') or '',
+                attachment_ids=attachment_ids,
                 is_public=payload.get("is_public", True),
                 via_channel=payload.get("via_channel"),
                 email_message_id=payload.get("email_message_id"),
@@ -278,11 +313,14 @@ class TicketService:
                     record_metric("ai.dispatch_failed", labels={"ticket_id": ticket_id})
 
             transaction.on_commit(_dispatch_ai)
+        AttachmentService.remember(actor, 'ticket', request_id, fingerprint, ticket=ticket)
         return ticket
 
     @staticmethod
+    @retry_attachment_mutation
     @transaction.atomic
     def update_ticket(actor, ticket_id, payload):
+        AttachmentService.lock_actor(actor)
         ticket = Ticket.objects.select_for_update().get(id=ticket_id)
         if not can_update_ticket(actor, ticket):
             raise APIValidationError("forbidden", "No puedes actualizar este ticket.", status=403)
@@ -369,11 +407,14 @@ class TicketService:
 
         SLAService.apply_policy(ticket)
         NotificationService.notify_ticket_users(ticket, f"Ticket #{ticket.id} actualizado", actor=actor)
-        if payload.get("content"):
+        if payload.get("content") or payload.get('html_body') or payload.get('attachment_ids'):
             CommentService.add_comment(
                 ticket,
                 actor,
-                payload.get("content"),
+                payload.get("content") or '',
+                html_body=payload.get('html_body') or '',
+                attachment_ids=payload.get('attachment_ids'),
+                request_id=payload.get('request_id'),
                 is_public=payload.get("is_public", True),
                 notify=False,
             )

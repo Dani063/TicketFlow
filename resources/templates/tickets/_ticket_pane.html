@@ -1,6 +1,10 @@
 {% load static %}
 {# Ticket pane partial: rendered standalone when ?fragment=1, or included in create_ticket.html for deep-link page loads. #}
-<div class="ticket-pane" data-ticket-id="{{ ticket.id|default:'' }}">
+<div class="ticket-pane" data-ticket-id="{{ ticket.id|default:'' }}"
+     data-attachment-max-files="{{ attachment_limits.max_files|default:5 }}"
+     data-attachment-max-bytes="{{ attachment_limits.max_bytes|default:15728640 }}"
+     data-attachment-max-total-bytes="{{ attachment_limits.max_total_bytes|default:26214400 }}"
+     data-attachment-allowed-extensions="{{ attachment_limits.allowed_extensions|join:',' }}">
 {% if ticket and ticket.merged_into %}
 <div class="merge-banner">
     <i class="fas fa-code-branch"></i>
@@ -250,28 +254,21 @@
                             <span class="msg-timestamp" data-ts="{{ c.created_at|date:'c' }}" title="{{ c.created_at|date:'d/m/Y H:i' }}">{{ c.created_at|date:'d/m/Y H:i' }}</span>
                         </div>
                     </div>
-                    <div class="msg-body">
+                    {% if c.content or c.html_body %}<div class="msg-body">
                         {% if c.html_body %}
                             <div class="email-html">{{ c.html_body|safe }}</div>
                         {% else %}
                             {{ c.content|urlize|linebreaksbr }}
                         {% endif %}
-                    </div>
-                    {% with atts=c.attachment_set.all %}
-                    {% if atts %}
-                    <div class="attachments">
-                        {% for a in atts %}
-                        {% if a.file_type and a.file_type|slice:":6" == "image/" %}
-                        <a href="{{ a.file_url }}" target="_blank"><img src="{{ a.file_url }}" alt="adjunto"></a>
-                        {% else %}
-                        <a href="{{ a.file_url }}" target="_blank" class="file-pill">
-                            <i class="fas fa-paperclip"></i> Archivo
-                        </a>
-                        {% endif %}
-                        {% endfor %}
+                    </div>{% endif %}
+                    {% if c.attachment_cards %}
+                    <div class="tf-attachments" data-attachment-gallery>
+                        {{ c.attachment_cards|json_script }}
+                        <noscript>{% for a in c.attachment_cards %}
+                            <a href="{{ a.download_url }}">{{ a.filename }}</a>
+                        {% endfor %}</noscript>
                     </div>
                     {% endif %}
-                    {% endwith %}
                 </div>
                 {% endwith %}
                 {% else %}
@@ -329,6 +326,7 @@
                 {% if can_use_internal %}
                 <div id="ai-reply-panel" class="ai-reply-panel" data-ticket-id="{{ ticket.id }}" hidden></div>
                 {% endif %}
+                <div id="pending-attachments" class="tf-attachment-queue" aria-label="Archivos de esta respuesta"></div>
                 <div class="compose-toolbar">
                     {# Solo agentes ven el toggle Público/Interno #}
                     {% if can_use_internal %}
@@ -368,8 +366,6 @@
                     <input type="file" id="attach-input"
                            accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.txt,.csv,.doc,.docx,.xls,.xlsx,.zip,.log"
                            multiple hidden>
-                    <!-- Previsualización de adjuntos pendientes de enviar -->
-                    <div class="pending-attachments" id="pending-attachments"></div>
                     {% if can_use_internal %}
                     <!-- Asistencia de respuesta IA -->
                     <button type="button" id="ai-reply-btn" class="ai-reply-btn"

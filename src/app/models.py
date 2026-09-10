@@ -286,6 +286,20 @@ class TicketEvent(models.Model):
             ),
         ]
 
+class AttachmentDraft(models.Model):
+    """Private upload batch; publishing permanently consumes its UUID."""
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE)
+    key = models.UUIDField()
+    ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['uploaded_by', 'key'], name='attachment_draft_owner_key'),
+        ]
+
+
 class Attachment(models.Model):
     file_url = models.URLField(null=False, help_text='URL of the attached file')
     file_type = models.CharField(max_length=255, null=True)
@@ -300,6 +314,35 @@ class Attachment(models.Model):
     comment = models.ForeignKey(Comment, on_delete=models.CASCADE, null=True, blank=True)
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
+    draft = models.ForeignKey(AttachmentDraft, on_delete=models.PROTECT, null=True, blank=True)
+
+    @property
+    def filename(self):
+        from app.services.attachments import AttachmentService
+        return AttachmentService.filename(self)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['uploaded_by', 'ticket', 'comment'], name='attachment_pending_owner'),
+        ]
+
+
+class AttachmentRequest(models.Model):
+    """Committed results and tombstones survive retries and attachment deletion."""
+    actor = models.ForeignKey(User, on_delete=models.CASCADE)
+    operation = models.CharField(max_length=16)
+    key = models.UUIDField()
+    fingerprint = models.CharField(max_length=64)
+    attachment = models.ForeignKey(Attachment, on_delete=models.SET_NULL, null=True, blank=True)
+    ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True)
+    comment = models.ForeignKey(Comment, on_delete=models.SET_NULL, null=True, blank=True)
+    result = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['actor', 'operation', 'key'], name='attachment_request_actor_key'),
+        ]
 
     # models.py
 class Notification(models.Model):
