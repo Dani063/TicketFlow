@@ -28,13 +28,14 @@ data:
   RECORDIA_HELP_PUBLIC_URL: "https://support.recordia.net"
   PUBLIC_ECOMFAX_BRAND_NAME: "eComFax"
   PUBLIC_RECORDIA_BRAND_NAME: "Comunycarse Helpdesk"
-  # Mantener "auto" hasta que Infra entregue bucket + rol. Al activarlo en un
-  # entorno Kubernetes cambiar a "s3": así una mala configuración falla de
-  # forma visible y nunca cae silenciosamente al disco efímero del pod.
-  ATTACHMENT_STORAGE_BACKEND: "auto"
-  ATTACHMENT_STORAGE_PREFIX: "sta"
-  # PUBLIC_ATTACHMENTS_S3_BUCKET: "ticketflow-private-attachments"
+  # Ejemplo DEV. El CD corporativo usa los ConfigMaps de Recordia-Kubernetes.
+  # En STA usar su bucket y prefijo: sta-ticketflow-filestorage / sta.
+  ATTACHMENT_STORAGE_BACKEND: "s3"
+  ATTACHMENT_STORAGE_PREFIX: "dev"
+  PUBLIC_ATTACHMENTS_S3_BUCKET: "dev-ticketflow-filestorage"
   PUBLIC_ATTACHMENTS_S3_REGION: "eu-west-1"
+  HELP_CONTENT_S3_BUCKET: "dev-ticketflow-filestorage"
+  HELP_CONTENT_S3_REGION: "eu-west-1"
   PUBLIC_ATTACHMENT_MAX_FILES: "5"
   PUBLIC_ATTACHMENT_MAX_BYTES: "15728640"
   PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES: "26214400"

@@ -1,5 +1,27 @@
 # Almacenamiento privado de adjuntos
 
+## Buckets e identidad de los despliegues
+
+Infra creó los buckets el 9 de septiembre de 2026 en `eu-west-1`:
+
+| Entorno | Bucket | Rol EKS Pod Identity |
+|---|---|---|
+| DEV | `dev-ticketflow-filestorage` | `DEV-Recordia-EKS-TicketFlowUI-Role` |
+| STA | `sta-ticketflow-filestorage` | `STA-Recordia-EKS-TicketFlowUI-Role` |
+
+Ambos usan el ServiceAccount existente `recordia/ticketflow-ui` en sus
+respectivos clústeres. Los deployments web, worker, beat y migrate comparten
+esta identidad. No hacen falta claves estáticas ni un pod adicional.
+
+El CD corporativo consume los manifiestos del repositorio **Recordia-Kubernetes**,
+carpeta `DEV/Recordia/Manifests/TicketFlow.UI/`; `k8s/configmap.yaml` de este
+repositorio es solo una referencia. Los cuatro ConfigMaps de DEV deben llevar
+la misma configuración de almacenamiento. El `.env` descargado al arrancar
+completa valores ausentes, pero no sobrescribe variables del proceso.
+
+La activación de esta entrega es únicamente para DEV. El bucket de STA queda
+documentado para una promoción posterior.
+
 ## Solicitud para Infra
 
 Texto listo para enviar (Infra puede adaptar el nombre a su convención):
@@ -14,7 +36,7 @@ Texto listo para enviar (Infra puede adaptar el nombre a su convención):
 > La identidad debe poder hacer `s3:GetObject`, `s3:PutObject`,
 > `s3:DeleteObject` y `s3:AbortMultipartUpload` únicamente sobre
 > `arn:aws:s3:::<BUCKET>/*`. No necesitan acceso público ni listar otros
-> buckets. Preferimos un ServiceAccount dedicado llamado `ticketflow`.
+> buckets. El ServiceAccount existente es `recordia/ticketflow-ui`.
 >
 > Como protección operativa, solicitamos versionado y una lifecycle rule para
 > abortar multipart uploads incompletos después de 7 días; las versiones no
@@ -58,8 +80,9 @@ La implementación actual solicita SSE-S3 (`AES256`) en cada escritura.
 - Los objetos usan claves aleatorias bajo
   `<prefijo>/attachments/tickets/<ticket-id>/`; el nombre original saneado queda
   en base de datos.
-- El bucket nunca se expone al navegador. TicketFlow valida permisos sobre el
-  ticket y genera una URL firmada de cinco minutos para la descarga.
+- TicketFlow valida permisos sobre el ticket antes de generar una URL S3
+  firmada con Signature V4 de cinco minutos para descargar el objeto privado.
+  El navegador recibe esa URL temporal, nunca acceso público al bucket.
 - Se admiten hasta 5 archivos, 15 MB por archivo y 25 MB en conjunto.
 - Una subida pendiente se puede eliminar desde el editor. Las abandonadas se
   borran automáticamente después de 24 horas mediante Celery Beat.
@@ -75,9 +98,11 @@ La implementación actual solicita SSE-S3 (`AES256`) en cada escritura.
 
 ```env
 ATTACHMENT_STORAGE_BACKEND=s3
-ATTACHMENT_STORAGE_PREFIX=sta
-PUBLIC_ATTACHMENTS_S3_BUCKET=<bucket-entregado-por-infra>
+ATTACHMENT_STORAGE_PREFIX=dev
+PUBLIC_ATTACHMENTS_S3_BUCKET=dev-ticketflow-filestorage
 PUBLIC_ATTACHMENTS_S3_REGION=eu-west-1
+HELP_CONTENT_S3_BUCKET=dev-ticketflow-filestorage
+HELP_CONTENT_S3_REGION=eu-west-1
 PUBLIC_ATTACHMENT_MAX_FILES=5
 PUBLIC_ATTACHMENT_MAX_BYTES=15728640
 PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES=26214400
@@ -90,17 +115,38 @@ OUTBOUND_EMAIL_ATTACHMENT_MAX_BYTES=26214400
 centro de ayuda se guardan bajo `help-content/`. Si se usa otro bucket, se debe
 conceder el mismo conjunto mínimo de acciones para ese ARN.
 
-## Activación en STA
+## Activación y comprobación en DEV
 
-1. Infra crea bucket, policy e identidad de workload y devuelve sus nombres.
-2. Añadir `serviceAccountName: ticketflow` a los deployments web y worker si
-   Infra ha elegido ese ServiceAccount.
-3. Descomentar el bucket en `k8s/configmap.yaml` y cambiar el backend a `s3`.
-4. Aplicar ConfigMap y deployments; reiniciar web y worker.
+1. Verificar bucket, permisos y EKS Pod Identity. La policy dedicada debe
+   permitir también `s3:AbortMultipartUpload` para limpiar subidas fallidas.
+2. Publicar los cuatro ConfigMaps de DEV en Recordia-Kubernetes y la imagen
+   de TicketFlow con la precedencia de configuración corregida.
+3. Ejecutar el CD `DEV-CD-Kubernetes`, tipo `Manifests`, carpeta `TicketFlow.UI`,
+   proyecto `Recordia`, seleccionando `pipelines.templates@feature/kubernetes`
+   en Resources. El cambio de imagen reinicia los pods con la nueva configuración.
+4. Verificar Healthy/Synced en Argo CD y ejecutar en web y worker:
+
+   ```sh
+   python3 main.py check_attachment_storage
+   python3 main.py check_attachment_storage --size-mb 9
+   ```
+
+   El comando crea una clave aleatoria bajo `dev/attachments/checks/`, sube un
+   archivo de prueba, comprueba cifrado, contenido y descarga firmada por HTTPS,
+   y borra su propio objeto al terminar. No crea tickets ni envía correos.
+   Los 9 MB ejercitan la subida multipart. Si hay versionado, S3 conserva las
+   versiones anteriores según la retención corporativa. Un fallo devuelve
+   código de salida distinto de cero y no imprime la URL firmada.
+
 5. Probar subida, visualización, descarga, eliminación de una subida pendiente,
    respuesta pública con adjunto y correo entrante con adjunto.
 6. Verificar en S3 que el objeto es privado, está cifrado y usa el prefijo de
-   STA. Revisar logs para confirmar que no hay `attachment_storage_failed`.
+   DEV. Revisar logs para confirmar que no hay `attachment_storage_failed`.
+
+Los adjuntos ya guardados como `local` conservan ese backend. Activar S3 no
+migra ni recupera automáticamente archivos del disco efímero de pods antiguos;
+hay que inventariar y copiar los archivos disponibles antes de retirar esos
+pods si se necesita conservarlos.
 
 Rollback: volver temporalmente a la imagen anterior. No cambiar a `local` en un
 cluster con varias réplicas, porque los archivos quedarían ligados al pod que

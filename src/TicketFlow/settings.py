@@ -83,10 +83,15 @@ def find_project_root(current_path, marker=".env"):
 # Base para referenciar carpetas fuera de src/ de forma dinámica
 PROJECT_ROOT = find_project_root(__file__)
 
-# Buscamos el .env un nivel por encima (raíz del proyecto)
+def _load_project_environment(path):
+    if path.exists():
+        # Kubernetes wins over .env files downloaded at container startup.
+        load_dotenv(path, override=False)
+
+
+# Buscamos el .env un nivel por encima (raíz del proyecto).
 env_path = PROJECT_ROOT / ".env"
-if env_path.exists():
-    load_dotenv(env_path, override=True)
+_load_project_environment(env_path)
 if os.getenv("DISABLE_AWS_SSM", "").lower() in ("1", "true", "yes", "on"):
     os.environ["AWS_SSM_PREFIX"] = ""
 
@@ -281,9 +286,8 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'TicketFlow.wsgi.application'
 # Database — credenciales desde AWS SSM Parameter Store (prod/dev) o .env (local sin SSM)
-# DISABLE_AWS_SSM=1 (variable de entorno, no .env) permite ejecutar checks/tests
-# sin sesión AWS: el .env se carga con override=True, así que es la única forma
-# de desactivar SSM puntualmente desde fuera. (Documentada en docs/backend-architecture.md)
+# DISABLE_AWS_SSM=1 permite ejecutar checks/tests sin sesión AWS.
+# Las variables del proceso tienen prioridad sobre el .env.
 if os.getenv("DISABLE_AWS_SSM", os.getenv("AWS_SSM_DISABLE", "")).lower() in ("1", "true", "yes", "on"):
     _ssm_prefix = None
 else:

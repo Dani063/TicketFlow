@@ -137,6 +137,27 @@ class AttachmentStorageTests(TestCase):
         client_factory.return_value.get_object.return_value = {"Body": io.BytesIO(b"content")}
         self.assertEqual(AttachmentService.read(attachment), b"content")
 
+    @override_settings(ATTACHMENT_STORAGE_BACKEND="s3", PUBLIC_ATTACHMENTS_S3_BUCKET="ticketflow-private-test")
+    @patch("app.services.attachments.AttachmentService._s3_client")
+    def test_authorized_download_redirects_to_private_signed_url(self, client_factory):
+        attachment = AttachmentService.save(self._file(), self.ticket, self.agent)
+        client_factory.return_value.generate_presigned_url.return_value = "https://example.invalid/signed"
+        self.client.force_login(self.agent)
+        response = self.client.get(reverse("attachment_download", args=[attachment.id]))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "https://example.invalid/signed")
+        params = client_factory.return_value.generate_presigned_url.call_args.kwargs["Params"]
+        self.assertEqual(params["Key"], attachment.storage_key)
+        self.assertEqual(params["Bucket"], "ticketflow-private-test")
+
+    @override_settings(ATTACHMENT_STORAGE_BACKEND="s3", PUBLIC_ATTACHMENTS_S3_BUCKET="ticketflow-private-test")
+    @patch("app.services.attachments.AttachmentService._s3_client")
+    def test_anonymous_download_cannot_obtain_a_signed_url(self, client_factory):
+        attachment = AttachmentService.save(self._file(), self.ticket, self.agent)
+        response = self.client.get(reverse("attachment_download", args=[attachment.id]))
+        self.assertEqual(response.status_code, 404)
+        client_factory.return_value.generate_presigned_url.assert_not_called()
+
     @override_settings(ATTACHMENT_STORAGE_BACKEND="local", PUBLIC_ATTACHMENTS_S3_BUCKET="")
     def test_pending_attachment_can_be_removed_by_its_uploader(self):
         attachment = AttachmentService.save(self._file(), self.ticket, self.agent)

@@ -7,6 +7,7 @@ import uuid
 from datetime import timedelta
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
 from django.core.files.storage import default_storage
@@ -89,6 +90,7 @@ class AttachmentService:
         return boto3.client(
             "s3",
             region_name=getattr(settings, "PUBLIC_ATTACHMENTS_S3_REGION", None),
+            config=Config(signature_version="s3v4"),
         )
 
     @staticmethod
