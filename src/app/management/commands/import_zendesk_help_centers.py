@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from urllib.parse import quote, unquote, urljoin, urlparse
 
-import bleach
 import requests
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -16,7 +15,8 @@ from django.utils.dateparse import parse_datetime
 from django.utils.html import strip_tags
 from django.utils.text import slugify
 
-from app.models import Brand, HelpArticle, HelpCategory, HelpCenter, HelpSection
+from app.models import Brand, HelpArticle, HelpArticleRevision, HelpCategory, HelpCenter, HelpSection
+from app.services.help_content import sanitize_help_html
 
 
 SOURCES = {
@@ -95,36 +95,13 @@ COMMUNITY_ARTICLES = {
     ],
 }
 
-ALLOWED_TAGS = set(bleach.sanitizer.ALLOWED_TAGS) | {
-    "p", "br", "div", "span", "h1", "h2", "h3", "h4", "h5", "hr", "img", "figure", "figcaption",
-    "table", "thead", "tbody", "tfoot", "tr", "th", "td", "pre", "code", "blockquote", "iframe", "video", "source",
-    "details", "summary", "ol", "ul", "li", "strong", "em", "sup", "sub",
-}
-ALLOWED_ATTRIBUTES = {
-    "a": ["href", "title", "target", "rel"], "img": ["src", "alt", "width", "height", "loading"],
-    "iframe": ["src", "title", "width", "height", "allow", "allowfullscreen", "loading"],
-    "video": ["src", "controls", "width", "height"], "source": ["src", "type"],
-    "th": ["colspan", "rowspan", "scope"], "td": ["colspan", "rowspan"], "div": ["class"], "span": ["class"],
-}
-
-
 def _slug(title, source_id):
     return (slugify(title, allow_unicode=False)[:185] or f"article-{source_id}")
 
 
 def _clean_body(body):
-    body = bleach.clean(body or "", tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRIBUTES, protocols={"http", "https", "mailto"}, strip=True)
-    # Solo se conservan embeds de video conocidos.
-    def safe_iframe(match):
-        tag = match.group(0)
-        src_match = re.search(r'src=["\']([^"\']+)', tag, re.I)
-        host = urlparse(src_match.group(1)).hostname.lower() if src_match and urlparse(src_match.group(1)).hostname else ""
-        if host not in {"www.youtube.com", "youtube.com", "www.youtube-nocookie.com", "player.vimeo.com"}:
-            return ""
-        return tag.replace("<iframe", '<iframe loading="lazy"', 1) if "loading=" not in tag else tag
-    body = re.sub(r"<iframe\b[^>]*>.*?</iframe>", safe_iframe, body, flags=re.I | re.S)
-    body = re.sub(r"<img(?![^>]*\bloading=)", '<img loading="lazy"', body, flags=re.I)
-    return body
+    # Se conserva como alias por compatibilidad con pruebas y scripts existentes.
+    return sanitize_help_html(body)
 
 
 def _human_size(value):
@@ -189,6 +166,10 @@ class Command(BaseCommand):
         parser.add_argument("--from-snapshot", dest="from_snapshot", help="Importar desde un JSON sin acceder a Zendesk")
         parser.add_argument("--download-assets", action="store_true", help="Descarga imagenes y adjuntos al arbol static")
         parser.add_argument("--prune", action="store_true", help="Despublica contenido que ya no aparece en el origen")
+        parser.add_argument(
+            "--force-editorial-overrides", action="store_true",
+            help="Sobrescribe artículos que un agente haya editado manualmente",
+        )
 
     def handle(self, *args, **options):
         if options["from_snapshot"]:
@@ -205,7 +186,11 @@ class Command(BaseCommand):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             self.stdout.write(self.style.SUCCESS(f"Snapshot escrito en {target}"))
-        counts = self._import(data, prune=options["prune"])
+        counts = self._import(
+            data,
+            prune=options["prune"],
+            force_editorial_overrides=options["force_editorial_overrides"],
+        )
         self.stdout.write(self.style.SUCCESS(
             f"Importados {counts['centers']} centros, {counts['categories']} categorias, "
             f"{counts['sections']} secciones y {counts['articles']} articulos."
@@ -473,7 +458,7 @@ class Command(BaseCommand):
             self.stdout.write(f"Retirados {removed} recursos sin referencia de {center['slug']}.")
 
     @transaction.atomic
-    def _import(self, data, prune=False):
+    def _import(self, data, prune=False, force_editorial_overrides=False):
         counts = {"centers": 0, "categories": 0, "sections": 0, "articles": 0}
         seen = {"categories": set(), "sections": set(), "articles": set()}
         for row in data.get("centers", []):
@@ -501,15 +486,67 @@ class Command(BaseCommand):
                     seen["sections"].add(section.id); counts["sections"] += 1
                     for art_row in sec_row["articles"]:
                         clean_html = _clean_body(art_row.get("body_html", ""))
-                        article, _ = HelpArticle.objects.update_or_create(section=section, slug=art_row["slug"], defaults={
+                        defaults = {
                             "source_id": art_row.get("source_id"), "translation_key": art_row.get("translation_key", ""), "title": art_row["title"],
                             "body_html": clean_html, "body_text": html.unescape(strip_tags(clean_html)), "promoted": art_row.get("promoted", False),
                             "position": art_row.get("position", 0), "source_url": art_row.get("source_url", ""),
                             "source_updated_at": parse_datetime(art_row["source_updated_at"]) if art_row.get("source_updated_at") else None, "published": True,
-                        })
+                        }
+                        source_id = art_row.get("source_id")
+                        article = None
+                        if source_id:
+                            article = HelpArticle.objects.filter(
+                                source_id=source_id,
+                                section__category__center=center,
+                                section__category__locale=cat_row["locale"],
+                            ).first()
+                        article = article or HelpArticle.objects.filter(section=section, slug=art_row["slug"]).first()
+                        if article and (article.editorial_override or article.origin == HelpArticle.ORIGIN_AGENT) and not force_editorial_overrides:
+                            seen["articles"].add(article.id); counts["articles"] += 1
+                            continue
+
+                        created = article is None
+                        if created:
+                            article = HelpArticle(section=section, slug=art_row["slug"], origin=HelpArticle.ORIGIN_ZENDESK)
+                        before = (article.section_id, article.slug) + tuple(getattr(article, key, None) for key in defaults)
+                        article.section = section
+                        article.slug = art_row["slug"]
+                        for key, value in defaults.items():
+                            setattr(article, key, value)
+                        article.origin = HelpArticle.ORIGIN_ZENDESK
+                        article.editorial_override = False
+                        after = (article.section_id, article.slug) + tuple(getattr(article, key, None) for key in defaults)
+                        changed = created or before != after
+                        if changed:
+                            if not created:
+                                article.version += 1
+                            article.save()
+                            HelpArticleRevision.objects.filter(
+                                article=article, status=HelpArticleRevision.STATUS_PUBLISHED,
+                            ).update(status=HelpArticleRevision.STATUS_SUPERSEDED)
+                            revision = HelpArticleRevision.objects.create(
+                                article=article,
+                                number=(article.revisions.order_by("-number").values_list("number", flat=True).first() or 0) + 1,
+                                section=article.section,
+                                slug=article.slug,
+                                title=article.title,
+                                body_html=article.body_html,
+                                body_text=article.body_text,
+                                promoted=article.promoted,
+                                position=article.position,
+                                status=HelpArticleRevision.STATUS_PUBLISHED,
+                                base_version=article.version,
+                                change_note="Sincronización con Zendesk",
+                                published_at=article.updated_at,
+                            )
+                            article.published_revision = revision
+                            article.save(update_fields=["published_revision"])
                         seen["articles"].add(article.id); counts["articles"] += 1
         if prune:
-            HelpArticle.objects.exclude(id__in=seen["articles"]).update(published=False)
+            HelpArticle.objects.filter(
+                origin=HelpArticle.ORIGIN_ZENDESK,
+                editorial_override=False,
+            ).exclude(id__in=seen["articles"]).update(published=False)
             HelpSection.objects.exclude(id__in=seen["sections"]).update(published=False)
             HelpCategory.objects.exclude(id__in=seen["categories"]).update(published=False)
         return counts

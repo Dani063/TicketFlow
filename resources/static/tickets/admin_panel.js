@@ -15,6 +15,22 @@
         return '';
     }
     function hdr() { return { 'Content-Type': 'application/json', 'X-CSRFToken': csrf() }; }
+    // json_error() responde {ok:false, error:{code,message}, detail}: pintar
+    // json.error directamente daba "[object Object]" en los avisos de los modales.
+    // Algun endpoint antiguo devuelve error como cadena, asi que soportamos ambos.
+    // El backend devuelve reused=true cuando, al crear, ha reutilizado una fila
+    // desactivada que ocupaba la misma clave en vez de dar de alta una nueva.
+    // Conviene decirlo: el registro conserva su id y su historial.
+    function savedLabel(json, obj, msgs) {
+        if (!json.reused) return msgs.creado;
+        return obj && obj.active ? msgs.reactivado : msgs.actualizado;
+    }
+
+    function errMsg(json, fallback) {
+        if (!json) return fallback;
+        if (typeof json.error === 'string' && json.error) return json.error;
+        return json.detail || (json.error && json.error.message) || fallback;
+    }
     function esc(s) {
         return String(s == null ? '' : s)
             .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
@@ -34,6 +50,9 @@
     function closeModal(id) {
         const el = document.getElementById(id);
         if (!el) return;
+        // Al cerrar, el campo vuelve a ser un input de texto vacio: si se quedara
+        // como type="password" el navegador seguiria viendo un formulario de acceso.
+        if (id === 'userModal') resetUserPasswordField();
         el.classList.remove('open');
         el.classList.add('closing');
         const finish = () => { el.classList.remove('closing'); };
@@ -313,8 +332,24 @@
         clearSel(); loadUsers(false);
     });
 
-    function openUserModal(u) {
+    // El campo de contraseña solo es type="password" mientras se está escribiendo
+    // en él. En reposo es un input de texto vacío, para que el gestor de
+    // contraseñas del navegador no vea un formulario de acceso en el panel.
+    const _userPwd = document.getElementById('userModalPassword');
+    if (_userPwd) {
+        _userPwd.addEventListener('focus', () => { _userPwd.type = 'password'; });
+    }
+    function resetUserPasswordField() {
+        if (!_userPwd) return;
+        _userPwd.value = '';
+        _userPwd.type = 'text';
+    }
+
+    async function openUserModal(u) {
         hideErr('userModalError');
+        // Antes de volcar los valores: si otra pestana borro un grupo, el <option>
+        // seguiria ahi y se guardaria un id inexistente.
+        await refreshRoleGroupOptions();
         document.getElementById('userModalId').value    = u ? u.id : '';
         document.getElementById('userModalTitle').textContent = u ? 'Editar usuario' : 'Nuevo usuario';
         document.getElementById('userModalName').value  = u ? u.name : '';
@@ -323,7 +358,7 @@
         document.getElementById('userModalGroup').value = u && u.group_id ? u.group_id : '';
         document.getElementById('userModalActive').value = u ? String(u.is_active) : 'true';
         document.getElementById('userModalActiveField').style.display = u ? 'flex' : 'none';
-        document.getElementById('userModalPassword').value = '';
+        resetUserPasswordField();
         openModal('userModal');
     }
 
@@ -346,7 +381,7 @@
         try {
             const res  = await fetch('/api/admin/users/', { method:id?'PUT':'POST', headers:hdr(), body:JSON.stringify(payload) });
             const json = await res.json();
-            if (!json.ok) { showErr('userModalError', json.error||'Error al guardar'); return; }
+            if (!json.ok) { showErr('userModalError', errMsg(json, 'Error al guardar')); return; }
             closeModal('userModal');
             window.toast.success(id ? 'Usuario actualizado' : 'Usuario creado');
             loadUsers(false);
@@ -363,7 +398,7 @@
         try {
             const res  = await fetch('/api/admin/users/?id='+id, { method:'DELETE', headers:hdr() });
             const json = await res.json();
-            if (!json.ok) { window.toast.error(json.error||'Error'); return; }
+            if (!json.ok) { window.toast.error(errMsg(json, 'Error')); return; }
             window.toast.success(json.deactivated ? 'Usuario desactivado' : 'Usuario eliminado');
             clearSel(); loadUsers(false);
         } catch(e) { window.toast.error('Error de red'); }
@@ -375,7 +410,7 @@
         try {
             const res  = await fetch(`/api/admin/users/${id}/password/`, { method:'POST', headers:hdr(), body:JSON.stringify({password:pwd}) });
             const json = await res.json();
-            if (!json.ok) { window.toast.error(json.error||'Error'); return; }
+            if (!json.ok) { window.toast.error(errMsg(json, 'Error')); return; }
             window.toast.success('Contraseña actualizada');
         } catch(e) { window.toast.error('Error de red'); }
     }
@@ -444,8 +479,8 @@
         try {
             const res  = await fetch('/api/admin/roles/', { method:id?'PUT':'POST', headers:hdr(), body:JSON.stringify(payload) });
             const json = await res.json();
-            if (!json.ok) { showErr('roleModalError', json.error||'Error'); return; }
-            closeModal('roleModal'); window.toast.success(id?'Rol actualizado':'Rol creado'); loadRoles();
+            if (!json.ok) { showErr('roleModalError', errMsg(json, 'Error')); return; }
+            closeModal('roleModal'); window.toast.success(id?'Rol actualizado':'Rol creado'); loadRoles(); refreshRoleGroupOptions();
         } catch(e) { showErr('roleModalError', 'Error de red'); }
     });
 
@@ -455,9 +490,73 @@
         try {
             const res  = await fetch('/api/admin/roles/?id='+id, { method:'DELETE', headers:hdr() });
             const json = await res.json();
-            if (!json.ok) { window.toast.error(json.error||'Error'); return; }
-            window.toast.success('Rol eliminado'); loadRoles();
+            if (!json.ok) { window.toast.error(errMsg(json, 'Error')); return; }
+            window.toast.success('Rol eliminado'); loadRoles(); refreshRoleGroupOptions();
         } catch(e) { window.toast.error('Error de red'); }
+    }
+
+    /* Los desplegables de rol y grupo salen renderizados desde la plantilla, asi
+       que crear o borrar uno dejaba la lista congelada a como estaba al cargar la
+       pagina: se podia asignar a un usuario un grupo ya borrado y el guardado
+       fallaba con "Grupo no encontrado". Se repueblan desde la API tras cada alta
+       o baja y al abrir el modal de usuario. */
+    function fillSelectOptions(ids, items, nameField) {
+        ids.forEach(id => {
+            const sel = document.getElementById(id);
+            if (!sel) return;
+            const previo = sel.value;
+            const placeholder = sel.options[0];   // «Todos los…» / «— sin … —»
+            sel.innerHTML = '';
+            if (placeholder) sel.appendChild(placeholder);
+            items.forEach(it => sel.appendChild(new Option(it[nameField], it.id)));
+            sel.value = Array.from(sel.options).some(o => o.value === previo) ? previo : '';
+        });
+    }
+
+    function fillScopeOptions(containerId, items, nameField, vacio) {
+        const box = document.getElementById(containerId);
+        if (!box) return;
+        const marcados = new Set(readScope(containerId));
+        box.innerHTML = '';
+        if (!items.length) {
+            const hint = document.createElement('span');
+            hint.className = 'tf-hint';
+            hint.textContent = vacio;
+            box.appendChild(hint);
+        } else {
+            items.forEach(it => {
+                const label = document.createElement('label');
+                label.className = 'tf-multi-opt';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.value = String(it.id);
+                cb.checked = marcados.has(String(it.id));
+                const txt = document.createElement('span');
+                txt.textContent = it[nameField];
+                label.appendChild(cb);
+                label.appendChild(txt);
+                box.appendChild(label);
+            });
+        }
+        refreshScopeSummary(containerId);
+    }
+
+    async function refreshRoleGroupOptions() {
+        try {
+            const [roles, groups] = await Promise.all([
+                fetch('/api/admin/roles/').then(r => r.json()),
+                fetch('/api/admin/groups/').then(r => r.json()),
+            ]);
+            if (Array.isArray(roles.roles)) {
+                fillSelectOptions(['usersRoleFilter', 'userModalRole'], roles.roles, 'role_name');
+            }
+            if (Array.isArray(groups.groups)) {
+                fillSelectOptions(['usersGroupFilter', 'userModalGroup'], groups.groups, 'group_name');
+                fillScopeOptions('ruleGroups', groups.groups, 'group_name', 'No hay grupos definidos.');
+            }
+        } catch (e) {
+            console.error('No se pudieron refrescar las listas de roles y grupos', e);
+        }
     }
 
     /* ================================================================
@@ -524,8 +623,8 @@
         try {
             const res  = await fetch('/api/admin/groups/', { method:id?'PUT':'POST', headers:hdr(), body:JSON.stringify(payload) });
             const json = await res.json();
-            if (!json.ok) { showErr('groupModalError', json.error||'Error'); return; }
-            closeModal('groupModal'); window.toast.success(id?'Grupo actualizado':'Grupo creado'); loadGroups();
+            if (!json.ok) { showErr('groupModalError', errMsg(json, 'Error')); return; }
+            closeModal('groupModal'); window.toast.success(id?'Grupo actualizado':'Grupo creado'); loadGroups(); refreshRoleGroupOptions();
         } catch(e) { showErr('groupModalError', 'Error de red'); }
     });
 
@@ -541,8 +640,8 @@
         try {
             const res  = await fetch('/api/admin/groups/?id='+id, { method:'DELETE', headers:hdr() });
             const json = await res.json();
-            if (!json.ok) { window.toast.error(json.error||'Error'); return; }
-            window.toast.success('Grupo eliminado'); loadGroups();
+            if (!json.ok) { window.toast.error(errMsg(json, 'Error')); return; }
+            window.toast.success('Grupo eliminado'); loadGroups(); refreshRoleGroupOptions();
         } catch(e) { window.toast.error('Error de red'); }
     }
 
@@ -799,7 +898,7 @@
                 method: id ? 'PUT' : 'POST', headers: hdr(), body: JSON.stringify(payload),
             });
             const json = await res.json();
-            if (!json.ok) { showErr('ruleModalError', json.error || 'Error al guardar'); return; }
+            if (!json.ok) { showErr('ruleModalError', errMsg(json, 'Error al guardar')); return; }
             closeModal('ruleModal');
             window.toast.success(id ? 'Regla actualizada' : 'Regla creada');
             loadRules();
@@ -816,7 +915,7 @@
         try {
             const res  = await fetch('/api/admin/assignment-rules/?id=' + id, { method: 'DELETE', headers: hdr() });
             const json = await res.json();
-            if (!json.ok) { window.toast.error(json.error || 'Error'); return; }
+            if (!json.ok) { window.toast.error(errMsg(json, 'Error')); return; }
             window.toast.success('Regla desactivada'); loadRules();
         } catch(e) { window.toast.error('Error de red'); }
     }
@@ -870,7 +969,9 @@
                     </td>
                     <td class="col-actions"><div class="tf-admin-table-actions">
                         <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${t.id}" title="Editar" aria-label="Editar plantilla ${esc(t.key)}"><i class="fas fa-pen"></i></button>
-                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${t.id}" ${t.active?'':'disabled'} title="Desactivar" aria-label="Desactivar plantilla ${esc(t.key)}"><i class="fas fa-ban"></i></button>
+                        ${t.active
+                            ? `<button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${t.id}" title="Desactivar" aria-label="Desactivar plantilla ${esc(t.key)}"><i class="fas fa-ban"></i></button>`
+                            : `<button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="act" data-id="${t.id}" title="Reactivar" aria-label="Reactivar plantilla ${esc(t.key)}"><i class="fas fa-undo"></i></button>`}
                     </div></td>`;
                 frag.appendChild(tr);
             });
@@ -887,6 +988,7 @@
         const id = parseInt(btn.dataset.id, 10);
         if (btn.dataset.action === 'edit') openTemplateModal(_tMap.get(id));
         if (btn.dataset.action === 'del')  deactivateTemplate(id);
+        if (btn.dataset.action === 'act')  reactivateTemplate(id);
     });
 
     document.getElementById('btnNewTemplate').addEventListener('click', () => openTemplateModal(null));
@@ -929,7 +1031,7 @@
                 method: 'POST', headers: hdr(), body: JSON.stringify(templatePayload()),
             });
             const json = await res.json();
-            if (!json.ok) { showErr('templateModalError', json.error || 'Error en la vista previa'); return; }
+            if (!json.ok) { showErr('templateModalError', errMsg(json, 'Error en la vista previa')); return; }
             document.getElementById('templatePreviewSubject').textContent = json.preview.subject;
             document.getElementById('templatePreviewBody').innerHTML = json.preview.body_html;
             document.getElementById('templatePreviewArea').style.display = '';
@@ -946,9 +1048,11 @@
                 method: id ? 'PUT' : 'POST', headers: hdr(), body: JSON.stringify(payload),
             });
             const json = await res.json();
-            if (!json.ok) { showErr('templateModalError', json.error || 'Error al guardar'); return; }
+            if (!json.ok) { showErr('templateModalError', errMsg(json, 'Error al guardar')); return; }
             closeModal('templateModal');
-            window.toast.success(id ? 'Plantilla actualizada' : 'Plantilla creada');
+            window.toast.success(id ? 'Plantilla actualizada' : savedLabel(json, json.template, {
+                creado: 'Plantilla creada', reactivado: 'Plantilla reactivada', actualizado: 'Plantilla actualizada',
+            }));
             loadTemplates();
         } catch(e) { showErr('templateModalError', 'Error de red'); }
     });
@@ -963,8 +1067,28 @@
         try {
             const res  = await fetch('/api/admin/response-templates/?id=' + id, { method: 'DELETE', headers: hdr() });
             const json = await res.json();
-            if (!json.ok) { window.toast.error(json.error || 'Error'); return; }
+            if (!json.ok) { window.toast.error(errMsg(json, 'Error')); return; }
             window.toast.success('Plantilla desactivada'); loadTemplates();
+        } catch(e) { window.toast.error('Error de red'); }
+    }
+
+    // Igual que en los motivos: desactivar no borra, la clave sigue ocupada y sin
+    // esto no habia forma de volver a activarla ni de recrear la plantilla.
+    async function reactivateTemplate(id) {
+        const t = _tMap.get(id);
+        if (!t) return;
+        try {
+            const res  = await fetch('/api/admin/response-templates/', {
+                method: 'PUT', headers: hdr(),
+                body: JSON.stringify({
+                    id: t.id, key: t.key, brand_id: t.brand_id, language: t.language,
+                    subject: t.subject, body_html: t.body_html, body_text: t.body_text,
+                    active: true,
+                }),
+            });
+            const json = await res.json();
+            if (!json.ok) { window.toast.error(errMsg(json, 'Error')); return; }
+            window.toast.success('Plantilla reactivada'); loadTemplates();
         } catch(e) { window.toast.error('Error de red'); }
     }
 
@@ -999,7 +1123,9 @@
                     </td>
                     <td class="col-actions"><div class="tf-admin-table-actions">
                         <button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="edit" data-id="${r.id}" title="Editar" aria-label="Editar motivo ${esc(r.label)}"><i class="fas fa-pen"></i></button>
-                        <button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${r.id}" ${r.active?'':'disabled'} title="Desactivar" aria-label="Desactivar motivo ${esc(r.label)}"><i class="fas fa-ban"></i></button>
+                        ${r.active
+                            ? `<button class="tf-btn tf-btn--danger tf-btn--sm" data-action="del" data-id="${r.id}" title="Desactivar" aria-label="Desactivar motivo ${esc(r.label)}"><i class="fas fa-ban"></i></button>`
+                            : `<button class="tf-btn tf-btn--secondary tf-btn--sm" data-action="act" data-id="${r.id}" title="Reactivar" aria-label="Reactivar motivo ${esc(r.label)}"><i class="fas fa-undo"></i></button>`}
                     </div></td>`;
                 frag.appendChild(tr);
             });
@@ -1016,6 +1142,7 @@
         const id = parseInt(btn.dataset.id, 10);
         if (btn.dataset.action === 'edit') openReasonModal(_reasonMap.get(id));
         if (btn.dataset.action === 'del')  deactivateReason(id);
+        if (btn.dataset.action === 'act')  reactivateReason(id);
     });
 
     document.getElementById('btnNewReason').addEventListener('click', () => openReasonModal(null));
@@ -1048,9 +1175,11 @@
                 method: id ? 'PUT' : 'POST', headers: hdr(), body: JSON.stringify(payload),
             });
             const json = await res.json();
-            if (!json.ok) { showErr('reasonModalError', json.error || 'Error al guardar'); return; }
+            if (!json.ok) { showErr('reasonModalError', errMsg(json, 'Error al guardar')); return; }
             closeModal('reasonModal');
-            window.toast.success(id ? 'Motivo actualizado' : 'Motivo creado');
+            window.toast.success(id ? 'Motivo actualizado' : savedLabel(json, json.reason, {
+                creado: 'Motivo creado', reactivado: 'Motivo reactivado', actualizado: 'Motivo actualizado',
+            }));
             loadReasons();
         } catch(e) { showErr('reasonModalError', 'Error de red'); }
     });
@@ -1065,8 +1194,28 @@
         try {
             const res  = await fetch('/api/admin/satisfaction-reasons/?id=' + id, { method: 'DELETE', headers: hdr() });
             const json = await res.json();
-            if (!json.ok) { window.toast.error(json.error || 'Error'); return; }
+            if (!json.ok) { window.toast.error(errMsg(json, 'Error')); return; }
             window.toast.success('Motivo desactivado'); loadReasons();
+        } catch(e) { window.toast.error('Error de red'); }
+    }
+
+    // Desactivar no borra (las valoraciones emitidas apuntan al motivo), asi que el
+    // codigo sigue ocupado y no se puede recrear el mismo motivo: hace falta poder
+    // volver a activarlo desde la propia tabla.
+    async function reactivateReason(id) {
+        const r = _reasonMap.get(id);
+        if (!r) return;
+        try {
+            const res  = await fetch('/api/admin/satisfaction-reasons/', {
+                method: 'PUT', headers: hdr(),
+                body: JSON.stringify({
+                    id: r.id, label: r.label, code: r.code,
+                    language: r.language, position: r.position, active: true,
+                }),
+            });
+            const json = await res.json();
+            if (!json.ok) { window.toast.error(errMsg(json, 'Error')); return; }
+            window.toast.success('Motivo reactivado'); loadReasons();
         } catch(e) { window.toast.error('Error de red'); }
     }
 

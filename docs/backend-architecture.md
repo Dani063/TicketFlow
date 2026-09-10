@@ -197,8 +197,12 @@ Envío de email saliente por marca (`Brand.mailbox_type`): `ses` → API SESv2 c
   `EmailIngestionService.is_auto_generated`), renderiza la plantilla `ticket_created`,
   crea `OutboundEmailLog` con `dedup_key` único y encola `send_outbound_email` en
   `transaction.on_commit`. Toda supresión queda registrada con su motivo.
+- `queue_agent_reply(ticket, comment)`: renderiza `agent_reply` y deduplica por comentario.
+  Solo se invoca para comentarios públicos escritos por agentes; su interruptor es
+  `OUTBOUND_AGENT_REPLY_ENABLED` y no depende del acuse de creación.
 - `deliver(log)`: entrega real, llamada desde la tarea. SES devuelve `MessageId`; Graph
-  devuelve 202 (la copia queda en Enviados).
+  devuelve 202 (la copia queda en Enviados). La tarea revalida los interruptores global
+  y por plantilla justo antes de entregar para suprimir filas antiguas que sigan en cola.
 
 ### `TicketAIService` — `ticket_ai.py` (+ `ai.py`)
 

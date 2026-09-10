@@ -6,6 +6,11 @@
 (function () {
     const data = window.__customersData || {};
     const CUSTOMER_PROFILE_URL = data.customerProfileUrl || '/customer-profile/';
+    const INITIAL_VIEW = data.initialView || 'all';
+    const VIEW_LABELS = {
+        all: 'Todos los clientes',
+        suspended: 'Usuarios suspendidos',
+    };
 
     let _currentView = null;
     let _currentPage = 1;
@@ -16,6 +21,13 @@
 
     function getUrlParam(name) {
         return new URLSearchParams(window.location.search).get(name);
+    }
+
+    function updateViewHeading(view) {
+        const label = VIEW_LABELS[view] || 'Clientes';
+        const heading = document.getElementById('customersViewTitle');
+        if (heading) heading.textContent = label;
+        document.title = `TicketFlow – ${label}`;
     }
 
     function getPageRange(current, total) {
@@ -117,6 +129,7 @@
 
         _currentView = view;
         _currentPage = page;
+        updateViewHeading(view);
 
         const spinner = document.getElementById("loadingSpinner");
         const tbody   = document.getElementById("customersTableBody");
@@ -216,7 +229,7 @@
         const filters = document.querySelectorAll("#customerFilters li");
         const filtersPanel = document.getElementById('customerFiltersPanel');
         const filtersToggle = document.getElementById('customerFiltersToggle');
-        let activeView = getUrlParam("view");
+        let activeView = getUrlParam("view") || INITIAL_VIEW;
         let activePage = parseInt(getUrlParam("page") || "1", 10) || 1;
         let savedSize  = parseInt(getUrlParam("page_size") || "50", 10);
         if ([10,20,50,100,150].includes(savedSize)) {
@@ -228,7 +241,8 @@
         const savedSort = getUrlParam("sort_by");
         if (savedSort) { _sortBy = savedSort; _sortDir = getUrlParam("sort_dir") || 'asc'; }
 
-        if (!activeView && filters.length > 0) activeView = filters[0].dataset.view;
+        const availableViews = new Set(Array.from(filters, filter => filter.dataset.view));
+        if (!availableViews.has(activeView) && filters.length > 0) activeView = filters[0].dataset.view;
 
         if (filtersToggle && filtersPanel) {
             filtersToggle.addEventListener('click', () => {
@@ -238,6 +252,10 @@
         }
 
         filters.forEach(f => {
+            const isActive = f.dataset.view === activeView;
+            f.classList.toggle('active', isActive);
+            if (isActive) f.setAttribute('aria-current', 'true');
+            else f.removeAttribute('aria-current');
             f.addEventListener("click", () => {
                 filters.forEach(x => {
                     x.classList.remove("active");
@@ -251,10 +269,6 @@
                     if (filtersToggle) filtersToggle.setAttribute('aria-expanded', 'false');
                 }
             });
-            if (f.dataset.view === activeView) {
-                f.classList.add("active");
-                f.setAttribute('aria-current', 'true');
-            }
         });
 
         // Wire search/selects via shared helper — restores from URL + debounces.

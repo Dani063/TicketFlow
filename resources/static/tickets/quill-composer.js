@@ -34,6 +34,11 @@
             theme: 'snow',
             placeholder: 'Escribe un mensaje... (puedes pegar o arrastrar archivos)',
             modules: { toolbar: toolbar },
+            // Sin `bounds`, Quill centra el tooltip de enlace sobre la selección y lo
+            // deja con `left` negativo cuando la selección está al principio de la
+            // línea; `.column2` tiene overflow:hidden y recortaba la etiqueta y parte
+            // del input. Acotarlo al contenedor del editor lo mantiene entero.
+            bounds: editorEl,
         });
 
         const nativeValueDesc = Object.getOwnPropertyDescriptor(

@@ -10,9 +10,21 @@
     <link rel="alternate" hreflang="{{ other_locale }}" href="{{ locale_switch_url }}">
     <title>{% block title %}{{ ui.help_center }} · {{ center.name }}{% endblock %}</title>
     <link rel="stylesheet" href="{% static 'help_centers/public_help.css' %}?v=1.0">
+    {% if can_manage_help %}<link rel="stylesheet" href="{% static 'help_centers/help_editor.css' %}?v=1.0">{% endif %}
 </head>
 <body class="hc-body hc-brand--{{ center.slug }}" style="{{ brand_style }}">
 <a class="hc-skip" href="#main">{% if locale == 'es' %}Saltar al contenido{% else %}Skip to content{% endif %}</a>
+{% if can_manage_help %}
+<aside class="hce-agentbar" aria-label="Herramientas de edición">
+    <div class="hc-wrap hce-agentbar__inner">
+        <span class="hce-agentbar__identity"><span aria-hidden="true">✦</span> Modo agente</span>
+        <span class="hce-agentbar__context">{{ center.name }} · {{ locale|upper }}</span>
+        <nav class="hce-agentbar__actions">
+            {% block agent_actions %}<a href="{% url 'help_editor_article_new' center.slug locale %}">Nuevo artículo</a>{% endblock %}
+        </nav>
+    </div>
+</aside>
+{% endif %}
 <div class="hc-signal" aria-hidden="true"></div>
 <header class="hc-header">
     <div class="hc-wrap hc-header__inner">

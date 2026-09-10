@@ -4,10 +4,11 @@ from django.db import transaction
 from django.utils import timezone
 
 from app.api import APIValidationError
-from app.models import Attachment, Comment, TicketEvent
+from app.models import Attachment, Comment, Ticket, TicketEvent
 from app.permissions import can_comment_ticket, can_update_ticket, is_agent
 from app.sanitizers import sanitize_email_html
 from app.services.metrics import record_metric
+from app.services.attachments import AttachmentService, retry_attachment_mutation
 from app.services.notifications import NotificationService
 from app.services.sla import SLAService
 
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 class CommentService:
     @staticmethod
+    @retry_attachment_mutation
     @transaction.atomic
     def add_comment(
         ticket,
@@ -30,18 +32,38 @@ class CommentService:
         email_message_id=None,
         notify=True,
         send_requester_email=True,
+        request_id=None,
     ):
+        AttachmentService.lock_actor(actor)
+        ticket = Ticket.objects.select_for_update().get(pk=ticket.pk)
         if not can_comment_ticket(actor, ticket):
             raise APIValidationError("forbidden", "No tienes acceso a este ticket.", status=403)
 
-        content = (content or "").strip()
-        html_body = (html_body or "").strip()
-        if not content and not html_body:
-            raise APIValidationError("empty_comment", "El mensaje no puede estar vacío.", status=400)
-
+        if not isinstance(content, str) or not isinstance(html_body, str) or not isinstance(new_status, str) or type(is_public) is not bool:
+            raise APIValidationError('invalid_comment', 'Contenido de comentario inválido.', status=400)
+        content = content.strip()
+        html_body = html_body.strip()
+        attachment_ids = AttachmentService.parse_ids(attachment_ids)
+        request_id = AttachmentService.parse_uuid(request_id, 'request_id')
         final_is_public = bool(is_public) if is_agent(actor) else True
         if html_body:
             html_body = sanitize_email_html(html_body)
+        fingerprint = AttachmentService.fingerprint({
+            'ticket': ticket.id, 'content': content, 'html_body': html_body,
+            'is_public': final_is_public, 'new_status': new_status.lower(),
+            'attachment_ids': attachment_ids, 'via_channel': via_channel,
+            'email_message_id': email_message_id,
+        })
+        previous = AttachmentService.replay(actor, 'comment', request_id, fingerprint)
+        if previous:
+            if previous.comment_id is None:
+                raise APIValidationError('comment_gone', 'El comentario ya no está disponible.', status=410)
+            if not previous.comment.is_public and not is_agent(actor):
+                raise APIValidationError('forbidden', 'No tienes acceso a este comentario.', status=403)
+            return previous.comment, previous.result['new_status']
+        attachments = AttachmentService.pending_for_publish(actor, attachment_ids, ticket=ticket)
+        if not content and not html_body and not attachments:
+            raise APIValidationError('empty_comment', 'El mensaje no puede estar vacío.', status=400)
         now = timezone.now()
 
         comment = Comment.objects.create(
@@ -86,12 +108,8 @@ class CommentService:
             ticket.updated_at = now
             ticket.save(update_fields=["updated_at"])
 
-        if attachment_ids:
-            Attachment.objects.filter(
-                id__in=attachment_ids,
-                ticket=ticket,
-                comment__isnull=True,
-            ).update(comment=comment)
+        if attachments:
+            Attachment.objects.filter(id__in=attachment_ids).update(comment=comment)
 
         SLAService.record_first_response(ticket, actor, comment_is_public=final_is_public)
 
@@ -114,5 +132,7 @@ class CommentService:
 
         if notify:
             NotificationService.notify_ticket_users(ticket, f"Nuevo comentario en ticket #{ticket.id}", actor=actor)
+        AttachmentService.remember(actor, 'comment', request_id, fingerprint,
+                                   ticket=ticket, comment=comment, result={'new_status': applied_status})
         record_metric("comments.created", labels={"ticket_id": ticket.id})
         return comment, applied_status

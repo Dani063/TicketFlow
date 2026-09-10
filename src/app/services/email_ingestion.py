@@ -1,15 +1,19 @@
 import html as htmllib
 import logging
 import re
+from collections import Counter
 from datetime import timedelta
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.utils import timezone
 from django.utils.html import strip_tags
 
-from app.models import Comment, InboundEmailLog, Role, Ticket, TicketEvent, User
+from app.api import APIValidationError
+from app.models import Attachment, Comment, InboundEmailLog, Role, Ticket, TicketEvent, User
 from app.permissions import is_agent
 from app.sanitizers import sanitize_email_html
+from app.services.attachments import AttachmentService
 from app.services.metrics import record_metric
 from app.services.notifications import NotificationService
 from app.services.sla import SLAService
@@ -56,7 +60,7 @@ class EmailIngestionService:
         return False
 
     @staticmethod
-    def process_message(message, brand):
+    def process_message(message, brand, attachments=None):
         msg_id = message["id"]
         conversation_id = message.get("conversationId") or ""
         log, created = InboundEmailLog.objects.get_or_create(
@@ -82,7 +86,9 @@ class EmailIngestionService:
         log.save(update_fields=["status", "conversation_id", "payload", "error"])
 
         try:
-            result, ticket = EmailIngestionService._process_message(message, brand)
+            result, ticket = EmailIngestionService._process_message(
+                message, brand, attachments=attachments,
+            )
         except Exception as exc:
             log.status = InboundEmailLog.STATUS_FAILED
             log.error = str(exc)
@@ -104,7 +110,7 @@ class EmailIngestionService:
         return result
 
     @staticmethod
-    def _process_message(message, brand):
+    def _process_message(message, brand, attachments=None):
         msg_id = message["id"]
         conversation_id = message.get("conversationId") or ""
         subject = message.get("subject") or "(sin asunto)"
@@ -118,21 +124,44 @@ class EmailIngestionService:
         if not sender_email:
             return "skip_no_sender", None
 
-        if Comment.objects.filter(email_message_id=msg_id).exists():
-            return "skip_dup", None
-        if Ticket.objects.filter(email_message_id=msg_id).exists():
-            return "skip_dup", None
-
         requester = EmailIngestionService.get_or_create_requester(sender_email, sender_name)
+        existing_comment = (
+            Comment.objects.select_related("ticket")
+            .filter(email_message_id=msg_id)
+            .first()
+        )
+        if existing_comment:
+            EmailIngestionService._store_attachments(
+                existing_comment.ticket, existing_comment, requester, attachments,
+            )
+            return "skip_dup", existing_comment.ticket
+
+        existing_ticket = Ticket.objects.filter(email_message_id=msg_id).first()
+        if existing_ticket:
+            comment = Comment.objects.filter(
+                ticket=existing_ticket, email_message_id=msg_id,
+            ).first()
+            if attachments and comment is None:
+                comment = EmailIngestionService._create_attachment_only_comment(
+                    existing_ticket, requester, msg_id,
+                )
+            EmailIngestionService._store_attachments(
+                existing_ticket, comment, requester, attachments,
+            )
+            return "skip_dup", existing_ticket
+
         ticket = EmailIngestionService.find_ticket_for_message(subject, conversation_id, brand, requester=requester)
 
         if ticket:
-            EmailIngestionService._add_email_comment(
+            comment = EmailIngestionService._add_email_comment(
                 ticket=ticket,
                 actor=requester,
                 content=text_body or html_body,
                 html_body=html_body,
                 email_message_id=msg_id,
+            )
+            EmailIngestionService._store_attachments(
+                ticket, comment, requester, attachments,
             )
             return "comment_added", ticket
 
@@ -142,6 +171,7 @@ class EmailIngestionService:
                 "subject": subject,
                 "description": text_body or html_body or "",
                 "content": text_body or html_body or "",
+                "html_body": html_body,
                 "status": "open",
                 "priority": None,
                 "requester_id": requester.id,
@@ -154,7 +184,62 @@ class EmailIngestionService:
                 "suppress_requester_email": EmailIngestionService.is_auto_generated(message),
             },
         )
+        comment = Comment.objects.filter(ticket=ticket, email_message_id=msg_id).first()
+        if attachments and comment is None:
+            comment = EmailIngestionService._create_attachment_only_comment(
+                ticket, requester, msg_id,
+            )
+        EmailIngestionService._store_attachments(ticket, comment, requester, attachments)
         return "ticket_created", ticket
+
+    @staticmethod
+    def _create_attachment_only_comment(ticket, actor, email_message_id):
+        return Comment.objects.create(
+            ticket=ticket,
+            user=actor,
+            content="",
+            via_channel="email",
+            created_at=timezone.now(),
+            is_public=True,
+            email_message_id=email_message_id,
+        )
+
+    @staticmethod
+    def _store_attachments(ticket, comment, actor, attachments):
+        """Guarda adjuntos descargados y permite reanudar sin duplicarlos."""
+        if not attachments or comment is None:
+            return []
+
+        existing = Counter(
+            Attachment.objects.filter(comment=comment).values_list("original_name", "size")
+        )
+        encountered = Counter()
+        stored = []
+        for item in attachments:
+            uploaded = SimpleUploadedFile(
+                item.get("name") or "archivo",
+                item.get("content") or b"",
+                content_type=item.get("content_type") or "application/octet-stream",
+            )
+            key = (AttachmentService.safe_name(uploaded.name), uploaded.size)
+            encountered[key] += 1
+            if existing[key] >= encountered[key]:
+                continue
+            try:
+                stored.append(AttachmentService.save(uploaded, ticket, actor, comment=comment))
+            except APIValidationError as exc:
+                if exc.status >= 500:
+                    raise
+                logger.warning(
+                    "inbound_attachment_rejected",
+                    extra={
+                        "ticket_id": ticket.id,
+                        "message_id": comment.email_message_id,
+                        "attachment_name": uploaded.name,
+                        "error_code": exc.code,
+                    },
+                )
+        return stored
 
     @staticmethod
     def get_or_create_requester(email, name):

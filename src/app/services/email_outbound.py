@@ -5,13 +5,15 @@ procede enviar (anti-bucles), se renderiza la plantilla y se registra todo en
 OutboundEmailLog (queued/sent/failed/suppressed).
 """
 
+import base64
 import logging
 import re
 
 from django.conf import settings
 from django.db import transaction
 
-from app.models import Brand, OutboundEmailLog
+from app.models import Attachment, Brand, OutboundEmailLog
+from app.services.attachments import AttachmentService
 from app.services.email_templates import ResponseTemplateService
 from app.services.metrics import record_metric
 
@@ -138,6 +140,11 @@ class OutboundEmailService:
             OutboundEmailService.TEMPLATE_AGENT_REPLY,
             dedup_suffix=str(comment.id),
             context_builder=lambda tkt: ResponseTemplateService.context_for_agent_reply(tkt, comment),
+            payload_extra={
+                "attachment_ids": list(
+                    comment.attachment_set.order_by("id").values_list("id", flat=True)
+                ),
+            },
         )
 
     @staticmethod
@@ -156,7 +163,7 @@ class OutboundEmailService:
         )
 
     @staticmethod
-    def _queue(ticket, template_key, dedup_suffix, context_builder):
+    def _queue(ticket, template_key, dedup_suffix, context_builder, payload_extra=None):
         brand, to_email = OutboundEmailService._recipient(ticket)
 
         blocked = (
@@ -173,6 +180,12 @@ class OutboundEmailService:
 
         rendered = ResponseTemplateService.render(template, context_builder(ticket))
         dedup_key = f"{template_key}:{dedup_suffix}:{to_email.lower()}"[:190]
+        payload = {
+            "body_html": rendered["body_html"],
+            "body_text": rendered["body_text"],
+            "language": language,
+        }
+        payload.update(payload_extra or {})
         log, created = OutboundEmailLog.objects.get_or_create(
             dedup_key=dedup_key,
             defaults={
@@ -182,11 +195,7 @@ class OutboundEmailService:
                 "provider": brand.mailbox_type,
                 "to_email": to_email,
                 "subject": rendered["subject"],
-                "payload": {
-                    "body_html": rendered["body_html"],
-                    "body_text": rendered["body_text"],
-                    "language": language,
-                },
+                "payload": payload,
                 "status": OutboundEmailLog.STATUS_QUEUED,
             },
         )
@@ -225,6 +234,38 @@ class OutboundEmailService:
         return OutboundEmailService._send_via_graph(log)
 
     @staticmethod
+    def _attachments(log):
+        ids = list((log.payload or {}).get("attachment_ids") or [])
+        if not ids:
+            return []
+        order = {attachment_id: index for index, attachment_id in enumerate(ids)}
+        records = list(Attachment.objects.filter(
+            id__in=ids,
+            ticket_id=log.ticket_id,
+            comment__isnull=False,
+        ))
+        records.sort(key=lambda attachment: order.get(attachment.id, len(order)))
+        if len(records) != len(set(ids)):
+            raise RuntimeError("Uno o varios adjuntos del correo ya no están disponibles")
+
+        result = []
+        total = 0
+        max_total = getattr(settings, "OUTBOUND_EMAIL_ATTACHMENT_MAX_BYTES", 25 * 1024 * 1024)
+        for attachment in records:
+            content = AttachmentService.read(attachment)
+            total += len(content)
+            if total > max_total:
+                raise RuntimeError(
+                    f"Los adjuntos superan el máximo de correo de {max_total // (1024 * 1024)} MB"
+                )
+            result.append({
+                "name": attachment.original_name or f"attachment-{attachment.id}",
+                "content_type": attachment.file_type or "application/octet-stream",
+                "content": content,
+            })
+        return result
+
+    @staticmethod
     def _send_via_ses(log):
         # SESv2 con boto3: autentica con el rol IAM del pod (como SQS/SSM),
         # sin credenciales SMTP que gestionar/rotar; devuelve MessageId y
@@ -251,6 +292,18 @@ class OutboundEmailService:
                 }
             },
         }
+        attachments = OutboundEmailService._attachments(log)
+        if attachments:
+            kwargs["Content"]["Simple"]["Attachments"] = [
+                {
+                    "RawContent": item["content"],
+                    "ContentDisposition": "ATTACHMENT",
+                    "FileName": item["name"],
+                    "ContentType": item["content_type"],
+                    "ContentTransferEncoding": "BASE64",
+                }
+                for item in attachments
+            ]
         config_set = getattr(settings, "SES_CONFIGURATION_SET", "")
         if config_set:
             kwargs["ConfigurationSetName"] = config_set
@@ -278,6 +331,17 @@ class OutboundEmailService:
                 {"name": "X-Auto-Response-Suppress", "value": "All"},
             ],
         }
+        attachments = OutboundEmailService._attachments(log)
+        simple_limit = getattr(settings, "GRAPH_SIMPLE_ATTACHMENT_MAX_BYTES", 3 * 1024 * 1024)
+        if attachments and sum(len(item["content"]) for item in attachments) > simple_limit:
+            return OutboundEmailService._send_via_graph_draft(
+                brand, message, attachments, token,
+            )
+        if attachments:
+            message["attachments"] = [
+                OutboundEmailService._graph_attachment_json(item)
+                for item in attachments
+            ]
         response = requests.post(
             f"{GRAPH_BASE}/users/{brand.support_email}/sendMail",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
@@ -286,3 +350,100 @@ class OutboundEmailService:
         )
         response.raise_for_status()
         return None  # Graph devuelve 202 sin message id; la copia queda en Enviados
+
+    @staticmethod
+    def _graph_attachment_json(item):
+        return {
+            "@odata.type": "#microsoft.graph.fileAttachment",
+            "name": item["name"],
+            "contentType": item["content_type"],
+            "contentBytes": base64.b64encode(item["content"]).decode("ascii"),
+        }
+
+    @staticmethod
+    def _send_via_graph_draft(brand, message, attachments, token):
+        """Usa borrador/sesión para no superar el límite JSON de sendMail.
+
+        Este camino requiere Mail.ReadWrite además de Mail.Send. Los adjuntos de
+        hasta 3 MB se añaden al borrador de una vez; los mayores se trocean.
+        """
+        import requests
+
+        from app.services.msgraph import GRAPH_BASE
+
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        base = f"{GRAPH_BASE}/users/{brand.support_email}"
+        draft_id = None
+        try:
+            response = requests.post(f"{base}/messages", headers=headers, json=message, timeout=30)
+            response.raise_for_status()
+            draft_id = response.json()["id"]
+            simple_limit = getattr(settings, "GRAPH_SIMPLE_ATTACHMENT_MAX_BYTES", 3 * 1024 * 1024)
+
+            for item in attachments:
+                if len(item["content"]) <= simple_limit:
+                    response = requests.post(
+                        f"{base}/messages/{draft_id}/attachments",
+                        headers=headers,
+                        json=OutboundEmailService._graph_attachment_json(item),
+                        timeout=30,
+                    )
+                    response.raise_for_status()
+                else:
+                    OutboundEmailService._upload_graph_large_attachment(
+                        base, draft_id, item, headers,
+                    )
+
+            response = requests.post(
+                f"{base}/messages/{draft_id}/send",
+                headers=headers,
+                json={},
+                timeout=30,
+            )
+            response.raise_for_status()
+            return None
+        except Exception:
+            if draft_id:
+                try:
+                    requests.delete(f"{base}/messages/{draft_id}", headers=headers, timeout=10)
+                except Exception:
+                    logger.warning("graph_attachment_draft_cleanup_failed", extra={"draft_id": draft_id})
+            raise
+
+    @staticmethod
+    def _upload_graph_large_attachment(base, draft_id, item, headers):
+        import requests
+
+        response = requests.post(
+            f"{base}/messages/{draft_id}/attachments/createUploadSession",
+            headers=headers,
+            json={
+                "AttachmentItem": {
+                    "attachmentType": "file",
+                    "name": item["name"],
+                    "size": len(item["content"]),
+                    "contentType": item["content_type"],
+                }
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        upload_url = response.json()["uploadUrl"]
+        content = item["content"]
+        # Graph exige que cada fragmento, salvo el último, sea múltiplo de
+        # 320 KiB. Diez bloques mantienen el tamaño por debajo de 4 MiB.
+        chunk_size = 10 * 320 * 1024
+        for start in range(0, len(content), chunk_size):
+            chunk = content[start:start + chunk_size]
+            end = start + len(chunk) - 1
+            response = requests.put(
+                upload_url,
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "Content-Length": str(len(chunk)),
+                    "Content-Range": f"bytes {start}-{end}/{len(content)}",
+                },
+                data=chunk,
+                timeout=60,
+            )
+            response.raise_for_status()

@@ -29,6 +29,9 @@ env/
 # Adjuntos subidos por usuarios (datos reales de clientes) — nunca versionar.
 resources/media/
 
+# Capturas y artefactos temporales de QA; conservarlos solo en local.
+/tmp/
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 

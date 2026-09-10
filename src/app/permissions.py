@@ -64,6 +64,11 @@ def can_manage_users(user):
     return is_admin(user)
 
 
+def can_manage_help_content(user):
+    """Help content is editable by active, authenticated support staff."""
+    return bool(getattr(user, "is_active", False) and is_agent(user))
+
+
 def agent_user_filter():
     q = Q(is_superuser=True)
     for name in AGENT_ROLE_NAMES:

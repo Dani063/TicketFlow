@@ -1,9 +1,12 @@
 {% extends 'help_center/base.html' %}
 {% block title %}{{ article.title }} · {{ center.name }}{% endblock %}
+{% block agent_actions %}
+{% if editor_preview %}<a href="{% url 'help_editor_article_edit' article.id %}?revision={{ preview_revision.id }}">Volver al editor</a>{% else %}<a href="{% url 'help_editor_article_edit' article.id %}">Editar artículo</a><a href="{% url 'help_editor_article_history' article.id %}">Historial</a>{% endif %}
+<a href="{% url 'help_editor_article_new' center.slug locale %}">Nuevo artículo</a>
+{% endblock %}
 {% block content %}<div class="hc-wrap hc-article-layout">
-<article class="hc-article"><nav class="hc-breadcrumb" aria-label="Breadcrumb"><a href="{% url 'help_home' center.slug locale %}">{{ ui.home }}</a><span>/</span><a href="{% url 'help_category' center.slug locale article.section.category.slug %}">{{ article.section.category.name }}</a><span>/</span><a href="{% url 'help_section' center.slug locale article.section.slug %}">{{ article.section.name }}</a></nav>
+<article class="hc-article">{% if editor_preview %}<div class="hce-preview-banner"><strong>Previsualización de la revisión {{ preview_revision.number }}</strong><span>Este contenido todavía no es público.</span></div>{% endif %}<nav class="hc-breadcrumb" aria-label="Breadcrumb"><a href="{% url 'help_home' center.slug locale %}">{{ ui.home }}</a><span>/</span><a href="{% url 'help_category' center.slug locale article.section.category.slug %}">{{ article.section.category.name }}</a><span>/</span><a href="{% url 'help_section' center.slug locale article.section.slug %}">{{ article.section.name }}</a></nav>
 <header class="hc-article__header"><span class="hc-eyebrow">{{ article.section.name }}</span><h1>{{ article.title }}</h1>{% if article.source_updated_at %}<p>{{ ui.updated }} {{ article.source_updated_at|date:'d/m/Y' }}</p>{% endif %}</header>
 <div class="hc-article__body">{{ article.body_html|safe }}</div>
 <footer class="hc-article__footer"><span>{% if locale == 'es' %}¿No era lo que buscabas?{% else %}Not what you were looking for?{% endif %}</span><a href="{% url 'help_request' center.slug locale %}">{{ ui.submit_request }} →</a></footer></article>
 {% if related %}<aside class="hc-related"><h2>{{ ui.related }}</h2><ul>{% for item in related %}<li><a href="{% url 'help_article' center.slug locale item.slug %}">{{ item.title }}</a></li>{% endfor %}</ul></aside>{% endif %}</div>{% endblock %}
-

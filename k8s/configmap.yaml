@@ -12,6 +12,10 @@ data:
   AWS_REGION: "eu-west-1"
   SSO_LOGIN_API_URL: "https://dev-login-api.agentia365.com"
   SSO_LOGIN_UI_URL: "https://dev-login.recordia.net"
+  # Con 512 MiB por pod, dos procesos dejan margen para cálculos de reporting
+  # sin que el kernel termine workers por presión de memoria.
+  WEB_CONCURRENCY: "2"
+  GUNICORN_TIMEOUT: "60"
   # STA: únicamente las respuestas públicas escritas por agentes salen por email.
   # Acuse de creación y encuesta permanecen explícitamente desactivados.
   OUTBOUND_EMAIL_ENABLED: "true"
@@ -24,10 +28,20 @@ data:
   RECORDIA_HELP_PUBLIC_URL: "https://support.recordia.net"
   PUBLIC_ECOMFAX_BRAND_NAME: "eComFax"
   PUBLIC_RECORDIA_BRAND_NAME: "Comunycarse Helpdesk"
-  # El nombre del bucket privado debe configurarse antes de activar el formulario
-  # en produccion. Puede ir aqui o en ticketflow-secrets segun la politica local.
-  # PUBLIC_ATTACHMENTS_S3_BUCKET: "ticketflow-private-attachments"
+  # Ejemplo DEV. El CD corporativo usa los ConfigMaps de Recordia-Kubernetes.
+  # En STA usar su bucket y prefijo: sta-ticketflow-filestorage / sta.
+  ATTACHMENT_STORAGE_BACKEND: "s3"
+  ATTACHMENT_STORAGE_PREFIX: "dev"
+  PUBLIC_ATTACHMENTS_S3_BUCKET: "dev-ticketflow-filestorage"
   PUBLIC_ATTACHMENTS_S3_REGION: "eu-west-1"
+  HELP_CONTENT_S3_BUCKET: "dev-ticketflow-filestorage"
+  HELP_CONTENT_S3_REGION: "eu-west-1"
+  PUBLIC_ATTACHMENT_MAX_FILES: "5"
+  PUBLIC_ATTACHMENT_MAX_BYTES: "15728640"
+  PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES: "26214400"
+  ATTACHMENT_ORPHAN_MAX_AGE_HOURS: "24"
+  ATTACHMENT_DOWNLOAD_URL_TTL_SECONDS: "300"
+  OUTBOUND_EMAIL_ATTACHMENT_MAX_BYTES: "26214400"
   # El ingress de confianza debe sanear/añadir X-Forwarded-For.
   PUBLIC_CLIENT_IP_HEADER: "HTTP_X_FORWARDED_FOR"
   # Azure, Zendesk y SECRET_KEY vienen de SSM — no van aquí
