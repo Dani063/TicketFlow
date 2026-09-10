@@ -179,6 +179,12 @@ class ConversationTests(SimpleTestCase):
             self.assertNotIn('javascript:', output)
         self.assertNotIn('alert(1)', result['html'])
 
+    def test_malformed_legacy_html_falls_back_without_breaking_ticket(self):
+        result = present_comment(comment(html_body='<p>Respuesta</p><![broken]><p>Final</p>'))
+        self.assertIn('Respuesta', result['html'])
+        self.assertIn('Final', result['html'])
+        self.assertFalse(result['history'])
+
     def test_render_escapes_quoted_author_and_uses_native_details(self):
         data = present_comment(comment('Nuevo\nDe: <img src=x onerror=bad()>\nEnviado: ayer\nAsunto: Prueba\nAnterior'))
         output = render_to_string('tickets/_conversation_body.html', {'conversation': data})

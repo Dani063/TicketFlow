@@ -293,7 +293,7 @@ def present_comment(comment):
                 result['history'].append(dict(**header, **segment))
         if result['history'] and all(h.get('parsed_date') for h in result['history']):
             result['history'].sort(key=lambda h: (h['parsed_date'].astimezone(timezone.utc) if h['parsed_date'].tzinfo else h['parsed_date']).replace(tzinfo=None))
-    except (ValueError, RecursionError):
+    except (ValueError, RecursionError, AssertionError):
         # Nunca truncar ni ocultar el cuerpo al no poder reconocerlo.
         result.update(html=result['original_html'], text=content, history=[])
     return result
