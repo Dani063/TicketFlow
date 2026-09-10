@@ -4,6 +4,7 @@ Context: tickets, pagination, filters, page_sizes.
 Optional: extra_param + extra_value (carried in every link, e.g. customer id).
 {% endcomment %}
 
+<div id="profileTicketsPanel">
 <form method="get" class="tf-toolbar" id="profileTicketsToolbar" action="#tickets">
     {% if extra_param %}<input type="hidden" name="{{ extra_param }}" value="{{ extra_value }}">{% endif %}
     <div class="tf-status-pills" role="group" aria-label="Filtro por estado">
@@ -86,6 +87,7 @@ Optional: extra_param + extra_value (carried in every link, e.g. customer id).
     </div>
 </div>
 {% endif %}
+</div>
 
 <style>
 .tf-status-pills { display: flex; gap: var(--space-1); flex-wrap: wrap; }
@@ -110,20 +112,25 @@ Optional: extra_param + extra_value (carried in every link, e.g. customer id).
 .tf-profile-search { display: flex; align-items: center; gap: var(--space-1); min-width: 240px; }
 .tf-profile-search .tf-input { flex: 1; }
 .profile-pagination { border-top: 1px solid var(--color-divider-strong); margin-top: var(--space-1); }
+#profileTicketsPanel.is-loading { opacity: .55; pointer-events: none; }
 </style>
 
 <script>
 (function () {
-    const form = document.getElementById('profileTicketsToolbar');
-    if (!form) return;
-    const statusInput = document.getElementById('profileTicketsStatus');
-    const pageSizeInput = document.getElementById('profileTicketsPageSize');
+    // El panel se recarga por AJAX: los pills, la paginación y la búsqueda NO
+    // navegan. Antes hacían `form.submit()`, y como tabs.js identifica cada
+    // pestaña por su URL completa (parámetros incluidos), cada filtro abría una
+    // pestaña nueva del mismo cliente. Ahora se pide el fragmento y se sustituye
+    // solo el contenido de #profileTicketsPanel, sin tocar la URL.
+    const panel = document.getElementById('profileTicketsPanel');
+    if (!panel || panel.dataset.tfBound === '1') return;
+    panel.dataset.tfBound = '1';
 
     // On load: if the hash points us at the tickets pane (or there are
-    // filter query params, which means we came from a form submit), open it.
-    // We touch the DOM directly instead of clicking the menu item — the
-    // parent template's click handler hasn't been bound yet at this point
-    // (its DOMContentLoaded listener is registered after ours).
+    // filter query params, e.g. un enlace directo), open it. We touch the DOM
+    // directly instead of clicking the menu item — the parent template's click
+    // handler hasn't been bound yet at this point (its DOMContentLoaded
+    // listener is registered after ours).
     function activateTicketsPane() {
         document.querySelectorAll('#profileMenu li').forEach(li => li.classList.remove('active'));
         document.querySelectorAll('.profile-section').forEach(s => s.style.display = 'none');
@@ -139,37 +146,75 @@ Optional: extra_param + extra_value (carried in every link, e.g. customer id).
         activateTicketsPane();
     }
 
-    // Status pills → set status, reset page, submit (keeping #tickets hash)
-    form.querySelectorAll('.tf-status-pill').forEach(pill => {
-        pill.addEventListener('click', () => {
-            statusInput.value = pill.dataset.status;
-            form.submit();
+    function buildParams(overrides) {
+        const form = panel.querySelector('#profileTicketsToolbar');
+        const params = new URLSearchParams(form ? new FormData(form) : '');
+        Object.entries(overrides || {}).forEach(([key, value]) => {
+            if (value === null || value === undefined || value === '') params.delete(key);
+            else params.set(key, value);
         });
-    });
-
-    // Page-size select
-    const pageSizeSelect = document.getElementById('profileTicketsPageSizeSelect');
-    if (pageSizeSelect) {
-        pageSizeSelect.addEventListener('change', () => {
-            pageSizeInput.value = pageSizeSelect.value;
-            form.submit();
-        });
+        return params;
     }
 
-    // Prev / next buttons → add page param and submit
-    document.querySelectorAll('.profile-pagination .page-num-btn[data-page]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            if (btn.disabled) return;
-            let pageField = form.querySelector('input[name="page"]');
-            if (!pageField) {
-                pageField = document.createElement('input');
-                pageField.type = 'hidden';
-                pageField.name = 'page';
-                form.appendChild(pageField);
+    // Descarta respuestas obsoletas: al pulsar pills seguidos puede llegar
+    // antes la de una petición anterior.
+    let _seq = 0;
+
+    async function reload(overrides) {
+        const seq = ++_seq;
+        const url = window.location.pathname + '?' + buildParams(overrides).toString();
+        panel.classList.add('is-loading');
+        try {
+            const res = await fetch(url + '&fragment=1', {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+            const fresh = doc.getElementById('profileTicketsPanel');
+            if (!fresh) throw new Error('respuesta sin #profileTicketsPanel');
+            if (seq !== _seq) return;
+            panel.innerHTML = fresh.innerHTML;
+            // Las filas son nuevas: hay que reenganchar la tarjeta de previsualización.
+            if (typeof window.__tfProfileHoverAttach === 'function') {
+                window.__tfProfileHoverAttach(panel);
             }
-            pageField.value = btn.dataset.page;
-            form.submit();
-        });
+        } catch (err) {
+            console.error('[profile-tickets] no se pudieron cargar los tickets:', err);
+            if (window.toast && window.toast.error) {
+                window.toast.error('No se pudieron cargar los tickets.');
+            }
+        } finally {
+            if (seq === _seq) panel.classList.remove('is-loading');
+        }
+    }
+
+    // Delegado en el panel: sus controles se reemplazan en cada recarga.
+    panel.addEventListener('click', (event) => {
+        const pill = event.target.closest('.tf-status-pill');
+        if (pill) {
+            const statusInput = panel.querySelector('#profileTicketsStatus');
+            if (statusInput) statusInput.value = pill.dataset.status;
+            reload({ page: 1 });
+            return;
+        }
+        const pageBtn = event.target.closest('.profile-pagination .page-num-btn[data-page]');
+        if (pageBtn && !pageBtn.disabled) reload({ page: pageBtn.dataset.page });
+    });
+
+    panel.addEventListener('change', (event) => {
+        if (event.target.id !== 'profileTicketsPageSizeSelect') return;
+        const pageSizeInput = panel.querySelector('#profileTicketsPageSize');
+        if (pageSizeInput) pageSizeInput.value = event.target.value;
+        reload({ page: 1 });
+    });
+
+    panel.addEventListener('submit', (event) => {
+        // `matches` y no `event.target.id`: el form lleva un <input name="id">
+        // (extra_param) y las named properties del formulario ensombrecen
+        // `form.id`, que devolvería el input en vez de la cadena.
+        if (!event.target.matches('#profileTicketsToolbar')) return;
+        event.preventDefault();
+        reload({ page: 1 });
     });
 })();
 </script>

@@ -2,6 +2,7 @@
 Definition of models.
 """
 
+import uuid
 from unicodedata import category
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
@@ -127,6 +128,23 @@ class Group(models.Model):
     def __str__(self):
         return self.group_name
 
+
+class ProductLine(models.Model):
+    """Catálogo estable de producto/servicio para la lectura de negocio."""
+    code = models.SlugField(max_length=64, unique=True)
+    name = models.CharField(max_length=100, unique=True)
+    color = models.CharField(max_length=7, default="#64748b")
+    icon = models.CharField(max_length=64, blank=True, default="fa-cube")
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        ordering = ["sort_order", "name"]
+
+    def __str__(self):
+        return self.name
+
+
 class Ticket(models.Model):
     zendesk_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)
     subject = models.CharField(max_length=255, null=False)
@@ -137,6 +155,12 @@ class Ticket(models.Model):
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='assigned_tickets')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_tickets')
     brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
+    # Dimensión comercial. Se mantiene independiente de ``service``, que sigue
+    # gobernando asignación, SLA y centros de ayuda.
+    product_line = models.ForeignKey(
+        'ProductLine', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='tickets',
+    )
     type = models.CharField(max_length=255, null=True, blank=True, choices=TICKET_TYPE_CHOICES)
     # Un problema (type='problem') agrupa los incidentes que provoca (compatible con problem_id de Zendesk).
     problem = models.ForeignKey(
@@ -197,6 +221,8 @@ class Ticket(models.Model):
             models.Index(fields=['is_deleted', 'merged_into', 'service', 'status', 'updated_at'], name='app_ticket_live_service'),
             models.Index(fields=['is_deleted', 'merged_into', 'created_at', 'updated_at'], name='app_ticket_live_created'),
             models.Index(fields=['is_deleted', 'merged_into', 'brand', 'status'], name='app_ticket_live_brand_idx'),
+            models.Index(fields=['is_deleted', 'merged_into', 'product_line', 'created_at'], name='app_ticket_product_created'),
+            models.Index(fields=['is_deleted', 'merged_into', 'product_line', 'status'], name='app_ticket_product_status'),
         ]
 
 
@@ -253,6 +279,26 @@ class TicketEvent(models.Model):
 
     class Meta:
         ordering = ['created_at']
+        indexes = [
+            models.Index(
+                fields=['ticket', 'field_name', 'created_at'],
+                name='app_evt_tkt_field_time',
+            ),
+        ]
+
+class AttachmentDraft(models.Model):
+    """Private upload batch; publishing permanently consumes its UUID."""
+    uploaded_by = models.ForeignKey(User, on_delete=models.CASCADE)
+    key = models.UUIDField()
+    ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['uploaded_by', 'key'], name='attachment_draft_owner_key'),
+        ]
+
 
 class Attachment(models.Model):
     file_url = models.URLField(null=False, help_text='URL of the attached file')
@@ -268,6 +314,35 @@ class Attachment(models.Model):
     comment = models.ForeignKey(Comment, on_delete=models.CASCADE, null=True, blank=True)
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
+    draft = models.ForeignKey(AttachmentDraft, on_delete=models.PROTECT, null=True, blank=True)
+
+    @property
+    def filename(self):
+        from app.services.attachments import AttachmentService
+        return AttachmentService.filename(self)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['uploaded_by', 'ticket', 'comment'], name='attachment_pending_owner'),
+        ]
+
+
+class AttachmentRequest(models.Model):
+    """Committed results and tombstones survive retries and attachment deletion."""
+    actor = models.ForeignKey(User, on_delete=models.CASCADE)
+    operation = models.CharField(max_length=16)
+    key = models.UUIDField()
+    fingerprint = models.CharField(max_length=64)
+    attachment = models.ForeignKey(Attachment, on_delete=models.SET_NULL, null=True, blank=True)
+    ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True)
+    comment = models.ForeignKey(Comment, on_delete=models.SET_NULL, null=True, blank=True)
+    result = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['actor', 'operation', 'key'], name='attachment_request_actor_key'),
+        ]
 
     # models.py
 class Notification(models.Model):
@@ -716,6 +791,15 @@ class HelpSection(models.Model):
 
 
 class HelpArticle(models.Model):
+    ORIGIN_ZENDESK = "zendesk"
+    ORIGIN_AGENT = "agent"
+    ORIGIN_SYSTEM = "system"
+    ORIGIN_CHOICES = [
+        (ORIGIN_ZENDESK, "Zendesk"),
+        (ORIGIN_AGENT, "Agente"),
+        (ORIGIN_SYSTEM, "Sistema"),
+    ]
+
     section = models.ForeignKey(HelpSection, on_delete=models.CASCADE, related_name="articles")
     source_id = models.BigIntegerField(null=True, blank=True, db_index=True)
     translation_key = models.CharField(max_length=100, blank=True, default="", db_index=True)
@@ -728,6 +812,21 @@ class HelpArticle(models.Model):
     source_url = models.URLField(max_length=1000, blank=True, default="")
     source_updated_at = models.DateTimeField(null=True, blank=True)
     published = models.BooleanField(default=True, db_index=True)
+    origin = models.CharField(max_length=20, choices=ORIGIN_CHOICES, default=ORIGIN_ZENDESK, db_index=True)
+    editorial_override = models.BooleanField(default=False, db_index=True)
+    version = models.PositiveIntegerField(default=1)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="created_help_articles",
+    )
+    updated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="updated_help_articles",
+    )
+    published_revision = models.ForeignKey(
+        "HelpArticleRevision", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="published_for_articles",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -749,6 +848,70 @@ class HelpArticle(models.Model):
 
     def __str__(self):
         return f"{self.title} [{self.locale}]"
+
+
+class HelpArticleRevision(models.Model):
+    STATUS_DRAFT = "draft"
+    STATUS_PUBLISHED = "published"
+    STATUS_SUPERSEDED = "superseded"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "Borrador"),
+        (STATUS_PUBLISHED, "Publicada"),
+        (STATUS_SUPERSEDED, "Sustituida"),
+    ]
+
+    article = models.ForeignKey(HelpArticle, on_delete=models.CASCADE, related_name="revisions")
+    number = models.PositiveIntegerField()
+    section = models.ForeignKey(HelpSection, on_delete=models.PROTECT, related_name="article_revisions")
+    slug = models.SlugField(max_length=220)
+    title = models.CharField(max_length=500)
+    body_html = models.TextField(blank=True, default="")
+    body_text = models.TextField(blank=True, default="")
+    promoted = models.BooleanField(default=False)
+    position = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
+    base_version = models.PositiveIntegerField(default=1)
+    change_note = models.CharField(max_length=500, blank=True, default="")
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="help_article_revisions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-number"]
+        constraints = [
+            models.UniqueConstraint(fields=["article", "number"], name="help_article_revision_number_uniq"),
+        ]
+        indexes = [
+            models.Index(fields=["article", "status"], name="help_revision_status_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.article.title} · v{self.number} ({self.status})"
+
+
+class HelpArticleAsset(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    article = models.ForeignKey(HelpArticle, on_delete=models.CASCADE, related_name="assets")
+    original_name = models.CharField(max_length=255)
+    storage_key = models.CharField(max_length=1000)
+    storage_backend = models.CharField(max_length=20, default="local")
+    content_type = models.CharField(max_length=255, blank=True, default="")
+    size = models.PositiveBigIntegerField(default=0)
+    checksum = models.CharField(max_length=64, blank=True, default="")
+    uploaded_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="help_article_assets",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.original_name
 
 
 class PublicTicketAttempt(models.Model):

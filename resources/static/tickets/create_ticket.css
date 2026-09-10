@@ -668,6 +668,71 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 }
 .quote-toggle:hover { background: #e4e4e4; }
 
+/* Conversación: presentación común para el histórico y los mensajes nuevos. */
+.message.speaker-customer { border-left: 3px solid var(--color-divider-strong, #94a3b8); }
+.message.speaker-agent { border-left: 3px solid var(--color-primary, #5b67ca); }
+.msg-body .conversation { font-family: inherit; font-size: 14px; line-height: 1.65; }
+.msg-body .conversation-text { max-width: 80ch; margin: 0; overflow-wrap: anywhere; }
+.msg-body .conversation-text,
+.msg-body .conversation-text * { line-height: 1.65; }
+.msg-body .conversation-text pre,
+.msg-body .conversation-text code { font-family: var(--font-mono, monospace); }
+.msg-body .conversation-text p { margin: 0 0 .65em; }
+.msg-body .conversation-text div { margin: 0; }
+.msg-body .conversation-text > :first-child { margin-top: 0; }
+.msg-body .conversation-text > :last-child { margin-bottom: 0; }
+.msg-body .conversation-text blockquote,
+.msg-body .conversation-original-content blockquote {
+    display: block;
+    margin: .7em 0;
+    padding: .4em .8em;
+    color: inherit;
+    font-size: inherit;
+}
+.msg-body .conversation-text table { display: block; overflow-x: auto; margin: .8em 0; font-size: 13px; }
+.msg-body .conversation-text td,
+.msg-body .conversation-text th { padding: .4em .6em; border: 1px solid var(--color-divider-strong, #cbd5e1); }
+.msg-body .conversation-text pre { white-space: pre-wrap; tab-size: 4; }
+.msg-body .conversation-text img { max-width: 100%; height: auto; }
+.conversation-details { margin-top: 12px; font-size: 13px; }
+.conversation-details > summary {
+    width: fit-content;
+    max-width: 100%;
+    color: var(--color-text-muted, #526174);
+    cursor: pointer;
+    padding: 4px 0;
+    line-height: 1.5;
+    list-style: none;
+}
+.conversation-details > summary::-webkit-details-marker { display: none; }
+.conversation-details > summary::before { content: '▸'; display: inline-block; width: 16px; }
+.conversation-details[open] > summary::before { content: '▾'; }
+.conversation-details > summary:hover { color: var(--color-primary, #5b67ca); }
+.conversation-details > summary:focus-visible { outline: 2px solid var(--color-primary, #5b67ca); outline-offset: 3px; border-radius: 2px; }
+.conversation-details[open] > summary { margin-bottom: 8px; }
+.conversation-history { border-top: 1px solid var(--color-divider-strong, #e2e8f0); padding-top: 8px; }
+.conversation-history > summary { font-weight: 600; }
+.msg-body .conversation-hint { color: var(--color-text-muted, #526174); font-size: 12px; margin: 8px 0; }
+.conversation-thread { list-style: none; padding: 0; margin: 12px 0 0 4px; border-left: 2px solid var(--color-divider-strong, #cbd5e1); }
+.conversation-entry { padding: 0 0 22px 18px; position: relative; }
+.conversation-entry:last-child { padding-bottom: 4px; }
+.conversation-entry::before { content: ''; position: absolute; width: 8px; height: 8px; border-radius: 50%; background: var(--color-divider-strong, #94a3b8); left: -5px; top: 7px; }
+.msg-body .conversation-entry-header { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 8px; align-items: baseline; }
+.conversation-entry-header strong { font-size: 13px; overflow-wrap: anywhere; }
+.conversation-entry-header * { line-height: 1.5; }
+.conversation-entry-header span { color: var(--color-text-muted, #526174); font-size: 12px; }
+.conversation-footer .conversation-text { color: var(--color-text-muted, #526174); font-size: 12px; }
+.conversation-original-content { max-height: 480px; overflow: auto; padding: 12px; border: 1px solid var(--color-divider-strong, #cbd5e1); background: #fff; color: #222; }
+:root[data-theme="dark"] .msg-body .conversation-text a { color: #93c5fd; }
+.msg-body .conversation-original-content a { color: #2563eb; }
+@media (max-width: 600px) {
+    .msg-body .conversation { font-size: 14px; }
+    .conversation-entry { padding-left: 12px; }
+    .conversation-entry-header { flex-direction: column; }
+    .message .msg-header { flex-wrap: wrap; }
+    .message .msg-right { flex-wrap: wrap; }
+}
+
 /* Horizontal drag handle between messages and compose */
 .compose-resize-handle {
     height: 5px;

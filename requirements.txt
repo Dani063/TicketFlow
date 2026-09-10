@@ -11,3 +11,4 @@ whitenoise
 bleach[css]>=5.0.0
 openai>=1.40,<2
 reportlab>=4.2,<5
+Pillow>=12.3,<13

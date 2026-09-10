@@ -118,8 +118,22 @@ class PublicTicketIntakeService:
             "is_public": True,
         })
         comment = ticket.comment_set.order_by("created_at", "id").first()
-        for uploaded in files:
-            AttachmentService.save(uploaded, ticket, requester, comment=comment)
-        attempt.accepted = True
-        attempt.save(update_fields=["accepted"])
+        stored_attachments = []
+        try:
+            for uploaded in files:
+                stored_attachments.append(
+                    AttachmentService.save(uploaded, ticket, requester, comment=comment)
+                )
+            attempt.accepted = True
+            attempt.save(update_fields=["accepted"])
+        except Exception:
+            # La transacción revierte los registros, pero S3 no participa en la
+            # transacción SQL. Retiramos cualquier objeto ya almacenado.
+            for attachment in stored_attachments:
+                AttachmentService.delete_blob_by_key(
+                    attachment.storage_backend,
+                    attachment.storage_key,
+                    suppress_errors=True,
+                )
+            raise
         return ticket

@@ -15,6 +15,7 @@ import posixpath
 import logging as _logging
 from pathlib import Path
 from dotenv import load_dotenv
+from TicketFlow.attachment_config import attachment_storage_config
 
 
 def _ssm_client():
@@ -83,10 +84,15 @@ def find_project_root(current_path, marker=".env"):
 # Base para referenciar carpetas fuera de src/ de forma dinámica
 PROJECT_ROOT = find_project_root(__file__)
 
-# Buscamos el .env un nivel por encima (raíz del proyecto)
+def _load_project_environment(path):
+    if path.exists():
+        # Kubernetes wins over .env files downloaded at container startup.
+        load_dotenv(path, override=False)
+
+
+# Buscamos el .env un nivel por encima (raíz del proyecto).
 env_path = PROJECT_ROOT / ".env"
-if env_path.exists():
-    load_dotenv(env_path, override=True)
+_load_project_environment(env_path)
 if os.getenv("DISABLE_AWS_SSM", "").lower() in ("1", "true", "yes", "on"):
     os.environ["AWS_SSM_PREFIX"] = ""
 
@@ -281,9 +287,8 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'TicketFlow.wsgi.application'
 # Database — credenciales desde AWS SSM Parameter Store (prod/dev) o .env (local sin SSM)
-# DISABLE_AWS_SSM=1 (variable de entorno, no .env) permite ejecutar checks/tests
-# sin sesión AWS: el .env se carga con override=True, así que es la única forma
-# de desactivar SSM puntualmente desde fuera. (Documentada en docs/backend-architecture.md)
+# DISABLE_AWS_SSM=1 permite ejecutar checks/tests sin sesión AWS.
+# Las variables del proceso tienen prioridad sobre el .env.
 if os.getenv("DISABLE_AWS_SSM", os.getenv("AWS_SSM_DISABLE", "")).lower() in ("1", "true", "yes", "on"):
     _ssm_prefix = None
 else:
@@ -456,6 +461,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'app.tasks.offer_satisfaction_surveys',
         'schedule': 900.0,  # Cada 15 min; el retardo real lo fija SATISFACTION_SURVEY_DELAY_HOURS
     },
+    'cleanup-orphan-attachments': {
+        'task': 'app.tasks.cleanup_orphan_attachments',
+        'schedule': 3600.0,
+    },
 }
 
 # === Azure AD (lectura buzones M365 + envío via Graph sendMail) ===
@@ -551,6 +560,7 @@ TICKETFLOW_PUBLIC_URL = os.getenv('TICKETFLOW_PUBLIC_URL', '')
 
 # === Centros de ayuda publicos (eComFax / Recordia) ===
 PUBLIC_HELP_ENABLED = os.getenv('PUBLIC_HELP_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
+HELP_EDITOR_ENABLED = os.getenv('HELP_EDITOR_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
 PUBLIC_TICKET_INTAKE_ENABLED = os.getenv('PUBLIC_TICKET_INTAKE_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
 ECOMFAX_HELP_PUBLIC_URL = os.getenv('ECOMFAX_HELP_PUBLIC_URL', 'https://support.ecomfax.com').rstrip('/')
 RECORDIA_HELP_PUBLIC_URL = os.getenv('RECORDIA_HELP_PUBLIC_URL', 'https://support.recordia.net').rstrip('/')
@@ -570,16 +580,41 @@ PUBLIC_TICKET_EMAIL_WINDOW_MINUTES = int(os.getenv('PUBLIC_TICKET_EMAIL_WINDOW_M
 # configurar HTTP_X_FORWARDED_FOR (se toma el ultimo salto añadido por el proxy).
 PUBLIC_CLIENT_IP_HEADER = os.getenv('PUBLIC_CLIENT_IP_HEADER', 'REMOTE_ADDR')
 
-# Adjuntos privados: local en desarrollo, S3 privado en produccion cuando se
-# define el bucket. Nunca se expone la URL de almacenamiento directamente.
-PUBLIC_ATTACHMENTS_S3_BUCKET = os.getenv('PUBLIC_ATTACHMENTS_S3_BUCKET', '')
-PUBLIC_ATTACHMENTS_S3_REGION = os.getenv('PUBLIC_ATTACHMENTS_S3_REGION', os.getenv('AWS_REGION', 'eu-west-1'))
+# Adjuntos privados: S3 en DEV o al configurar un bucket; local por defecto
+# fuera de DEV. Las descargas S3 requieren autorización y una URL temporal.
+_attachment_storage = attachment_storage_config(os.environ)
+ATTACHMENT_STORAGE_BACKEND = _attachment_storage['ATTACHMENT_STORAGE_BACKEND']
+ATTACHMENT_STORAGE_PREFIX = _attachment_storage['ATTACHMENT_STORAGE_PREFIX']
+PUBLIC_ATTACHMENTS_S3_BUCKET = _attachment_storage['PUBLIC_ATTACHMENTS_S3_BUCKET']
+PUBLIC_ATTACHMENTS_S3_REGION = _attachment_storage['PUBLIC_ATTACHMENTS_S3_REGION']
 PUBLIC_ATTACHMENT_MAX_FILES = int(os.getenv('PUBLIC_ATTACHMENT_MAX_FILES', '5'))
 PUBLIC_ATTACHMENT_MAX_BYTES = int(os.getenv('PUBLIC_ATTACHMENT_MAX_BYTES', str(15 * 1024 * 1024)))
+PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES = int(os.getenv('PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES', str(25 * 1024 * 1024)))
+ATTACHMENT_ORPHAN_MAX_AGE_HOURS = int(os.getenv('ATTACHMENT_ORPHAN_MAX_AGE_HOURS', '24'))
+ATTACHMENT_DOWNLOAD_URL_TTL_SECONDS = int(os.getenv('ATTACHMENT_DOWNLOAD_URL_TTL_SECONDS', '300'))
+OUTBOUND_EMAIL_ATTACHMENT_MAX_BYTES = int(os.getenv(
+    'OUTBOUND_EMAIL_ATTACHMENT_MAX_BYTES', str(PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES),
+))
+GRAPH_SIMPLE_ATTACHMENT_MAX_BYTES = int(os.getenv(
+    'GRAPH_SIMPLE_ATTACHMENT_MAX_BYTES', str(3 * 1024 * 1024),
+))
 PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS = {
     item.strip().lower() for item in os.getenv(
         'PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS',
         'pdf,png,jpg,jpeg,gif,webp,txt,csv,doc,docx,xls,xlsx,zip,log',
+    ).split(',') if item.strip()
+}
+
+# Recursos de artículos: privados en el almacenamiento y servidos por una URL
+# estable de TicketFlow. Si no se configura un bucket específico, reutiliza el
+# bucket privado de adjuntos; en desarrollo usa MEDIA_ROOT.
+HELP_CONTENT_S3_BUCKET = _attachment_storage['HELP_CONTENT_S3_BUCKET']
+HELP_CONTENT_S3_REGION = _attachment_storage['HELP_CONTENT_S3_REGION']
+HELP_CONTENT_ASSET_MAX_BYTES = int(os.getenv('HELP_CONTENT_ASSET_MAX_BYTES', str(20 * 1024 * 1024)))
+HELP_CONTENT_ALLOWED_EXTENSIONS = {
+    item.strip().lower() for item in os.getenv(
+        'HELP_CONTENT_ALLOWED_EXTENSIONS',
+        'pdf,png,jpg,jpeg,gif,webp,txt,csv,doc,docx,xls,xlsx,zip',
     ).split(',') if item.strip()
 }
 

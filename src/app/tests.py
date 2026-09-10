@@ -1,7 +1,9 @@
 import json
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import patch
 
+from django.conf import settings
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -17,6 +19,7 @@ from app.models import (
     Notification,
     OperationalMetric,
     OutboundEmailLog,
+    ProductLine,
     ResponseTemplate,
     Role,
     SatisfactionRating,
@@ -71,6 +74,7 @@ class TicketFlowBackendTests(TestCase):
         )
         self.admin.role = self.admin_role
         self.admin.save(update_fields=["role"])
+        self.product = ProductLine.objects.get(code="recordia")
 
     def make_ticket(self, **overrides):
         values = {
@@ -81,6 +85,7 @@ class TicketFlowBackendTests(TestCase):
             "requester": self.customer,
             "assignee": self.agent,
             "created_by": self.customer,
+            "product_line": self.product,
         }
         values.update(overrides)
         return Ticket.objects.create(**values)
@@ -157,6 +162,7 @@ class TicketFlowBackendTests(TestCase):
                 "message": "Initial text",
                 "status": "open",
                 "prioridad": "normal",
+                "producto": str(self.product.id),
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -180,7 +186,7 @@ class TicketFlowBackendTests(TestCase):
         self.client.force_login(self.customer)
         response = self.client.post(
             f"{reverse('create_ticket')}?id={ticket.id}",
-            {"subject": "Changed", "message": "Changed"},
+            {"subject": "Changed", "message": "Changed", "producto": str(self.product.id)},
         )
         self.assertEqual(response.status_code, 403)
         ticket.refresh_from_db()
@@ -320,6 +326,7 @@ class TicketFlowBackendTests(TestCase):
                 "message": "Initial text",
                 "status": "open",
                 "solicitante": str(self.customer.id),
+                "producto": str(self.product.id),
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -456,6 +463,7 @@ class TicketFlowBackendTests(TestCase):
                 "subject": "Assigned by rule",
                 "message": "Body",
                 "status": "open",
+                "producto": str(self.product.id),
             },
         )
         self.assertEqual(response.status_code, 302)
@@ -536,6 +544,8 @@ class _BaseFixture(TestCase):
         self.brand_b = Brand.objects.create(
             name="Ecomfax", support_email="helpdesk@ecomfax.example", mailbox_type="ses", language="es"
         )
+        self.product = ProductLine.objects.get(code="recordia")
+        self.product_b = ProductLine.objects.get(code="ecomfax")
 
     def make_ticket(self, **overrides):
         values = {
@@ -546,18 +556,29 @@ class _BaseFixture(TestCase):
             "requester": self.customer,
             "assignee": self.agent,
             "created_by": self.customer,
+            "product_line": self.product,
         }
         values.update(overrides)
         return Ticket.objects.create(**values)
 
 
 class EntityTaxonomyTests(_BaseFixture):
+    def test_product_is_required_for_manual_ticket_creation(self):
+        from app.api import APIValidationError
+        from app.services.tickets import TicketService
+
+        with self.assertRaises(APIValidationError) as ctx:
+            TicketService.create_or_update_from_post(
+                self.agent, {"subject": "Sin producto", "message": "b"}
+            )
+        self.assertEqual(ctx.exception.code, "product_required")
+
     def test_legacy_spanish_type_and_channel_are_normalized_on_create(self):
         from app.services.tickets import TicketService
 
         ticket = TicketService.create_or_update_from_post(
             self.agent,
-            {"subject": "Legacy", "message": "b", "tipo": "incidencia", "canal": "telefono"},
+            {"subject": "Legacy", "message": "b", "tipo": "incidencia", "canal": "telefono", "producto": self.product.id},
         )
         self.assertEqual(ticket.type, "incident")
         self.assertEqual(ticket.channel, "phone")
@@ -566,14 +587,14 @@ class EntityTaxonomyTests(_BaseFixture):
         from app.services.tickets import TicketService
 
         ticket = TicketService.create_or_update_from_post(
-            self.agent, {"subject": "Web ticket", "message": "b"}
+            self.agent, {"subject": "Web ticket", "message": "b", "producto": self.product.id}
         )
         self.assertEqual(ticket.channel, "web")
 
         # En update, canal vacío NO machaca con 'web': queda None (comportamiento previo)
         email_ticket = self.make_ticket(channel="email")
         updated = TicketService.create_or_update_from_post(
-            self.agent, {"subject": "Edited", "message": ""}, ticket_id=email_ticket.id
+            self.agent, {"subject": "Edited", "message": "", "producto": self.product.id}, ticket_id=email_ticket.id
         )
         self.assertIsNone(updated.channel)
 
@@ -583,7 +604,7 @@ class EntityTaxonomyTests(_BaseFixture):
 
         with self.assertRaises(APIValidationError) as ctx:
             TicketService.create_or_update_from_post(
-                self.agent, {"subject": "X", "message": "b", "empresa": "NoExiste S.L."}
+                self.agent, {"subject": "X", "message": "b", "empresa": "NoExiste S.L.", "producto": self.product.id}
             )
         self.assertEqual(ctx.exception.code, "brand_not_found")
         self.assertFalse(Brand.objects.filter(name="NoExiste S.L.").exists())
@@ -597,7 +618,7 @@ class EntityTaxonomyTests(_BaseFixture):
 
         incident = TicketService.create_or_update_from_post(
             self.agent,
-            {"subject": "Incidente", "message": "b", "tipo": "incident", "problem_id": str(problem.id)},
+            {"subject": "Incidente", "message": "b", "tipo": "incident", "problem_id": str(problem.id), "producto": self.product.id},
         )
         self.assertEqual(incident.problem_id, problem.id)
         self.assertIn(incident, problem.incidents.all())
@@ -610,14 +631,14 @@ class EntityTaxonomyTests(_BaseFixture):
         with self.assertRaises(APIValidationError):
             TicketService.create_or_update_from_post(
                 self.agent,
-                {"subject": "Mal vinculo", "message": "b", "tipo": "incident", "problem_id": str(question.id)},
+                {"subject": "Mal vinculo", "message": "b", "tipo": "incident", "problem_id": str(question.id), "producto": self.product.id},
             )
 
         # Solo los incidentes pueden vincularse
         with self.assertRaises(APIValidationError):
             TicketService.create_or_update_from_post(
                 self.agent,
-                {"subject": "Tarea", "message": "b", "tipo": "task", "problem_id": str(problem.id)},
+                {"subject": "Tarea", "message": "b", "tipo": "task", "problem_id": str(problem.id), "producto": self.product.id},
             )
 
     def test_ticket_detail_api_exposes_problem_link_and_incidents(self):
@@ -1076,10 +1097,54 @@ class OutboundEmailTests(_BaseFixture):
             OutboundEmailLog.objects.filter(ticket=customer_ticket, template_key="agent_reply").exists()
         )
 
-    def test_initial_ticket_description_is_not_treated_as_an_agent_reply(self):
+    def test_initial_public_agent_message_is_queued_as_an_agent_reply(self):
         ticket = self._create_ticket_via_service(content="Descripción inicial")
+        comment = Comment.objects.get(ticket=ticket, content="Descripción inicial")
+        reply = OutboundEmailLog.objects.get(ticket=ticket, template_key="agent_reply")
+
+        self.assertEqual(reply.status, OutboundEmailLog.STATUS_QUEUED)
+        self.assertIn("Descripción inicial", reply.payload["body_text"])
+        self.assertIn(str(comment.id), reply.dedup_key)
+
+    def test_create_ticket_form_queues_its_first_public_message(self):
+        self.client.force_login(self.agent)
+        response = self.client.post(
+            reverse("create_ticket"),
+            {
+                "subject": "Primer mensaje por formulario",
+                "message": "Este mensaje también debe enviarse.",
+                "status": "open",
+                "solicitante": str(self.customer.id),
+                "empresa": self.brand_a.name,
+                "producto": str(self.product.id),
+                "is_public": "true",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        ticket = Ticket.objects.get(subject="Primer mensaje por formulario")
+        reply = OutboundEmailLog.objects.get(ticket=ticket, template_key="agent_reply")
+        self.assertEqual(reply.to_email, self.customer.email)
+        self.assertIn("Este mensaje también debe enviarse.", reply.payload["body_text"])
+
+    def test_initial_private_note_and_suppressed_flow_do_not_queue_agent_reply(self):
+        private_ticket = self._create_ticket_via_service(
+            content="Nota interna inicial",
+            is_public=False,
+        )
         self.assertFalse(
-            OutboundEmailLog.objects.filter(ticket=ticket, template_key="agent_reply").exists()
+            OutboundEmailLog.objects.filter(
+                ticket=private_ticket,
+                template_key="agent_reply",
+            ).exists()
+        )
+
+        suppressed_ticket = self._create_ticket_via_service(
+            content="Carga silenciosa",
+            suppress_requester_email=True,
+        )
+        self.assertFalse(
+            OutboundEmailLog.objects.filter(ticket=suppressed_ticket).exists()
         )
 
     @override_settings(OUTBOUND_TICKET_CREATED_ENABLED=False)
@@ -1439,8 +1504,8 @@ class ReportingTests(_BaseFixture):
             subject="RA2", brand=self.brand_a, status="closed",
             closed_at=timezone.now(), sla_breached_at=timezone.now(),
         )
-        self.t_b = self.make_ticket(subject="RB1", brand=self.brand_b, status="open")
-        self.t_none = self.make_ticket(subject="RN1", brand=None, status="pending")
+        self.t_b = self.make_ticket(subject="RB1", brand=self.brand_b, product_line=self.product_b, status="open")
+        self.t_none = self.make_ticket(subject="RN1", brand=None, product_line=None, status="pending")
 
     def test_reporting_data_requires_agent(self):
         url = reverse("reporting_data")
@@ -1465,7 +1530,7 @@ class ReportingTests(_BaseFixture):
 
     def test_reporting_csv_streams_filtered_rows(self):
         self.client.force_login(self.agent)
-        response = self.client.get(f"{reverse('reporting_export_csv')}?brand={self.brand_a.id}")
+        response = self.client.get(f"{reverse('reporting_export_csv')}?product={self.product.id}")
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/csv", response["Content-Type"])
         content = b"".join(response.streaming_content).decode("utf-8")
@@ -1473,12 +1538,175 @@ class ReportingTests(_BaseFixture):
         self.assertEqual(len(lines), 3)  # cabecera + 2 tickets de la marca A
         self.assertIn("RA1", content)
         self.assertNotIn("RB1", content)
+        self.assertIn("producto_servicio", content)
+        self.assertNotIn(";marca;", content)
 
     def test_reporting_page_renders_for_agent(self):
         self.client.force_login(self.agent)
         response = self.client.get(reverse("reporting"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Reportes por entidad")
+        self.assertContains(response, "Métricas")
+        self.assertNotContains(response, "Informe semanal")
+        self.assertContains(response, "Filtrar por producto o servicio")
+        self.assertNotContains(response, 'id="repProduct"')
+        self.assertContains(response, 'class="tf-product-chip is-selected"')
+        self.assertContains(response, 'data-product-id="unclassified"')
+        self.assertNotContains(response, ">Empresa<")
+
+    def test_product_filter_and_grouping_use_native_ticket_dimension(self):
+        self.client.force_login(self.agent)
+        payload = self.client.get(
+            reverse("reporting_data"),
+            {"section": "tickets", "product": self.product.id},
+        ).json()
+        self.assertTrue(payload["ok"])
+        rows = payload["charts"]["dimensions"]["product"]["summary"]
+        self.assertEqual(rows, [{"label": "Recordia", "n": 2, "pct": 100.0}])
+
+    def test_unclassified_product_button_filters_native_tickets(self):
+        self.client.force_login(self.agent)
+        payload = self.client.get(
+            reverse("reporting_data"),
+            {"section": "tickets", "product": "unclassified"},
+        ).json()
+        self.assertTrue(payload["ok"])
+        rows = payload["charts"]["dimensions"]["product"]["summary"]
+        self.assertEqual(rows, [{"label": "Sin clasificar", "n": 1, "pct": 100.0}])
+
+        executive = self.client.get(
+            reverse("reporting_data"),
+            {"section": "executive", "product": "unclassified"},
+        ).json()
+        self.assertEqual([row["name"] for row in executive["matrix"]], ["Sin clasificar"])
+
+    def test_executive_summary_compares_equivalent_previous_period(self):
+        self.client.force_login(self.agent)
+        payload = self.client.get(reverse("reporting_data"), {"section": "executive"}).json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("comparison", payload)
+        self.assertEqual(len(payload["matrix"]), 7)
+        self.assertTrue(all("comparison" in row for row in payload["matrix"]))
+        self.assertTrue(all("previous" in kpi for kpi in payload["kpis"]))
+
+    def test_current_snapshot_uses_persisted_status_without_loading_audits(self):
+        from app.services.reporting_metrics import _states_at
+
+        with patch("app.services.reporting_metrics._ticket_events") as event_loader:
+            states = _states_at(
+                [self.t_a1, self.t_a2], timezone.now() + timedelta(seconds=1)
+            )
+
+        event_loader.assert_not_called()
+        self.assertEqual(states[self.t_a1.id], "open")
+        self.assertEqual(states[self.t_a2.id], "closed")
+
+    def test_historical_snapshot_projects_latest_status_without_loading_all_audits(self):
+        from app.services.reporting_metrics import _states_at
+
+        now = timezone.now()
+        Ticket.objects.filter(id=self.t_a1.id).update(created_at=now - timedelta(days=20))
+        self.t_a1.refresh_from_db()
+        TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="description",
+            old_value="", new_value="x" * 10000, created_at=now - timedelta(days=12),
+        )
+        TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="status",
+            old_value="open", new_value="pending", created_at=now - timedelta(days=10),
+        )
+        TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="status",
+            old_value="pending", new_value="closed", created_at=now - timedelta(days=2),
+        )
+
+        with patch("app.services.reporting_metrics._ticket_events") as event_loader:
+            with self.assertNumQueries(1):
+                states = _states_at([self.t_a1], now - timedelta(days=5))
+
+        event_loader.assert_not_called()
+        self.assertEqual(states[self.t_a1.id], "pending")
+
+    def test_reporting_event_loader_excludes_irrelevant_large_audits(self):
+        from app.services.reporting_metrics import STATE_EVENT_NAMES, _ticket_events
+
+        TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="description",
+            old_value="", new_value="x" * 10000, created_at=timezone.now(),
+        )
+        status_event = TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="status",
+            old_value="open", new_value="pending", created_at=timezone.now(),
+        )
+
+        grouped = _ticket_events(
+            [self.t_a1.id], field_names=STATE_EVENT_NAMES, include_actor=False
+        )
+
+        self.assertEqual([event.id for event in grouped[self.t_a1.id]], [status_event.id])
+
+    def test_multi_snapshot_backlog_replay_matches_single_snapshot_logic(self):
+        from app.services.reporting_metrics import (
+            STATE_EVENT_NAMES, _state_at, _states_at_samples, _ticket_events,
+        )
+
+        now = timezone.now()
+        Ticket.objects.filter(id=self.t_a1.id).update(created_at=now - timedelta(days=20))
+        self.t_a1.refresh_from_db()
+        TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="status",
+            old_value="open", new_value="pending", created_at=now - timedelta(days=10),
+        )
+        TicketEvent.objects.create(
+            ticket=self.t_a1, actor=self.agent, field_name="status",
+            old_value="pending", new_value="closed", created_at=now - timedelta(days=2),
+        )
+        events = _ticket_events(
+            [self.t_a1.id], field_names=STATE_EVENT_NAMES, include_actor=False
+        )[self.t_a1.id]
+        samples = [now - timedelta(days=15), now - timedelta(days=5), now + timedelta(days=1)]
+
+        expected = [_state_at(self.t_a1, events, sample) for sample in samples]
+        actual = list(_states_at_samples(self.t_a1, events, samples))
+
+        self.assertEqual(actual, expected)
+
+    def test_reporting_cache_outage_is_non_blocking(self):
+        from app import views
+
+        with patch.object(views.cache, "get", side_effect=RuntimeError("cache down")):
+            self.assertIsNone(views._reporting_cache_get("reporting:test"))
+        with patch.object(views.cache, "set", side_effect=RuntimeError("cache down")):
+            self.assertIsNone(views._reporting_cache_set("reporting:test", {"ok": True}))
+
+    def test_pdf_export_loads_reporting_zones_sequentially(self):
+        asset = Path(settings.BASE_DIR).parent / "resources" / "static" / "tickets" / "reporting.js"
+        script = asset.read_text(encoding="utf-8")
+
+        self.assertIn("for (let index = 0; index < ZONES.length; index += 1)", script)
+        self.assertNotIn("Promise.all(ZONES.map(zone => loadSection(zone.key)))", script)
+        self.assertIn("El servicio de métricas no está disponible", script)
+
+    def test_weekly_reporting_exposes_all_sections_and_charts(self):
+        self.client.force_login(self.agent)
+        expected_charts = {
+            "executive": 2,
+            "tickets": 5,  # dimensions agrupa los dos gráficos parametrizados
+            "efficiency": 6,
+            "assignee_activity": 3,
+            "agent_updates": 2,
+            "unsolved": 4,
+            "backlog": 4,  # incluye metadatos de cobertura
+            "satisfaction": 6,
+            "sla": 6,
+        }
+        for section, chart_count in expected_charts.items():
+            with self.subTest(section=section):
+                response = self.client.get(reverse("reporting_data"), {"section": section})
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertTrue(payload["ok"])
+                self.assertEqual(payload["section"], section)
+                self.assertEqual(len(payload["charts"]), chart_count)
 
 
 class SLAOrganizationTests(_BaseFixture):
@@ -1802,6 +2030,12 @@ class SatisfactionSurveyTests(_BaseFixture):
         rating.refresh_from_db()
         self.assertEqual(rating.score, "good")
         self.assertIsNone(rating.reason_choice_id)
+        self.assertTrue(TicketEvent.objects.filter(
+            ticket=rating.ticket,
+            field_name="satisfaction_score",
+            old_value="bad",
+            new_value="good",
+        ).exists())
 
     def test_vote_is_attributed_to_the_assignee_at_vote_time(self):
         ticket = self._resolved_ticket()

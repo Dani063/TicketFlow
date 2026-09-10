@@ -104,6 +104,9 @@ AZURE_CLIENT_SECRET=<valor del secret — ver gestor de contraseñas>
 
 # Email saliente
 OUTBOUND_EMAIL_ENABLED=true            # kill switch global (false en local)
+OUTBOUND_TICKET_CREATED_ENABLED=false  # acuse automático al crear ticket
+OUTBOUND_AGENT_REPLY_ENABLED=true      # comentario público de agente -> requester
+SATISFACTION_SURVEY_ENABLED=false      # encuesta automática tras resolución
 AWS_SES_REGION=eu-west-1
 # SES_CONFIGURATION_SET=ticketflow     # opcional: tracking de bounces/quejas
 TICKETFLOW_PUBLIC_URL=https://<host>   # base de los enlaces {{ticket_url}} en plantillas
@@ -143,8 +146,8 @@ Los triggers con uso activo real que hay que implementar como notificaciones por
 
 | Trigger | Cuándo | Destinatario | Idioma |
 |---|---|---|---|
-| Acuse de recibo | Ticket creado | Cliente (requester) | ES / EN |
-| Respuesta de agente | Comentario público añadido | Cliente (requester) | ES / EN |
+| Acuse de recibo | Ticket creado | Cliente (requester) | ES / EN — implementado, opt-in |
+| Respuesta de agente | Comentario público añadido por agente | Cliente (requester) | ES / EN — implementado, opt-in |
 | Ticket resuelto | Estado → resolved | Cliente (requester) | ES / EN |
 | Asignación | Ticket asignado a agente | Agente (assignee) | — |
 
@@ -182,6 +185,17 @@ Implementadas como tareas periódicas de Celery Beat:
 - **Confirmación de creación**: `TicketService.create_ticket` encola la confirmación
   al solicitante en su idioma (`ticket.language` → `brand.language` → es) desde la
   dirección de su marca; tarea Celery `send_outbound_email` con reintentos.
+- **Respuesta pública del agente**: `CommentService.add_comment` encola `agent_reply`
+  solo si el autor es agente y el comentario es público. Notas internas, mensajes del
+  cliente y la descripción inicial nunca generan este correo. La deduplicación es por
+  comentario y el worker revalida los interruptores antes de cada entrega.
+- **Adjuntos**: la respuesta del agente conserva los identificadores de los adjuntos
+  asociados al comentario y el worker los lee del almacenamiento privado al entregar.
+  SES los envía con la API SESv2; Graph usa `sendMail` hasta 3 MB y, para cargas
+  mayores, crea un borrador y una upload session. Este último camino requiere
+  `Mail.ReadWrite` además de `Mail.Send` (ambos permisos de aplicación con admin
+  consent). Los correos entrantes M365 guardan los adjuntos de archivo en el ticket y
+  omiten recursos inline de firma.
 - **Anti-bucles** (defensa en profundidad): detección de cabeceras de auto-respuesta
   entrantes (`Auto-Submitted`, `X-Auto-Response-Suppress`, `Precedence`, `List-Id`),
   blocklist de buzones propios, patrones noreply, dedup por (plantilla, ticket,
@@ -198,11 +212,14 @@ Implementadas como tareas periódicas de Celery Beat:
 | Azure AD App Registration | ✅ Completado |
 | Exchange Online Access Policy | ✅ Completado |
 | Lectura buzones M365 (Graph API) | ✅ Completado — poll Celery cada 2 min |
+| Adjuntos entrantes M365 | ✅ Implementado — requiere almacenamiento S3 activado en Kubernetes |
 | Email saliente (código: SESv2 + Graph sendMail) | ✅ Implementado — tras kill switch `OUTBOUND_EMAIL_ENABLED` |
+| Adjuntos en respuestas de agente | ✅ Implementado — SESv2 / Graph; Graph grande requiere `Mail.ReadWrite` |
 | Permiso Graph `Mail.Send` + admin consent | ⏳ Pendiente (bloquea envío M365) |
 | SES production access + identidades DKIM + IAM `ses:SendEmail` | ⏳ Pendiente (bloquea envío SES) |
-| Confirmación de creación al cliente (acuse de recibo ES/EN) | ✅ Implementado |
+| Confirmación de creación al cliente (acuse de recibo ES/EN) | ✅ Implementado — `OUTBOUND_TICKET_CREATED_ENABLED` |
+| Respuesta pública del agente al cliente (ES/EN) | ✅ Implementado — `OUTBOUND_AGENT_REPLY_ENABLED` |
 | Lectura buzones SES (recordia, fxsigner) | ⏳ Pendiente — falta revisar receipt rules actuales |
-| Triggers restantes (respuesta de agente, resuelto, asignación) | ⏳ Pendiente — el sistema de plantillas ya los soporta (añadir claves nuevas) |
+| Triggers restantes (resuelto, asignación) | ⏳ Pendiente — el sistema de plantillas ya los soporta (añadir claves nuevas) |
 | Automations (Celery Beat: auto-cierre, CSAT, alerta 24h) | ⏳ Pendiente |
 | Horario laboral en BD | ⏳ Pendiente |

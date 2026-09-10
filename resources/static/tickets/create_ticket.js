@@ -67,10 +67,17 @@ window.tfApplyPaneSelect2 = function (paneEl, opts) {
                     },
                 });
             } else {
+                // La cruz de «limpiar» solo se ofrece donde el vacío es un valor
+                // válido: el select tiene opción vacía y no es obligatorio
+                // (#producto lo es). Sin opción vacía, Select2 dejaría el campo
+                // en la primera opción real al pulsar la cruz.
+                const clearable = !this.multiple
+                    && !this.required
+                    && !!this.querySelector('option[value=""]');
                 window.jQuery(this).select2({
                     width: '100%',
                     placeholder: window.jQuery(this).attr('placeholder') || 'Selecciona una opción',
-                    allowClear: false,
+                    allowClear: clearable,
                 });
             }
             inited++;
@@ -139,12 +146,17 @@ window.initTicketPane = function (root, ctx) {
     }
 
     function warnMessageRequired(action) {
-        window.toast.warning(`Escribe un mensaje antes de ${action}.`);
+        window.toast.warning(`Escribe un mensaje o adjunta un archivo antes de ${action}.`);
         focusValidationTarget('#new-message');
     }
 
     function validateNewTicketRequiredFields() {
         const required = [
+            {
+                selector: '#producto',
+                value: (rootEl.querySelector('#producto')?.value || '').trim(),
+                message: 'Selecciona un producto o servicio antes de crear el ticket.',
+            },
             {
                 selector: '#empresa',
                 value: (rootEl.querySelector('#empresa')?.value || '').trim(),
@@ -157,8 +169,8 @@ window.initTicketPane = function (root, ctx) {
             },
             {
                 selector: '#new-message',
-                value: (rootEl.querySelector('#new-message')?.value || '').trim(),
-                message: 'Escribe el mensaje inicial antes de crear el ticket.',
+                value: (rootEl.querySelector('#new-message')?.value || '').trim() || attachments.hasFiles(),
+                message: 'Escribe un mensaje o adjunta un archivo antes de crear el ticket.',
             },
         ];
         const missing = required.find(item => !item.value);
@@ -168,137 +180,39 @@ window.initTicketPane = function (root, ctx) {
         focusValidationTarget(missing.selector);
         return false;
     }
-    function middleEllipsis(filename, max = 26, filler = '…') {
-        if (!filename) return '';
-        // separa extensión
-        const lastDot = filename.lastIndexOf('.');
-        const ext = lastDot > 0 ? filename.slice(lastDot) : '';
-        const base = lastDot > 0 ? filename.slice(0, lastDot) : filename;
+    // A separate controller per pane owns uploads, drafts and previews.
+    const attachments = window.TicketAttachments.mount(rootEl, {
+        ticketId: ctx.ticketId, getCsrfToken: () => getCookie('csrftoken'),
+    });
+    let submissionBusy = false;
+    let lastAttempt = null;
 
-        if (base.length + ext.length <= max) return filename;
-
-        const keep = Math.max(1, max - ext.length - 1); // 1 para el filler
-        const start = Math.ceil(keep / 2);
-        const end = Math.floor(keep / 2);
-        return base.slice(0, start) + filler + base.slice(base.length - end) + ext;
+    function setSubmissionBusy(busy) {
+        submissionBusy = busy;
+        attachments.lock(busy);
+        rootEl.querySelectorAll('#publish-button, #send-message-btn, #dropdown-button, #visBtn, .vis-option')
+            .forEach(button => { button.disabled = busy; });
+        paneComposer?.quill?.enable(!busy);
+        rootEl.setAttribute('aria-busy', String(busy));
     }
 
-    // ---- Adjuntos: subir y preparar para el comentario ----
-    window.pendingAttachmentIds = [];
+    function attachmentsReady() {
+        if (attachments.ready()) return true;
+        window.toast.warning('Espera a que terminen las subidas. Reintenta o retira los archivos con error antes de publicar.');
+        return false;
+    }
 
-    const attachBtn = rootEl.querySelector('#attach-btn');
-    const attachInput = rootEl.querySelector('#attach-input');
-    const pendingBox = rootEl.querySelector('#pending-attachments');
-    const composerArea = rootEl.querySelector('#messageInputArea');
-    const composerTextarea = rootEl.querySelector('#new-message');
-
-    function isImageType(t) { return t && t.startsWith('image/'); }
-
-    async function uploadFiles(files) {
-        if (!files || !files.length) return;
-        if (!ctx.ticketId) {
-            window.toast.warning('Guarda el ticket antes de adjuntar archivos.');
-            return;
+    function requestIdFor(payload) {
+        const fingerprint = JSON.stringify(payload);
+        if (!lastAttempt || lastAttempt.fingerprint !== fingerprint) {
+            lastAttempt = { fingerprint, id: crypto.randomUUID() };
         }
-        for (const file of files) {
-            const fd = new FormData();
-            fd.append('file', file);
-            try {
-                const res = await fetch(`/tickets/${ctx.ticketId}/attachments/upload/`, {
-                    method: 'POST',
-                    headers: { 'X-CSRFToken': getCookie('csrftoken') }, // NO pongas Content-Type aquí
-                    body: fd
-                });
-                const data = await res.json();
-                if (!res.ok) { window.toast.error(data.error || 'Error al subir adjunto'); continue; }
-
-                window.pendingAttachmentIds.push(data.id);
-                const pill = document.createElement('div');
-                pill.className = 'pending-pill';
-                pill.dataset.id = String(data.id);
-
-                const originalName = data.filename || (data.file_url || '').split('/').pop() || 'archivo';
-                const displayName = middleEllipsis(originalName, 26, '…');
-
-                pill.innerHTML = `
-  <i class="fas fa-paperclip" aria-hidden="true"></i>
-  <span class="name" title="${originalName}">${displayName}</span>
-  <button type="button" class="remove" aria-label="Quitar adjunto">&times;</button>
-`;
-
-                pill.querySelector('.remove').addEventListener('click', () => {
-                    window.pendingAttachmentIds = window.pendingAttachmentIds.filter(id => id !== data.id);
-                    pill.remove();
-                });
-
-                pendingBox && pendingBox.appendChild(pill);
-            } catch (err) {
-                console.error('Upload error', err);
-                window.toast.error('No se pudo subir el adjunto.');
-            }
-        }
+        return lastAttempt.id;
     }
 
-    if (attachBtn && attachInput) {
-        attachBtn.addEventListener('click', () => {
-            if (!ctx.ticketId) {
-                window.toast.warning('Guarda el ticket antes de adjuntar archivos.');
-                return;
-            }
-            attachInput.click();
-        });
-
-        attachInput.addEventListener('change', async (e) => {
-            await uploadFiles(Array.from(e.target.files || []));
-            attachInput.value = '';
-        });
-    }
-
-    // Drag & drop sobre el composer
-    if (composerArea) {
-        let _dragDepth = 0;
-        const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
-
-        composerArea.addEventListener('dragenter', (e) => {
-            if (!hasFiles(e)) return;
-            e.preventDefault();
-            _dragDepth++;
-            composerArea.classList.add('dragover');
-        });
-        composerArea.addEventListener('dragover', (e) => {
-            if (!hasFiles(e)) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'copy';
-        });
-        composerArea.addEventListener('dragleave', () => {
-            _dragDepth = Math.max(0, _dragDepth - 1);
-            if (_dragDepth === 0) composerArea.classList.remove('dragover');
-        });
-        composerArea.addEventListener('drop', async (e) => {
-            if (!hasFiles(e)) return;
-            e.preventDefault();
-            _dragDepth = 0;
-            composerArea.classList.remove('dragover');
-            await uploadFiles(Array.from(e.dataTransfer.files || []));
-        });
-    }
-
-    // Pegar imagen desde el portapapeles
-    if (composerTextarea) {
-        composerTextarea.addEventListener('paste', async (e) => {
-            const items = (e.clipboardData && e.clipboardData.items) || [];
-            const files = [];
-            for (const it of items) {
-                if (it.kind === 'file') {
-                    const f = it.getAsFile();
-                    if (f) files.push(f);
-                }
-            }
-            if (files.length) {
-                e.preventDefault();
-                await uploadFiles(files);
-            }
-        });
+    function responseError(data, fallback) {
+        return data?.detail || data?.error?.message
+            || (typeof data?.error === 'string' ? data.error : '') || fallback;
     }
 
 
@@ -360,303 +274,237 @@ window.initTicketPane = function (root, ctx) {
         });
     }
 
-    const sendMessage = async (ev) => {
-        if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-
-        const textarea = rootEl.querySelector('#new-message');
-        const content = (textarea?.value || '').trim();
-
-        // Si aún no existe id real, validar como en "Publicar"
-        if (!ctx.ticketId) {
-            if (!validateNewTicketRequiredFields()) return;
-
-            // Inyecta status y crea/redirige
-            const ticketForm = rootEl.querySelector('#ticket-form');
-            const selectedStatus = rootEl.querySelector('#selected-status')?.textContent?.trim() || '';
-            let statusInput = ticketForm.querySelector('input[name="status"]');
-            if (!statusInput) {
-                statusInput = document.createElement('input');
-                statusInput.type = 'hidden';
-                statusInput.name = 'status';
-                ticketForm.appendChild(statusInput);
+    // Both actions share the same safe rendering and attachment association.
+    function appendPublishedComment(data) {
+        const box = rootEl.querySelector('#messagesBox');
+        if (!box || box.querySelector('[data-comment-id="' + Number(data.id) + '"]')) return;
+        const element = (tag, className, value) => {
+            const node = document.createElement(tag);
+            if (className) node.className = className;
+            if (value != null) node.textContent = value;
+            return node;
+        };
+        const message = element('div', 'message' +
+            (Number(data.user_id) === Number(ctx.currentUserId) ? ' me' : '') +
+            (data.is_public ? '' : ' internal'));
+        message.dataset.commentId = data.id;
+        const header = element('div', 'msg-header');
+        const name = data.username || 'Usuario';
+        const avatar = element('div', 'msg-avatar', name.charAt(0).toUpperCase());
+        const palette = ['#5b67ca','#e06c75','#56b6c2','#98c379','#d19a66','#c678dd','#61afef','#e5c07b'];
+        let hash = 0;
+        for (const character of name) hash = character.charCodeAt(0) + ((hash << 5) - hash);
+        avatar.style.backgroundColor = palette[Math.abs(hash) % palette.length];
+        const meta = element('div', 'msg-meta');
+        const author = element('a', 'msg-author', name);
+        author.href = (window.urls?.customer_profile || '/customers/profile/') + '?id=' + Number(data.user_id);
+        meta.appendChild(author);
+        if (data.user_role) meta.appendChild(element('span', 'msg-role', data.user_role));
+        const right = element('div', 'msg-right');
+        if (!data.is_public) right.appendChild(element('span', 'badge-internal', 'Interno'));
+        const timestamp = element('span', 'msg-timestamp', 'hace un momento');
+        timestamp.dataset.ts = data.created_at_iso || '';
+        timestamp.title = data.created_at || '';
+        right.appendChild(timestamp);
+        header.append(avatar, meta, right);
+        message.appendChild(header);
+        if (['agent', 'customer', 'internal'].includes(data.speaker_kind)) message.classList.add('speaker-' + data.speaker_kind);
+        if (data.content || data.html_body) {
+            const body = element('div', 'msg-body');
+            if (data.conversation_html) {
+                // Misma plantilla saneada que la carga inicial y los fragmentos SPA.
+                body.innerHTML = data.conversation_html;
+            } else if (data.html_body) {
+                const html = element('div', 'email-html');
+                // Only the server-sanitized comment HTML enters this surface.
+                html.innerHTML = data.html_body;
+                body.appendChild(html);
+            } else {
+                body.textContent = data.content || '';
+                body.style.whiteSpace = 'pre-wrap';
             }
-            statusInput.value = selectedStatus;
-            if (window.Tabs && typeof window.Tabs.closeDraftNewTicketTabs === 'function') {
-                window.Tabs.closeDraftNewTicketTabs();
-            }
-            ticketForm.requestSubmit();
+            message.appendChild(body);
+        }
+        if (data.attachments?.length) {
+            const files = element('div', 'tf-attachments');
+            window.TicketAttachments.render(files, data.attachments);
+            message.appendChild(files);
+        }
+        box.appendChild(message);
+        scrollToLatestMessage(box);
+    }
+
+    async function createTicketWithAttachments() {
+        if (submissionBusy) return;
+        if (rootEl.dataset.createdTicketId) {
+            window.openTicket?.(rootEl.dataset.createdTicketId);
             return;
         }
-
-        // Ticket existente: validar contenido
-        if (!content) { warnMessageRequired('enviar'); return; }
-
-        const isPublic = (typeof isPublicInput !== 'undefined') ? (isPublicInput.value === 'true') : true;
-        const payload = { content, is_public: isPublic };
-        const _html = window.QuillComposer?.getHtml?.();
-        if (_html) payload.html_body = _html;
-        if (window.pendingAttachmentIds?.length) payload.attachment_ids = window.pendingAttachmentIds;
-
+        if (!validateNewTicketRequiredFields() || !attachmentsReady()) return;
+        const form = rootEl.querySelector('#ticket-form');
+        const fd = new FormData(form);
+        fd.set('status', rootEl.querySelector('#selected-status')?.textContent?.trim() || 'open');
+        fd.set('message', rootEl.querySelector('#new-message')?.value || '');
+        fd.set('html_body', paneComposer?.getHtml?.() || '');
+        fd.set('is_public', isPublicInput?.value || 'true');
+        fd.set('attachment_ids', JSON.stringify(attachments.ids()));
+        fd.set('draft_key', attachments.draftKey);
+        fd.set('request_id', requestIdFor(Array.from(fd.entries()).filter(([key]) => key !== 'csrfmiddlewaretoken')));
+        setSubmissionBusy(true);
         try {
-            const response = await fetch(`/tickets/${ctx.ticketId}/add_comment/`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': getCookie('csrftoken')
-                },
-                body: JSON.stringify(payload)
+            const response = await fetch(form.action, {
+                method: 'POST', body: fd,
+                headers: {'X-Requested-With':'XMLHttpRequest', 'X-CSRFToken':getCookie('csrftoken')},
             });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                window.toast.error(data.error || 'No se pudo enviar el mensaje.');
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.ticket_id) {
+                window.toast.error(responseError(data, 'No se pudo crear el ticket. Tu borrador se conserva.'));
                 return;
             }
-
-            const messagesBox = rootEl.querySelector('#messagesBox');
-            const newComment = document.createElement('div');
-            const isMe = Number(data.user_id) === Number(window.currentUserId);
-            newComment.className = 'message' + (isMe ? ' me' : '') + (data.is_public ? '' : ' internal');
-            newComment.dataset.commentId = data.id;
-
-            // Calcular fecha relativa ("hace un momento", "hace X minutos", etc.)
-            const getRelativeTime = (isoDate) => {
-                const date = new Date(isoDate);
-                const now = new Date();
-                const diffMs = now - date;
-                const diffMins = Math.floor(diffMs / 60000);
-                const diffHours = Math.floor(diffMs / 3600000);
-                const diffDays = Math.floor(diffMs / 86400000);
-
-                if (diffMins < 1) return 'hace un momento';
-                if (diffMins < 60) return `hace ${diffMins} minuto${diffMins > 1 ? 's' : ''}`;
-                if (diffHours < 24) return `hace ${diffHours} hora${diffHours > 1 ? 's' : ''}`;
-                if (diffDays < 7) return `hace ${diffDays} día${diffDays > 1 ? 's' : ''}`;
-                return date.toLocaleDateString('es-ES');
-            };
-
-            const internalBadge = data.is_public ? '' : '<span class="badge-internal">Interno</span>';
-            const initials = (data.username || '?').charAt(0).toUpperCase();
-            const roleHtml = data.user_role ? `<span class="msg-role">${data.user_role}</span>` : '';
-            const profileUrl = (window.urls && window.urls.customer_profile) ? `${window.urls.customer_profile}?id=${data.user_id}` : '#';
-            const userLink = `<a class="msg-author" href="${profileUrl}">${data.username || 'Usuario'}</a>`;
-            const relativeTime = getRelativeTime(data.created_at_iso);
-            const _bodyHtml = data.html_body
-                ? `<div class="email-html">${data.html_body}</div>`
-                : `${(data.content || '').replace(/\n/g, '<br>')}`;
-
-            // Calcular color del avatar usando la misma lógica que existe en la página
-            const avatarColor = (name) => {
-                const palette = ['#5b67ca','#e06c75','#56b6c2','#98c379','#d19a66','#c678dd','#61afef','#e5c07b'];
-                let hash = 0;
-                for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-                return palette[Math.abs(hash) % palette.length];
-            };
-            const bgColor = avatarColor(data.username || '?');
-
-            newComment.innerHTML = `
-      <div class="msg-header">
-        <div class="msg-avatar" data-initials="${initials}" style="background: ${bgColor};">${initials}</div>
-        <div class="msg-meta">
-          ${userLink}
-          ${roleHtml}
-        </div>
-        <div class="msg-right">
-          ${internalBadge}
-          <span class="msg-timestamp" title="${data.created_at}">${relativeTime}</span>
-        </div>
-      </div>
-      <div class="msg-body">${_bodyHtml}</div>
-    `;
-
-            // PINTAR ADJUNTOS DEVUELTOS (si hay)
-            if (data.attachments && data.attachments.length) {
-                const at = document.createElement('div');
-                at.className = 'attachments';
-                data.attachments.forEach(a => {
-                    if (a.file_type && a.file_type.startsWith('image/')) {
-                        const link = document.createElement('a');
-                        link.href = a.file_url; link.target = '_blank';
-                        const img = document.createElement('img');
-                        img.src = a.file_url; link.appendChild(img);
-                        at.appendChild(link);
-                    } else {
-                        const link = document.createElement('a');
-                        link.href = a.file_url; link.target = '_blank';
-                        link.className = 'file-pill';
-                        link.innerHTML = '<i class="fas fa-paperclip"></i> Archivo';
-                        at.appendChild(link);
-                    }
-                });
-                newComment.appendChild(at);
+            attachments.clear();
+            paneComposer?.clear();
+            rootEl.dataset.createdTicketId = String(data.ticket_id);
+            const oldKey = Array.from(window.Tabs?.paneCache?.entries() || [])
+                .find(([, entry]) => entry.$pane === rootEl)?.[0];
+            const oldTab = oldKey ? Array.from(document.querySelectorAll('.navbar-left .tab'))
+                .find(tab => window.Tabs.normalizeUrl(tab.dataset.url || '') === oldKey) : null;
+            setSubmissionBusy(false);
+            if (window.openTicket) {
+                window.openTicket(data.ticket_id, rootEl.querySelector('#subject')?.value);
+                // Only close this submitted draft, never the drafts in other tabs.
+                if (oldTab && !oldTab.classList.contains('active')) oldTab.querySelector('.close-tab')?.click();
+            } else {
+                window.location.assign(data.url || '/tickets/create/?id=' + Number(data.ticket_id));
             }
-
-            messagesBox.appendChild(newComment);
-
-            // limpiar composer
-            textarea.value = '';
-            if (typeof pendingBox !== 'undefined' && pendingBox) pendingBox.innerHTML = '';
-            window.pendingAttachmentIds = [];
-            messagesBox.scrollTop = messagesBox.scrollHeight;
-
-        } catch (err) {
-            console.error('Error al enviar el comentario:', err);
-            window.toast.error('Error de red al enviar el mensaje.');
+        } catch (_) {
+            window.toast.error('No se pudo confirmar la publicación. El borrador se conserva; reintentar no duplicará el ticket.');
+        } finally {
+            setSubmissionBusy(false);
         }
-    };
+    }
 
-    async function publishComment(ev) {
+    async function submitComment(ev, updateFields) {
         if (ev) { ev.preventDefault(); ev.stopPropagation(); }
-
-        if (!ctx.ticketId) {
-            // Reutiliza tu flujo de creación
-            const ticketForm = rootEl.querySelector('#ticket-form');
-            const selectedStatus = rootEl.querySelector('#selected-status')?.textContent?.trim() || 'open';
-            let statusInput = ticketForm.querySelector('input[name="status"]');
-            if (!statusInput) {
-                statusInput = document.createElement('input');
-                statusInput.type = 'hidden';
-                statusInput.name = 'status';
-                ticketForm.appendChild(statusInput);
-            }
-            statusInput.value = selectedStatus;
-            ticketForm.requestSubmit();
-            return;
-        }
-
+        if (submissionBusy) return;
+        if (!ctx.ticketId) return createTicketWithAttachments();
+        if (!attachmentsReady()) return;
         const textarea = rootEl.querySelector('#new-message');
         const content = (textarea?.value || '').trim();
-        if (!content) { warnMessageRequired('publicar'); return; }
-
-        const isPublic = (typeof isPublicInput !== 'undefined') ? (isPublicInput.value === 'true') : true;
         const newStatus = (rootEl.querySelector('#selected-status')?.textContent || 'open').trim().toLowerCase();
+        if (!content && !attachments.hasFiles()) {
+            if (!updateFields || !hasTicketFieldChanges()) { warnMessageRequired('publicar'); return; }
+            setSubmissionBusy(true);
+            try {
+                if (await saveTicketFields(newStatus)) window.toast.success('Cambios del ticket guardados.');
+            } finally { setSubmissionBusy(false); }
+            return;
+        }
+        const payload = {
+            content, is_public: isPublicInput ? isPublicInput.value === 'true' : true,
+            html_body: paneComposer?.getHtml?.() || '', attachment_ids: attachments.ids(),
+        };
+        if (updateFields) payload.new_status = newStatus;
+        payload.request_id = requestIdFor(payload);
+        setSubmissionBusy(true);
+        try {
+            if (updateFields && !await saveTicketFields(newStatus)) return;
+            const response = await fetch('/tickets/' + ctx.ticketId + '/add_comment/', {
+                method:'POST',
+                headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
+                body:JSON.stringify(payload),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                window.toast.error(responseError(data, 'No se pudo publicar. El texto y los adjuntos se conservan.'));
+                return;
+            }
+            appendPublishedComment(data);
+            attachments.clear();
+            paneComposer?.clear();
+            textarea.value = '';
+            lastAttempt = null;
+            if (data.new_status) rootEl.querySelector('#selected-status').textContent = data.new_status;
+        } catch (_) {
+            window.toast.error('No se pudo confirmar la publicación. Reintenta; no se duplicará el mensaje.');
+        } finally { setSubmissionBusy(false); }
+    }
 
-        const payload = { content, is_public: isPublic, new_status: newStatus };
-        const _html2 = window.QuillComposer?.getHtml?.();
-        if (_html2) payload.html_body = _html2;
-        if (window.pendingAttachmentIds?.length) payload.attachment_ids = window.pendingAttachmentIds;
+    const sendMessage = ev => submitComment(ev, false);
+
+    // ---- Guardado de los campos del ticket ----
+    // "Publicar como <estado>" solo publicaba el comentario en tickets ya
+    // existentes: el <form id="ticket-form"> nunca se enviaba, así que cualquier
+    // cambio en Asignado, Solicitante, Empresa, Tipo... se perdía en silencio (el
+    // pane seguía mostrando el valor elegido porque nunca se recarga).
+    //
+    // Se envía el formulario solo si algo cambió respecto a como se cargó: así un
+    // ticket sin producto —los que entran por email— sigue admitiendo respuestas
+    // sin que la validación de "producto obligatorio" bloquee la publicación.
+    let _formBaseline = null;
+
+    function serializeTicketForm() {
+        const form = rootEl.querySelector('#ticket-form');
+        if (!form) return null;
+        const params = new URLSearchParams(new FormData(form));
+        params.delete('message');               // el cuerpo del comentario no es metadato
+        params.delete('csrfmiddlewaretoken');
+        return JSON.stringify([...params.entries()].sort(
+            (a, b) => (a[0] === b[0] ? (a[1] > b[1] ? 1 : -1) : (a[0] > b[0] ? 1 : -1))
+        ));
+    }
+
+    function hasTicketFieldChanges() {
+        if (_formBaseline === null) return false;   // la carga inicial falló: no tocamos nada
+        return serializeTicketForm() !== _formBaseline;
+    }
+
+    async function saveTicketFields(status) {
+        const form = rootEl.querySelector('#ticket-form');
+        if (!form || !hasTicketFieldChanges()) return true;
+
+        const fd = new FormData(form);
+        // El comentario lo publica add_comment (con HTML, adjuntos y visibilidad).
+        // Si 'message' viajara aquí, update_ticket crearía un segundo comentario.
+        fd.delete('message');
+        // Sin 'status' explícito el backend cae a "open" y reabriría el ticket.
+        fd.set('status', status || rootEl.querySelector('#selected-status')?.textContent?.trim() || 'open');
 
         try {
-            const response = await fetch(`/tickets/${ctx.ticketId}/add_comment/`, {
+            const res = await fetch(form.action, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
-                body: JSON.stringify(payload)
+                body: fd,
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
             });
-            const data = await response.json();
-            if (!response.ok) { window.toast.error(data.error || 'No se pudo publicar.'); return; }
-
-            // Pinta el nuevo comentario (idéntico a sendMessage)
-            const messagesBox = rootEl.querySelector('#messagesBox');
-            const newComment = document.createElement('div');
-            const isMe = Number(data.user_id) === Number(window.currentUserId);
-            newComment.className = 'message' + (isMe ? ' me' : '') + (data.is_public ? '' : ' internal');
-            newComment.dataset.commentId = data.id;
-
-            // Reutilizar la función getRelativeTime (definida en sendMessage)
-            const getRelativeTime2 = (isoDate) => {
-                const date = new Date(isoDate);
-                const now = new Date();
-                const diffMs = now - date;
-                const diffMins = Math.floor(diffMs / 60000);
-                const diffHours = Math.floor(diffMs / 3600000);
-                const diffDays = Math.floor(diffMs / 86400000);
-
-                if (diffMins < 1) return 'hace un momento';
-                if (diffMins < 60) return `hace ${diffMins} minuto${diffMins > 1 ? 's' : ''}`;
-                if (diffHours < 24) return `hace ${diffHours} hora${diffHours > 1 ? 's' : ''}`;
-                if (diffDays < 7) return `hace ${diffDays} día${diffDays > 1 ? 's' : ''}`;
-                return date.toLocaleDateString('es-ES');
-            };
-
-            // Construir estructura correcta del mensaje
-            const internalBadge = data.is_public ? '' : '<span class="badge-internal">Interno</span>';
-            const initials = (data.username || '?').charAt(0).toUpperCase();
-            const roleHtml = data.user_role ? `<span class="msg-role">${data.user_role}</span>` : '';
-            const profileUrl = (window.urls && window.urls.customer_profile) ? `${window.urls.customer_profile}?id=${data.user_id}` : '#';
-            const userLink = `<a class="msg-author" href="${profileUrl}">${data.username || 'Usuario'}</a>`;
-            const relativeTime = getRelativeTime2(data.created_at_iso);
-            const _bodyHtml2 = data.html_body
-                ? `<div class="email-html">${data.html_body}</div>`
-                : `${(data.content || '').replace(/\n/g, '<br>')}`;
-
-            // Calcular color del avatar
-            const avatarColor2 = (name) => {
-                const palette = ['#5b67ca','#e06c75','#56b6c2','#98c379','#d19a66','#c678dd','#61afef','#e5c07b'];
-                let hash = 0;
-                for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-                return palette[Math.abs(hash) % palette.length];
-            };
-            const bgColor2 = avatarColor2(data.username || '?');
-
-            newComment.innerHTML = `
-      <div class="msg-header">
-        <div class="msg-avatar" data-initials="${initials}" style="background: ${bgColor2};">${initials}</div>
-        <div class="msg-meta">
-          ${userLink}
-          ${roleHtml}
-        </div>
-        <div class="msg-right">
-          ${internalBadge}
-          <span class="msg-timestamp" title="${data.created_at}">${relativeTime}</span>
-        </div>
-      </div>
-      <div class="msg-body">${_bodyHtml2}</div>
-    `;
-            if (data.attachments && data.attachments.length) {
-                const at = document.createElement('div');
-                at.className = 'attachments';
-                data.attachments.forEach(a => {
-                    if (a.file_type && a.file_type.startsWith('image/')) {
-                        const link = document.createElement('a');
-                        link.href = a.file_url; link.target = '_blank';
-                        const img = document.createElement('img');
-                        img.src = a.file_url; link.appendChild(img);
-                        at.appendChild(link);
-                    } else {
-                        const link = document.createElement('a');
-                        link.href = a.file_url; link.target = '_blank';
-                        link.className = 'file-pill';
-                        link.innerHTML = '<i class="fas fa-paperclip"></i> Archivo';
-                        at.appendChild(link);
-                    }
-                });
-                newComment.appendChild(at);
+            if (!res.ok) {
+                let msg = 'No se pudieron guardar los cambios del ticket.';
+                // json_error() responde {ok, error:{code,message}, detail}: 'error' es
+                // un objeto, no una cadena.
+                try {
+                    const data = await res.json();
+                    msg = data.detail || data.error?.message || (typeof data.error === 'string' ? data.error : '') || msg;
+                } catch (_) { /* respuesta no JSON */ }
+                window.toast.error(msg);
+                return false;
             }
-            messagesBox.appendChild(newComment);
-            messagesBox.scrollTop = messagesBox.scrollHeight;
-
-            // Actualiza el estado en la UI (span del footer y, si tienes, badge/campo de estado)
-            const statusSpan = rootEl.querySelector('#selected-status');
-            if (statusSpan && data.new_status) statusSpan.textContent = data.new_status;
-
-            // Limpia composer
-            textarea.value = '';
-            if (typeof pendingBox !== 'undefined' && pendingBox) pendingBox.innerHTML = '';
-            window.pendingAttachmentIds = [];
-
+            _formBaseline = serializeTicketForm();
+            return true;
         } catch (err) {
-            console.error('Error al publicar:', err);
-            window.toast.error('Error de red al publicar.');
+            console.error('Error guardando los campos del ticket:', err);
+            window.toast.error('Error de red al guardar los cambios del ticket.');
+            return false;
         }
     }
 
+    const publishComment = ev => submitComment(ev, true);
 
     const sendMessageButton = rootEl.querySelector('#send-message-btn');
-    if (sendMessageButton) {
-        sendMessageButton.addEventListener('click', sendMessage);
-    }
-
+    sendMessageButton?.addEventListener('click', sendMessage);
     const ticketForm = rootEl.querySelector('#ticket-form');
-    if (ticketForm) {
-        ticketForm.addEventListener('submit', (e) => {
-            // Solo bloqueamos el submit automático en tickets NUEVOS si faltan datos
-            if (!ctx.ticketId && !validateNewTicketRequiredFields()) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-        });
-    }
+    ticketForm?.addEventListener('submit', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        publishComment(event);
+    });
 
     // Manejo del Dropdown de Estado
     const manageStatusDropdown = () => {
@@ -694,28 +542,7 @@ window.initTicketPane = function (root, ctx) {
             }
         });
 
-        publishButton.addEventListener('click', (event) => {
-            event.preventDefault();
-            // Si hay ticketId → publicar vía AJAX con cambio de estado
-            if (ctx.ticketId) {
-                publishComment(event);
-                return;
-            }
-
-            // Ticket nuevo → validación + submit (tu flujo actual)
-            if (!validateNewTicketRequiredFields()) return;
-
-            const selectedStatus = rootEl.querySelector('#selected-status').textContent.trim();
-            let statusInput = ticketForm.querySelector('input[name="status"]');
-            if (!statusInput) {
-                statusInput = document.createElement('input');
-                statusInput.type = 'hidden';
-                statusInput.name = 'status';
-                ticketForm.appendChild(statusInput);
-            }
-            statusInput.value = selectedStatus;
-            ticketForm.submit();
-        });
+        publishButton.addEventListener('click', publishComment);
     };
 
     // Inicializar Dropdown de Estado
@@ -845,6 +672,7 @@ window.initTicketPane = function (root, ctx) {
         fetch(`/api/tickets/${ticketId}/`)
             .then(response => response.json())
             .then(data => {
+                $root.find('#producto').val(data.producto || '').trigger('change');
                 $root.find('#empresa').val(data.empresa || '').trigger('change');
                 $root.find('#asignado').val(data.asignado || '').trigger('change');
                 $root.find('#grupo').val(data.grupo || '').trigger('change');
@@ -894,13 +722,24 @@ window.initTicketPane = function (root, ctx) {
                     });
                     $ccs.trigger('change');
                 }
+                // Estado "tal como se cargó": referencia para saber al publicar
+                // qué campos tocó el usuario.
+                _formBaseline = serializeTicketForm();
             })
             .catch(error => console.error('Error al cargar el ticket:', error));
     }
 
+    // El comienzo del último mensaje debe quedar visible, incluso si es largo.
+    // Ir al final mostraba firmas/controles en vez de la respuesta del remitente.
+    function scrollToLatestMessage(box) {
+        const messages = box.querySelectorAll(':scope > .message');
+        const last = messages[messages.length - 1];
+        if (last) box.scrollTop += last.getBoundingClientRect().top - box.getBoundingClientRect().top - 12;
+    }
+
     // ---- Scroll al último comentario ----
     const messagesBox = rootEl.querySelector('#messagesBox');
-    if (messagesBox) messagesBox.scrollTop = messagesBox.scrollHeight;
+    if (messagesBox) scrollToLatestMessage(messagesBox);
 
     // ---- Avatares: color por nombre ----
     function avatarColor(name) {
@@ -942,24 +781,8 @@ window.initTicketPane = function (root, ctx) {
         });
     });
 
-    // ---- Blockquotes colapsables ----
-    rootEl.querySelectorAll('.msg-body').forEach(body => {
-        const quotes = body.querySelectorAll('blockquote');
-        if (!quotes.length) return;
-        quotes.forEach(q => {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'quote-toggle';
-            btn.innerHTML = '<i class="fas fa-ellipsis-h"></i> Ver mensaje anterior';
-            btn.addEventListener('click', () => {
-                const expanded = q.classList.toggle('quote-expanded');
-                btn.innerHTML = expanded
-                    ? '<i class="fas fa-minus"></i> Ocultar'
-                    : '<i class="fas fa-ellipsis-h"></i> Ver mensaje anterior';
-            });
-            q.before(btn);
-        });
-    });
+    // El historial y las firmas usan <details> en la plantilla compartida.
+    // Las citas normales e intercaladas siguen visibles y no requieren listeners.
 
     // ---- Macros panel ----
     const macroBtn    = rootEl.querySelector('#macro-btn');

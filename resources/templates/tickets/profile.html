@@ -130,18 +130,23 @@
             if (card.style.display === "block") _positionCard();
         });
 
-        document.addEventListener("DOMContentLoaded", function() {
-            document.querySelectorAll(".subject-text").forEach(function(span) {
-                span.addEventListener("mouseenter", function() {
-                    clearTimeout(_timer);
-                    _timer = setTimeout(() => _showCard(span), 250);
-                });
-                span.addEventListener("mouseleave", function() {
-                    clearTimeout(_timer);
-                    card.style.display = "none";
-                });
+        function _attachHover(span) {
+            span.addEventListener("mouseenter", function() {
+                clearTimeout(_timer);
+                _timer = setTimeout(() => _showCard(span), 250);
             });
-        });
+            span.addEventListener("mouseleave", function() {
+                clearTimeout(_timer);
+                card.style.display = "none";
+            });
+        }
+
+        // Expuesto para que _profile_tickets.html reenganche el hover en las filas
+        // que llegan por AJAX al filtrar o paginar (son nodos nuevos).
+        window.__tfProfileHoverAttach = function (root) {
+            (root || document).querySelectorAll(".subject-text").forEach(_attachHover);
+        };
+        window.__tfProfileHoverAttach();
     })();
 
     function openTicket(ticketId, subject) {

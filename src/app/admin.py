@@ -1,26 +1,26 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import Brand, Comment, Group, HelpArticle, HelpCategory, HelpCenter, HelpSection, OutboundEmailLog, ResponseTemplate, Role, SatisfactionRating, SatisfactionReason, SLAPolicy, Ticket, TicketAIAnalysis, User
+from .models import Brand, Comment, Group, HelpArticle, HelpArticleAsset, HelpArticleRevision, HelpCategory, HelpCenter, HelpSection, OutboundEmailLog, ProductLine, ResponseTemplate, Role, SatisfactionRating, SatisfactionReason, SLAPolicy, Ticket, TicketAIAnalysis, User
 
 # ====== Ticket ======
 
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
     list_display = (
-        "id", "subject", "status", "priority",
+        "id", "subject", "product_line", "status", "priority",
         "requester", "assignee", "created_at", "updated_at"
     )
-    list_filter = ("status", "priority", "type", "service", "channel", "language")
+    list_filter = ("status", "priority", "product_line", "type", "service", "channel", "language")
     search_fields = ("subject", "description", "requester__email", "assignee__email")
     date_hierarchy = "created_at"
     ordering = ("-updated_at",)
-    list_select_related = ("requester", "assignee")
+    list_select_related = ("requester", "assignee", "product_line")
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         # Evita N+1 al listar tickets
-        return qs.select_related("requester", "assignee")
+        return qs.select_related("requester", "assignee", "product_line")
 
 # ====== Comment ======
 
@@ -62,6 +62,15 @@ class UserAdmin(DjangoUserAdmin):
 # ====== Cat�logos ======
 admin.site.register(Role)
 admin.site.register(Group)
+
+
+@admin.register(ProductLine)
+class ProductLineAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "color", "icon", "sort_order", "active")
+    list_editable = ("color", "icon", "sort_order", "active")
+    list_filter = ("active",)
+    search_fields = ("name", "code")
+    ordering = ("sort_order", "name")
 
 
 @admin.register(Brand)
@@ -156,7 +165,36 @@ class HelpSectionAdmin(admin.ModelAdmin):
 
 @admin.register(HelpArticle)
 class HelpArticleAdmin(admin.ModelAdmin):
-    list_display = ("title", "section", "promoted", "published", "source_updated_at")
-    list_filter = ("published", "promoted", "section__category__center", "section__category__locale")
+    list_display = ("title", "section", "origin", "editorial_override", "version", "promoted", "published", "source_updated_at")
+    list_filter = ("published", "promoted", "origin", "editorial_override", "section__category__center", "section__category__locale")
     search_fields = ("title", "body_text", "source_id")
     list_select_related = ("section", "section__category", "section__category__center")
+
+
+@admin.register(HelpArticleRevision)
+class HelpArticleRevisionAdmin(admin.ModelAdmin):
+    list_display = ("article", "number", "status", "created_by", "created_at", "published_at")
+    list_filter = ("status", "section__category__center", "section__category__locale")
+    search_fields = ("article__title", "title", "change_note")
+    readonly_fields = (
+        "article", "number", "section", "slug", "title", "body_html", "body_text",
+        "promoted", "position", "status", "base_version", "change_note", "created_by",
+        "created_at", "published_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(HelpArticleAsset)
+class HelpArticleAssetAdmin(admin.ModelAdmin):
+    list_display = ("original_name", "article", "storage_backend", "size", "uploaded_by", "created_at")
+    list_filter = ("storage_backend", "article__section__category__center")
+    search_fields = ("original_name", "article__title", "checksum")
+    readonly_fields = ("id", "article", "original_name", "storage_key", "storage_backend", "content_type", "size", "checksum", "uploaded_by", "created_at")
+
+    def has_add_permission(self, request):
+        return False

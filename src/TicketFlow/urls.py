@@ -6,7 +6,7 @@ from datetime import datetime
 from django.urls import path, include
 from django.contrib import admin
 from django.contrib.auth.views import LoginView, LogoutView
-from app import forms, views, public_views
+from app import forms, help_editor_views, views, public_views
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -31,7 +31,11 @@ urlpatterns = [
     path('api/tags/', views.tags_api, name='tags_api'),
     path('api/users/search/', views.users_search_api, name='users_search_api'),
     path('tickets/<int:ticket_id>/attachments/upload/', views.upload_attachment, name='upload_attachment'),
+    path('attachments/<int:attachment_id>/pending/delete/', views.delete_pending_attachment, name='delete_pending_attachment'),
     path('attachments/<int:attachment_id>/download/', public_views.attachment_download, name='attachment_download'),
+    path('attachments/<int:attachment_id>/preview/', public_views.attachment_preview, name='attachment_preview'),
+    path('attachments/drafts/upload/', views.upload_draft_attachment, name='upload_draft_attachment'),
+    path('attachments/uploads/cancel/', views.cancel_attachment_upload, name='cancel_attachment_upload'),
 
     path("customers/filter/", views.filter_customers, name="filter_customers"),
     path('customers/', views.customers_list, name='customers_list'),
@@ -57,7 +61,19 @@ urlpatterns = [
     path('docs/', views.documentation, name='documentation'),
     path('django-admin/', admin.site.urls),
 
+    # Edición interna de artículos. Estas rutas requieren agente y nunca se
+    # exponen en los dominios públicos de soporte.
+    path('help-editor/<slug:center_slug>/<str:locale>/articles/new/', help_editor_views.article_new, name='help_editor_article_new'),
+    path('help-editor/articles/<int:article_id>/', help_editor_views.article_edit, name='help_editor_article_edit'),
+    path('help-editor/articles/<int:article_id>/history/', help_editor_views.article_history, name='help_editor_article_history'),
+    path('help-editor/articles/<int:article_id>/revisions/<int:revision_id>/preview/', help_editor_views.article_preview, name='help_editor_article_preview'),
+    path('help-editor/articles/<int:article_id>/revisions/<int:revision_id>/publish/', help_editor_views.article_publish, name='help_editor_article_publish'),
+    path('help-editor/articles/<int:article_id>/revisions/<int:revision_id>/restore/', help_editor_views.article_restore, name='help_editor_article_restore'),
+    path('help-editor/articles/<int:article_id>/unpublish/', help_editor_views.article_unpublish, name='help_editor_article_unpublish'),
+    path('help-editor/articles/<int:article_id>/assets/', help_editor_views.article_asset_upload, name='help_editor_asset_upload'),
+
     # Portales publicos de producto. No requieren sesion y no enlazan a la app interna.
+    path('help/assets/<uuid:asset_id>/<path:filename>/', help_editor_views.article_asset, name='help_article_asset'),
     path('help/', public_views.help_hub, name='help_hub'),
     path('help/<slug:center_slug>/<str:locale>/', public_views.help_home, name='help_home'),
     path('help/<slug:center_slug>/<str:locale>/categories/<slug:category_slug>/', public_views.help_category, name='help_category'),

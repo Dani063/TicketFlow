@@ -11,7 +11,7 @@ from types import new_class
 from unicodedata import category
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse
-from .models import Brand, Organization, Ticket, Comment, User, TicketTag, Attachment, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating, SatisfactionReason, AssignmentRule, AssignmentRuleMember, SLAPolicy, AutomationRule, ResponseTemplate, OutboundEmailLog
+from .models import Brand, Organization, ProductLine, Ticket, Comment, User, TicketTag, Attachment, TicketEvent, Notification, Role, Group, Macro, SatisfactionRating, SatisfactionReason, AssignmentRule, AssignmentRuleMember, SLAPolicy, AutomationRule, ResponseTemplate, OutboundEmailLog
 from .forms import TicketForm, CommentForm, UserForm
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.decorators import login_required
@@ -30,10 +30,12 @@ from django.views import View
 from django.views.decorators.http import require_GET
 from django.core.cache import cache
 from .api import APIValidationError, api_login_required, json_error, json_ok, parse_json_body
-from .constants import CHANNEL_CHOICES, SERVICE_CHOICES, SLA_AT_RISK_WINDOW_MINUTES
+from .constants import CHANNEL_CHOICES, SERVICE_CHOICES, SLA_AT_RISK_WINDOW_MINUTES, TICKET_TYPE_CHOICES
 from .permissions import can_manage_users, can_update_ticket, can_view_ticket, is_admin as permission_is_admin, is_agent as permission_is_agent
 from .sanitizers import sanitize_email_html
+from .services.conversation import prepare_comments
 from .services.assignment import AssignmentService
+from .services.attachments import AttachmentService
 from .services.comments import CommentService
 from .services.merge import MergeService
 from .services.notifications import NotificationService
@@ -1190,7 +1192,10 @@ def filter_customers(request):
         page = 1
     page_size = _parse_page_size(request.GET.get("page_size"))
 
-    base_queryset = User.objects.select_related('role', 'group').order_by('name')
+    # 'id' como desempate: sin una clave única el ORDER BY no es determinista y
+    # LIMIT/OFFSET puede repetir u omitir filas al cambiar de página (hay nombres
+    # duplicados de sobra en la tabla de usuarios).
+    base_queryset = User.objects.select_related('role', 'group').order_by('name', 'id')
     if not _is_admin(request.user):
          base_queryset = base_queryset.exclude(role__role_name__in=['admin', 'administrator'])
 
@@ -1213,7 +1218,7 @@ def filter_customers(request):
 
     db_sort = _CUSTOMER_SORT_FIELDS.get(sort_by)
     if db_sort:
-        users = users.order_by(f'-{db_sort}' if sort_dir == 'desc' else db_sort)
+        users = users.order_by(f'-{db_sort}' if sort_dir == 'desc' else db_sort, 'id')
 
     total = users.count()
     total_pages = max(1, (total + page_size - 1) // page_size)
@@ -1279,12 +1284,19 @@ def customers_list(request):
     if not _is_admin(request.user):
         role_qs = role_qs.exclude(role_name__in=['admin', 'administrator'])
 
+    active_view = request.GET.get('view')
+    if active_view not in {'all', 'suspended'}:
+        active_view = 'all'
+    view_label = 'Usuarios suspendidos' if active_view == 'suspended' else 'Todos los clientes'
+
     context = {
         'username': request.user.name,
         'email': request.user.email,
         'is_admin': _is_admin(request.user),
         'roles': role_qs,
         'groups': group_qs,
+        'active_customer_view': active_view,
+        'customer_view_label': view_label,
     }
     return render(request, "tickets/customers_list.html", context)
 
@@ -1292,10 +1304,20 @@ def customers_list(request):
 def reporting(request):
     if not _is_agent(request.user) and not _is_admin(request.user):
         return render(request, "tickets/403.html", {"error": "No tienes permisos para ver los reportes."}, status=403)
+    agents = [
+        user for user in User.objects.filter(is_active=True).select_related('role').order_by('name')
+        if permission_is_agent(user)
+    ]
     context = {
         'username': request.user.name,
         'email': request.user.email,
-        'brands': list(Brand.objects.exclude(name='').order_by('name').values('id', 'name')),
+        'product_lines': list(ProductLine.objects.filter(active=True).order_by('sort_order', 'name').values('id', 'code', 'name', 'color', 'icon')),
+        'groups': list(Group.objects.order_by('group_name').values('id', 'group_name')),
+        'agents': agents,
+        'organizations': list(Organization.objects.order_by('name').values('id', 'name')),
+        'channels': CHANNEL_CHOICES,
+        'priorities': Ticket._meta.get_field('priority').choices,
+        'ticket_types': TICKET_TYPE_CHOICES,
     }
     return render(request, "tickets/reporting.html", context)
 
@@ -1307,6 +1329,22 @@ def _reporting_params(request):
     return brand_id, date_from, date_to, start_dt, end_dt
 
 
+def _reporting_cache_get(key):
+    """La caché acelera el informe, pero nunca debe decidir su disponibilidad."""
+    try:
+        return cache.get(key)
+    except Exception:
+        logger.exception('reporting_cache_get_failed')
+        return None
+
+
+def _reporting_cache_set(key, payload, timeout=60):
+    try:
+        cache.set(key, payload, timeout)
+    except Exception:
+        logger.exception('reporting_cache_set_failed')
+
+
 @api_login_required
 def reporting_data(request):
     """KPIs, series y distribuciones por entidad para /reporting/."""
@@ -1316,9 +1354,38 @@ def reporting_data(request):
     if not _is_agent(request.user) and not _is_admin(request.user):
         return json_error('forbidden', 'No tienes permisos para ver los reportes.', status=403)
 
+    section = (request.GET.get('section') or '').strip()
+    if section:
+        from .services.reporting_metrics import ReportFilters, SECTION_BUILDERS, build_reporting_section
+
+        if section not in SECTION_BUILDERS:
+            return json_error('invalid_section', 'La zona de reporting no existe.', status=400)
+        brand_id, date_from, date_to, start_dt, end_dt = _reporting_params(request)
+        filters = ReportFilters.from_params(request.GET)
+        cache_key = (
+            f"reporting:product:v3:{section}:{date_from}:{date_to}:"
+            f"{filters.cache_fragment()}"
+        )
+        cached = _reporting_cache_get(cache_key)
+        if cached is not None:
+            return JsonResponse(cached)
+        try:
+            payload = build_reporting_section(
+                section, filters, date_from, date_to, start_dt, end_dt
+            )
+        except Exception:
+            logger.exception('reporting_section_failed', extra={'section': section})
+            return json_error(
+                'reporting_failed',
+                'No se han podido calcular los datos de esta zona.',
+                status=500,
+            )
+        _reporting_cache_set(cache_key, payload, 60)
+        return JsonResponse(payload)
+
     brand_id, date_from, date_to, start_dt, end_dt = _reporting_params(request)
     cache_key = f"reporting:v2:{brand_id or 0}:{date_from}:{date_to}"
-    cached = cache.get(cache_key)
+    cached = _reporting_cache_get(cache_key)
     if cached is not None:
         return JsonResponse(cached)
 
@@ -1574,7 +1641,7 @@ def reporting_data(request):
         },
         'by_brand': brand_rows,
     }
-    cache.set(cache_key, payload, 60)
+    _reporting_cache_set(cache_key, payload, 60)
     return JsonResponse(payload)
 
 
@@ -1587,13 +1654,14 @@ def reporting_export_csv(request):
     if not _is_agent(request.user) and not _is_admin(request.user):
         return json_error('forbidden', 'No tienes permisos para exportar.', status=403)
 
-    brand_id, date_from, date_to, start_dt, end_dt = _reporting_params(request)
-    qs = Ticket.objects.filter(
+    from .services.reporting_metrics import ReportFilters
+
+    _brand_id, date_from, date_to, start_dt, end_dt = _reporting_params(request)
+    filters = ReportFilters.from_params(request.GET)
+    qs = filters.apply(Ticket.objects.filter(
         is_deleted=False, merged_into__isnull=True,
         created_at__range=(start_dt, end_dt),
-    )
-    if brand_id:
-        qs = qs.filter(brand_id=brand_id)
+    ))
     _last_rating = SatisfactionRating.objects.filter(
         ticket=OuterRef('pk'), score__in=['good', 'bad']
     ).order_by('-created_at')
@@ -1602,7 +1670,7 @@ def reporting_export_csv(request):
     reason_sub = _last_rating.values('reason_choice__label')[:1]
     reason_text_sub = _last_rating.values('reason')[:1]
     qs = (
-        qs.select_related('brand', 'requester', 'assignee')
+        qs.select_related('product_line', 'requester', 'assignee')
         .annotate(
             satisfaction=Subquery(rating_sub),
             satisfaction_reason=Subquery(reason_sub),
@@ -1621,7 +1689,7 @@ def reporting_export_csv(request):
         # BOM para que Excel abra acentos en UTF-8 correctamente
         yield '﻿'
         yield writer.writerow([
-            'id', 'asunto', 'marca', 'estado', 'prioridad', 'tipo', 'canal', 'servicio',
+            'id', 'asunto', 'producto_servicio', 'estado', 'prioridad', 'tipo', 'canal',
             'solicitante', 'agente', 'creado', 'cerrado', 'primera_respuesta_ok',
             'sla_incumplido', 'satisfaccion', 'motivo_satisfaccion',
         ])
@@ -1629,12 +1697,11 @@ def reporting_export_csv(request):
             yield writer.writerow([
                 t.id,
                 t.subject,
-                t.brand.name if t.brand else '',
+                t.product_line.name if t.product_line else 'Sin clasificar',
                 t.status,
                 t.priority or '',
                 t.type or '',
                 t.channel or '',
-                t.service or '',
                 t.requester.name if t.requester else '',
                 t.assignee.name if t.assignee else '',
                 t.created_at.strftime('%d/%m/%Y %H:%M') if t.created_at else '',
@@ -1645,10 +1712,10 @@ def reporting_export_csv(request):
                 t.satisfaction_reason or (t.satisfaction_reason_text or ''),
             ])
 
-    brand_part = f'brand{brand_id}' if brand_id else 'todas'
+    product_part = f'producto{filters.product_line_id}' if filters.product_line_id else 'todos-productos'
     response = StreamingHttpResponse(_rows(), content_type='text/csv; charset=utf-8')
     response['Content-Disposition'] = (
-        f'attachment; filename="tickets_{brand_part}_{date_from}_{date_to}.csv"'
+        f'attachment; filename="tickets_{product_part}_{date_from}_{date_to}.csv"'
     )
     return response
 
@@ -1788,7 +1855,7 @@ def ticket_detail(request, pk):
 @api_login_required
 def ticket_detail_api(request, ticket_id):
     ticket = get_object_or_404(
-        Ticket.objects.select_related('brand', 'requester', 'assignee'),
+        Ticket.objects.select_related('brand', 'product_line', 'requester', 'assignee'),
         id=ticket_id,
     )
     if not can_view_ticket(request.user, ticket):
@@ -1800,6 +1867,8 @@ def ticket_detail_api(request, ticket_id):
     data = {
         'empresa': ticket.brand.name if ticket.brand else '',
         'brand_id': ticket.brand_id,
+        'producto': ticket.product_line_id,
+        'producto_name': ticket.product_line.name if ticket.product_line else '',
         'solicitante': ticket.requester_id,
         'solicitante_name': ticket.requester.name if ticket.requester else '',
         'asignado': ticket.assignee_id,
@@ -1891,7 +1960,10 @@ def create_ticket(request):
             return json_error(exc.code, exc.message, status=exc.status)
         except Ticket.DoesNotExist:
             return json_error('ticket_not_found', 'Ticket no encontrado', status=404)
-        return redirect(f'{request.path}?id={ticket.id}')
+        url = f'{request.path}?id={ticket.id}'
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'ticket_id': ticket.id, 'url': url})
+        return redirect(url)
 
     # GET .
     # Gate: end users only see tickets they are involved in (requester / cc / created_by).
@@ -1910,6 +1982,7 @@ def create_ticket(request):
     grupos = Group.objects.all().order_by('group_name')
 
     empresas = list(Brand.objects.order_by('name').values_list('name', flat=True))
+    product_lines = list(ProductLine.objects.filter(active=True).order_by('sort_order', 'name'))
 
     ticket_obj = get_object_or_404(Ticket, id=int(id_param)) if id_param and id_param.isdigit() else None
 
@@ -1948,22 +2021,24 @@ def create_ticket(request):
     _FIELD_LABEL = {
         'status': 'estado', 'assignee_id': 'asignado', 'group_id': 'grupo',
         'priority': 'prioridad', 'tags': 'tags', 'subject': 'asunto',
-        'requester_id': 'solicitante',
+        'requester_id': 'solicitante', 'product_line_id': 'producto / servicio',
     }
     if ticket_obj:
         if _is_agent(request.user):
             comments_list = list(
-                ticket_obj.comment_set.select_related('user', 'user__role').order_by('created_at')
+                ticket_obj.comment_set.select_related('user', 'user__role').prefetch_related('attachment_set').order_by('created_at')
             )
         else:
             comments_list = list(
                 ticket_obj.comment_set.filter(is_public=True)
-                .select_related('user', 'user__role').order_by('created_at')
+                .select_related('user', 'user__role').prefetch_related('attachment_set').order_by('created_at')
             )
         events_list = list(ticket_obj.events.select_related('actor').order_by('created_at'))
 
         feed = []
-        for c in comments_list:
+        for c in prepare_comments(comments_list):
+            c.attachment_cards = [AttachmentService.metadata(a) for a in c.attachment_set.all()
+                                  if a.ticket_id == ticket_obj.id]
             feed.append({'item_type': 'comment', 'obj': c})
         for e in events_list:
             feed.append({'item_type': 'event', 'obj': e,
@@ -1987,6 +2062,7 @@ def create_ticket(request):
         'tags': tags,
         'todos': todos,
         'empresas': empresas,
+        'product_lines': product_lines,
         'grupos': grupos,
         'username': request.user.name,
         'email': request.user.email,
@@ -1996,6 +2072,7 @@ def create_ticket(request):
         'user_timeline': user_timeline,
         'ticket_satisfaction': ticket_satisfaction,
         'current_user_id': request.user.id,
+        'attachment_limits': AttachmentService.limits(),
     }
     # Fragment mode: ?fragment=1 returns only the ticket pane HTML (no base template).
     # Used by tabs.js to swap panes in-place without full page reload.
@@ -2079,6 +2156,8 @@ def take_ticket(request, ticket_id):
 def add_comment(request, ticket_id):
     try:
         data = parse_json_body(request)
+        if not isinstance(data, dict):
+            raise APIValidationError('invalid_json', 'Se requiere un objeto JSON.', status=400)
         ticket = get_object_or_404(Ticket, id=ticket_id)
         comment, applied_status = CommentService.add_comment(
             ticket=ticket,
@@ -2087,17 +2166,27 @@ def add_comment(request, ticket_id):
             is_public=data.get('is_public', True),
             html_body=data.get('html_body') or '',
             new_status=data.get('new_status') or '',
-            attachment_ids=data.get('attachment_ids') or [],
+            attachment_ids=data.get('attachment_ids'),
+            request_id=data.get('request_id'),
         )
     except APIValidationError as exc:
         return json_error(exc.code, exc.message, status=exc.status)
 
     # adjuntos del comentario para el frontend
-    atts = Attachment.objects.filter(comment=comment).values('id', 'file_url', 'file_type')
+    atts = [AttachmentService.metadata(a) for a in comment.attachment_set.order_by('id')]
+    visible_comments = ticket.comment_set.select_related('user', 'user__role').order_by('created_at', 'id')
+    if not _is_agent(request.user):
+        visible_comments = visible_comments.filter(is_public=True)
+    presented = prepare_comments(list(visible_comments))
+    published = next(c for c in presented if c.pk == comment.pk)
+    from django.template.loader import render_to_string
+    conversation_html = render_to_string('tickets/_conversation_body.html', {'conversation': published.conversation})
     return JsonResponse({
         'id': comment.id,
         'content': comment.content,
         'html_body': comment.html_body or '',
+        'conversation_html': conversation_html,
+        'speaker_kind': published.speaker_kind,
         'created_at': comment.created_at.strftime('%Y-%m-%d %H:%M:%S'),
         'created_at_iso': comment.created_at.isoformat(),
         'ticket_id': ticket.id,
@@ -2224,23 +2313,57 @@ def upload_attachment(request, ticket_id):
     ticket = get_object_or_404(Ticket, id=ticket_id)
     if not can_view_ticket(request.user, ticket):
         return json_error('forbidden', 'No tienes acceso a este ticket.', status=403)
-    f = request.FILES.get('file')
-    if not f:
-        return JsonResponse({'error': 'No se recibió ningún archivo.'}, status=400)
-
-    from app.services.attachments import AttachmentService
     try:
-        att = AttachmentService.save(f, ticket, request.user)
+        att = AttachmentService.upload(_single_attachment_file(request), request.user, ticket=ticket,
+                                       upload_key=request.POST.get('upload_key'), draft_key=request.POST.get('draft_key'))
     except APIValidationError as exc:
         return json_error(exc.code, exc.message, status=exc.status)
 
-    return JsonResponse({
-        'id': att.id,
-        'file_url': att.file_url,
-        'file_type': att.file_type or '',
-        'filename': att.original_name,
-        'size': getattr(f, 'size', 0),
-    })
+    return JsonResponse(AttachmentService.metadata(att))
+
+
+def _single_attachment_file(request):
+    files = [f for key in request.FILES for f in request.FILES.getlist(key)]
+    if len(files) != 1 or len(request.FILES.getlist('file')) != 1:
+        raise APIValidationError('invalid_file', 'Se requiere exactamente un archivo en file.', status=400)
+    return files[0]
+
+
+@api_login_required
+@require_POST
+def upload_draft_attachment(request):
+    try:
+        att = AttachmentService.upload(_single_attachment_file(request), request.user,
+                                       draft_key=request.POST.get('draft_key'), upload_key=request.POST.get('upload_key'))
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+    return JsonResponse(AttachmentService.metadata(att))
+
+
+@api_login_required
+@require_POST
+def cancel_attachment_upload(request):
+    try:
+        data = parse_json_body(request)
+        if not isinstance(data, dict):
+            raise APIValidationError('invalid_json', 'Se requiere un objeto JSON.', status=400)
+        AttachmentService.cancel_upload(request.user, data.get('upload_key'),
+                                        draft_key=data.get('draft_key'), ticket_id=data.get('ticket_id'))
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+    return json_ok({'cancelled': True, 'upload_key': data['upload_key']})
+
+
+@api_login_required
+@require_POST
+def delete_pending_attachment(request, attachment_id):
+    try:
+        AttachmentService.delete_pending(attachment_id, request.user)
+    except Attachment.DoesNotExist:
+        return json_error('attachment_not_found', 'Adjunto no encontrado.', status=404)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+    return json_ok({'deleted': True, 'attachment_id': attachment_id})
 
 @api_login_required
 @require_GET
@@ -3077,6 +3200,10 @@ _TEMPLATE_PREVIEW_CONTEXT = {
     'from_name': 'Soporte Mi Marca',
     'ticket_url': 'https://ticketflow.example.com/tickets/create/?id=12345',
     'created_at': '10/06/2026 15:30',
+    'agent_name': 'Agente Ejemplo',
+    'reply_html': '<p>Hemos revisado tu solicitud y ya puedes volver a acceder.</p>',
+    'reply_text': 'Hemos revisado tu solicitud y ya puedes volver a acceder.',
+    'responded_at': '10/06/2026 16:10',
 }
 
 
@@ -3120,17 +3247,33 @@ def admin_response_templates_api(request):
         body_html = sanitize_email_html(data.get('body_html') or '')
         if not subject or not body_html:
             return json_error('subject_body_required', 'subject y body_html son obligatorios', status=400)
-        if key == 'ticket_created' and '{{ticket_id}}' not in subject.replace(' ', ''):
+        if key in {'ticket_created', 'agent_reply', 'satisfaction_survey'} and '{{ticket_id}}' not in subject.replace(' ', ''):
             # El token [Ticket #N] del subject es el mecanismo de threading de
             # las respuestas; avisamos pero no bloqueamos.
-            logger.warning('response_template ticket_created sin {{ticket_id}} en subject')
+            logger.warning('response_template %s sin {{ticket_id}} en subject', key)
 
         brand_id = _as_int_or_none(data.get('brand_id'))
         duplicate = ResponseTemplate.objects.filter(
             key=key, brand_id=brand_id, language=language
-        ).exclude(id=tpl.id or 0).exists()
+        ).exclude(id=tpl.id or 0).select_related('brand').first()
+        reused = False
         if duplicate:
-            return json_error('duplicate_template', 'Ya existe una plantilla con esa key/marca/idioma', status=400)
+            if request.method == 'POST' and not duplicate.active:
+                # Desactivar no borra, asi que la fila sigue ocupando la clave y
+                # crear "la misma" plantilla era un callejon sin salida: se revive
+                # esa fila con los datos nuevos. En PUT no, ahi fusionar dos filas
+                # existentes seria destructivo y el aviso es lo correcto.
+                tpl = duplicate
+                reused = True
+            else:
+                # La key se normaliza con slugify, asi que hay que decir cual quedo.
+                marca = duplicate.brand.name if duplicate.brand_id and duplicate.brand else 'Global'
+                return json_error(
+                    'duplicate_template',
+                    f'Ya existe una plantilla con la clave "{key}" para '
+                    f'{marca} en {language.upper()}.',
+                    status=400,
+                )
 
         tpl.key = key
         tpl.brand_id = brand_id
@@ -3140,7 +3283,7 @@ def admin_response_templates_api(request):
         tpl.body_text = (data.get('body_text') or '').strip()
         tpl.active = bool(data.get('active', True))
         tpl.save()
-        return JsonResponse({'ok': True, 'template': _serialize_response_template(tpl)})
+        return JsonResponse({'ok': True, 'template': _serialize_response_template(tpl), 'reused': reused})
 
     if request.method == 'DELETE':
         tpl_id = _as_int_or_none(request.GET.get('id'))
@@ -3206,9 +3349,24 @@ def admin_satisfaction_reasons_api(request):
             return json_error('code_required', 'code requerido', status=400)
         duplicate = SatisfactionReason.objects.filter(
             code=code, language=language
-        ).exclude(id=reason.id or 0).exists()
+        ).exclude(id=reason.id or 0).first()
+        reused = False
         if duplicate:
-            return json_error('duplicate_reason', 'Ya existe un motivo con ese code/idioma', status=400)
+            if request.method == 'POST' and not duplicate.active:
+                # Mismo caso que en las plantillas: el code de un motivo
+                # desactivado sigue ocupado, asi que crear "el mismo" motivo
+                # revive esa fila en vez de dejar al admin sin salida.
+                reason = duplicate
+                reused = True
+            else:
+                # El code puede venir derivado de la etiqueta, asi que hay que
+                # decir cual es o el aviso no se entiende.
+                return json_error(
+                    'duplicate_reason',
+                    f'Ya existe el motivo "{duplicate.label}" con el codigo '
+                    f'"{code}" en {language.upper()}.',
+                    status=400,
+                )
 
         reason.code = code
         reason.label = label[:255]
@@ -3216,7 +3374,7 @@ def admin_satisfaction_reasons_api(request):
         reason.position = max(_as_int_or_none(data.get('position')) or 0, 0)
         reason.active = bool(data.get('active', True))
         reason.save()
-        return JsonResponse({'ok': True, 'reason': _serialize_satisfaction_reason(reason)})
+        return JsonResponse({'ok': True, 'reason': _serialize_satisfaction_reason(reason), 'reused': reused})
 
     return json_error('method_not_allowed', 'Metodo no permitido', status=405)
 

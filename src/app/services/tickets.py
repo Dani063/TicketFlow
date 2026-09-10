@@ -4,11 +4,12 @@ from django.utils.dateparse import parse_datetime
 
 from app.api import APIValidationError
 from app.constants import CHANNEL_VALUES, LEGACY_CHANNEL_MAP, LEGACY_TYPE_MAP, TICKET_TYPE_VALUES
-from app.models import Brand, Comment, Group, Ticket, TicketEvent, TicketTag, User
+from app.models import Attachment, AttachmentDraft, Brand, Comment, Group, ProductLine, Ticket, TicketEvent, TicketTag, User
 from app.permissions import can_update_ticket, is_agent
 from app.services.assignment import AssignmentService
 from app.services.automations import AutomationService
 from app.services.comments import CommentService
+from app.services.attachments import AttachmentService, retry_attachment_mutation
 from app.services.metrics import record_metric
 from app.services.notifications import NotificationService
 from app.services.sla import SLAService
@@ -17,12 +18,26 @@ from app.services.sla import SLAService
 class TicketService:
     STATUS_VALUES = {"open", "pending", "closed", "resolved"}
     PRIORITY_VALUES = {"low", "normal", "high", "urgent"}
+    PRODUCT_SERVICE_ALIASES = {
+        "recordia": "recordia",
+        "speech analytics": "speech-analytics",
+        "speech_analytics": "speech-analytics",
+        "speech-analytics": "speech-analytics",
+        "identia": "identia",
+        "ecomfax": "ecomfax",
+        "ecomfaxpro": "ecomfax",
+        "agentia365": "agentia365",
+        "agentia_365": "agentia365",
+        "agentia-365": "agentia365",
+    }
     EVENT_FIELDS = [
         ("status", "status"),
         ("priority", "priority"),
         ("subject", "subject"),
+        ("requester_id", "requester_id"),
         ("assignee_id", "assignee_id"),
         ("group_id", "assigned_group_id"),
+        ("product_line_id", "product_line_id"),
         ("type", "type"),
         ("problem_id", "problem_id"),
     ]
@@ -41,6 +56,15 @@ class TicketService:
         if not value:
             return None
         return LEGACY_CHANNEL_MAP.get(value) or (value if value in CHANNEL_VALUES else None)
+
+    @staticmethod
+    def product_from_service(service):
+        """Clasifica canales automáticos cuando el servicio es inequívoco."""
+        value = (service or "").strip().lower()
+        if not value:
+            return None
+        code = TicketService.PRODUCT_SERVICE_ALIASES.get(value, "otros-servicios")
+        return ProductLine.objects.filter(code=code, active=True).first()
 
     @staticmethod
     def create_or_update_from_post(actor, post_data, ticket_id=None):
@@ -74,9 +98,22 @@ class TicketService:
             brand = Brand.objects.filter(name=empresa_name).first()
             if brand is None:
                 raise APIValidationError("brand_not_found", f"Empresa desconocida: {empresa_name}", status=400)
+        product_line_id = TicketService._optional_int(post_data.get("producto"))
+        if not product_line_id:
+            raise APIValidationError(
+                "product_required", "Selecciona un producto o servicio.", status=400
+            )
+        product_line = ProductLine.objects.filter(id=product_line_id, active=True).first()
+        if product_line is None:
+            raise APIValidationError(
+                "product_not_found", "El producto o servicio seleccionado no está disponible.", status=400
+            )
         grupo_id = TicketService._optional_int(post_data.get("grupo"))
         asignado_id = TicketService._optional_int(post_data.get("asignado"))
-        solicitante_id = TicketService._optional_int(post_data.get("solicitante")) or actor.id
+        # Sin `or actor.id`: en una actualización eso convertiría un select vacío en
+        # «el solicitante pasa a ser el agente». create_ticket() aplica su propio
+        # fallback a actor.id al crear.
+        solicitante_id = TicketService._optional_int(post_data.get("solicitante"))
 
         content = ((post_data.get("content") or post_data.get("message")) or "").strip()
         due_at_raw = (post_data.get("due_at") or "").strip()
@@ -92,6 +129,7 @@ class TicketService:
             "assignee_id": asignado_id,
             "assigned_group_id": grupo_id,
             "brand": brand,
+            "product_line": product_line,
             "type": TicketService.normalize_type(post_data.get("tipo")),
             "channel": TicketService.normalize_channel(post_data.get("canal")),
             "problem_id": TicketService._optional_int(post_data.get("problem_id")),
@@ -107,6 +145,10 @@ class TicketService:
             "ccs_ids": TicketService._get_list(post_data, "ccs"),
             "tags": TicketService._get_list(post_data, "tags"),
             "is_public": str((post_data.get("is_public") or "true")).lower() in ("true", "1", "yes", "on"),
+            "html_body": post_data.get("html_body") or "",
+            "attachment_ids": AttachmentService.parse_ids(post_data.get("attachment_ids"), from_post=True),
+            "draft_key": post_data.get("draft_key"),
+            "request_id": post_data.get("request_id"),
         }
 
     @staticmethod
@@ -131,8 +173,30 @@ class TicketService:
         return target.id
 
     @staticmethod
+    @retry_attachment_mutation
     @transaction.atomic
     def create_ticket(actor, payload):
+        AttachmentService.lock_actor(actor)
+        payload = dict(payload)
+        attachment_ids = AttachmentService.parse_ids(payload.get('attachment_ids'))
+        draft_key = AttachmentService.parse_uuid(payload.get('draft_key'), 'draft_key', required=bool(attachment_ids))
+        request_id = AttachmentService.parse_uuid(payload.get('request_id'), 'request_id', required=draft_key is not None)
+        payload.update(attachment_ids=attachment_ids, draft_key=draft_key)
+        fingerprint = AttachmentService.fingerprint({k: v for k, v in payload.items() if k != 'request_id'})
+        previous = AttachmentService.replay(actor, 'ticket', request_id, fingerprint)
+        if previous:
+            if previous.ticket_id is None:
+                raise APIValidationError('ticket_gone', 'El ticket ya no está disponible.', status=410)
+            from app.permissions import can_view_ticket
+            if not can_view_ticket(actor, previous.ticket):
+                raise APIValidationError('forbidden', 'No tienes acceso a este ticket.', status=403)
+            return previous.ticket
+        draft = None
+        if draft_key:
+            draft, _ = AttachmentDraft.objects.get_or_create(uploaded_by=actor, key=draft_key)
+            if draft.published_at:
+                raise APIValidationError('draft_already_published', 'Este borrador ya se publicó.', status=409)
+        attachments = AttachmentService.pending_for_publish(actor, attachment_ids, draft=draft)
         requester_id = payload.get("requester_id") or actor.id
         if not is_agent(actor) and requester_id != actor.id:
             raise APIValidationError("invalid_requester", "No puedes crear tickets para otro solicitante.", status=403)
@@ -151,6 +215,7 @@ class TicketService:
         problem_id = TicketService._validate_problem_link(payload)
 
         now = timezone.now()
+        product_line = payload.get("product_line") or TicketService.product_from_service(payload.get("service"))
         ticket = Ticket.objects.create(
             subject=payload["subject"],
             description=payload.get("description") or "",
@@ -161,6 +226,7 @@ class TicketService:
             assigned_group_id=payload.get("assigned_group_id"),
             created_by_id=actor.id,
             brand=payload.get("brand"),
+            product_line=product_line,
             type=payload.get("type"),
             problem_id=problem_id,
             channel=payload.get("channel"),
@@ -188,16 +254,39 @@ class TicketService:
             new_value=ticket.status,
             created_at=now,
         )
-        if payload.get("content"):
+        if ticket.product_line_id:
+            TicketEvent.objects.create(
+                ticket=ticket,
+                actor=actor,
+                field_name="product_line_id",
+                old_value=None,
+                new_value=str(ticket.product_line_id),
+                created_at=now,
+            )
+        if draft:
+            draft.ticket = ticket
+            draft.published_at = timezone.now()
+            draft.save(update_fields=['ticket', 'published_at'])
+        if attachments:
+            Attachment.objects.filter(id__in=attachment_ids).update(ticket=ticket)
+        if payload.get("content") or payload.get('html_body') or attachments:
             CommentService.add_comment(
                 ticket,
                 actor,
-                payload.get("content"),
+                payload.get("content") or '',
+                html_body=payload.get('html_body') or '',
+                attachment_ids=attachment_ids,
                 is_public=payload.get("is_public", True),
                 via_channel=payload.get("via_channel"),
                 email_message_id=payload.get("email_message_id"),
                 notify=False,
-                send_requester_email=False,
+                # Un ticket creado manualmente por un agente ya contiene una
+                # respuesta pública para el solicitante. Debe enviarse igual
+                # que cualquier comentario posterior. Los flujos de ingesta o
+                # importación pueden conservar el silencio explícito mediante
+                # suppress_requester_email; CommentService también excluye las
+                # notas privadas y los comentarios escritos por clientes.
+                send_requester_email=not payload.get("suppress_requester_email"),
             )
         NotificationService.notify_ticket_users(ticket, f"Nuevo ticket #{ticket.id}: {ticket.subject}", actor=actor)
         AutomationService.run_for_ticket(ticket, actor=actor, event="ticket_created", event_key=f"ticket_created:{ticket.id}")
@@ -224,11 +313,14 @@ class TicketService:
                     record_metric("ai.dispatch_failed", labels={"ticket_id": ticket_id})
 
             transaction.on_commit(_dispatch_ai)
+        AttachmentService.remember(actor, 'ticket', request_id, fingerprint, ticket=ticket)
         return ticket
 
     @staticmethod
+    @retry_attachment_mutation
     @transaction.atomic
     def update_ticket(actor, ticket_id, payload):
+        AttachmentService.lock_actor(actor)
         ticket = Ticket.objects.select_for_update().get(id=ticket_id)
         if not can_update_ticket(actor, ticket):
             raise APIValidationError("forbidden", "No puedes actualizar este ticket.", status=403)
@@ -245,6 +337,7 @@ class TicketService:
             "status",
             "priority",
             "brand",
+            "product_line",
             "type",
             "channel",
             "service",
@@ -259,6 +352,19 @@ class TicketService:
         ):
             setattr(ticket, field, payload.get(field))
         ticket.problem_id = TicketService._validate_problem_link(payload, ticket_id=ticket.id)
+        # El solicitante se editaba en el formulario pero no se aplicaba nunca: el
+        # cambio se perdía en silencio y la lista, el dashboard y el hover de
+        # «Actualizaciones recientes» seguían mostrando el anterior. Vacío conserva
+        # el que ya tiene; reasignarlo es cosa de agentes, igual que al crear.
+        requester_id = payload.get("requester_id")
+        if requester_id and requester_id != ticket.requester_id:
+            if not is_agent(actor):
+                raise APIValidationError(
+                    "invalid_requester", "No puedes cambiar el solicitante del ticket.", status=403
+                )
+            if not User.objects.filter(id=requester_id, is_active=True).exists():
+                raise APIValidationError("requester_not_found", "Solicitante no encontrado.", status=400)
+            ticket.requester_id = requester_id
         ticket.assignee_id = payload.get("assignee_id")
         ticket.assigned_group_id = payload.get("assigned_group_id")
         if ticket.status == "closed" and not ticket.closed_at:
@@ -301,11 +407,14 @@ class TicketService:
 
         SLAService.apply_policy(ticket)
         NotificationService.notify_ticket_users(ticket, f"Ticket #{ticket.id} actualizado", actor=actor)
-        if payload.get("content"):
+        if payload.get("content") or payload.get('html_body') or payload.get('attachment_ids'):
             CommentService.add_comment(
                 ticket,
                 actor,
-                payload.get("content"),
+                payload.get("content") or '',
+                html_body=payload.get('html_body') or '',
+                attachment_ids=payload.get('attachment_ids'),
+                request_id=payload.get('request_id'),
                 is_public=payload.get("is_public", True),
                 notify=False,
             )

@@ -105,6 +105,14 @@
     --color-divider-strong: #e8e8e8;
     --color-tab-hover:      #eeeeee;
     --color-tab-active-bg:  #f0f0f0;
+    /* Pestana como pastilla: la activa se invierte sobre el fondo claro. */
+    --color-tab-pill-bg:        #f1f5f9;
+    --color-tab-pill-border:    #e2e8f0;
+    --color-tab-pill-fg:        #334155;
+    --color-tab-pill-sub:       #64748b;
+    --color-tab-pill-active-bg: #1e293b;
+    --color-tab-pill-active-fg: #ffffff;
+    --color-tab-pill-active-sub:#94a3b8;
     --shadow-card:          0 2px 4px rgba(0, 0, 0, 0.1);
     --shadow-popover-dark:  0 4px 12px rgba(0, 0, 0, 0.15);
 
@@ -200,6 +208,14 @@
     --color-divider-strong: #334155;
     --color-tab-hover:      #1f2937;
     --color-tab-active-bg:  #111827;
+    /* En oscuro no se invierte (quedaria un boton blanco): la activa se hunde. */
+    --color-tab-pill-bg:        #1e293b;
+    --color-tab-pill-border:    #334155;
+    --color-tab-pill-fg:        #e2e8f0;
+    --color-tab-pill-sub:       #94a3b8;
+    --color-tab-pill-active-bg: #0b1220;
+    --color-tab-pill-active-fg: #ffffff;
+    --color-tab-pill-active-sub:#94a3b8;
 
     --shadow-card:          0 2px 4px rgba(0, 0, 0, 0.4);
     --shadow-popover-dark:  0 4px 16px rgba(0, 0, 0, 0.55);
@@ -279,10 +295,9 @@
 :root[data-theme="dark"] .detail-card h3 { color: var(--color-text-muted); }
 :root[data-theme="dark"] .detail-card p { color: var(--color-text); }
 :root[data-theme="dark"] .profile-header p, :root[data-theme="dark"] .profile-header h3 { color: var(--color-text); }
-:root[data-theme="dark"] .tab { background-color: var(--color-surface); color: var(--color-text); }
-:root[data-theme="dark"] .tab:hover { background-color: var(--color-tab-hover); }
-:root[data-theme="dark"] .tab.active { background-color: var(--color-tab-active-bg); border-bottom-color: var(--color-primary); }
-:root[data-theme="dark"] .tab .tab-text, :root[data-theme="dark"] .tab .close-tab { color: var(--color-text); }
+/* La pastilla ya sale de tokens que cambian con el tema; aqui solo el anillo,
+   que necesita el color real de la barra para el hueco interior. */
+:root[data-theme="dark"] .tab.active { box-shadow: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-primary); }
 :root[data-theme="dark"] .add-tab { color: var(--color-text); }
 :root[data-theme="dark"] .add-tab:hover { background-color: var(--color-tab-hover); }
 :root[data-theme="dark"] .tabs-overflow-btn { color: var(--color-text); }
@@ -393,14 +408,21 @@ body {
 }
 
 .add-tab {
-    background-color: #ffffff;
-    color: #000000;
+    background-color: transparent;
+    color: inherit;
     border: none;
-    padding: 10px 10px;
+    padding: 8px 10px;
     cursor: pointer;
     font-size: 14px;
     margin-right: 10px;
+    /* Sin esto se parte en dos lineas al estrecharse y estira toda la barra,
+       que otras vistas descuentan con calc(100vh - Npx). */
+    white-space: nowrap;
+    flex: 0 0 auto;
+    border-radius: var(--radius-pill);
 }
+
+.add-tab:hover { background-color: var(--color-tab-hover); }
 
     .add-tab:hover {
         background-color: #eeeeee;
@@ -469,79 +491,99 @@ body {
     color: #333;
 }
 
-/* Tab Button Styles */
+/* Tab Button Styles — pastilla con icono, titulo y numero de ticket.
+   El alto se mantiene cerca del anterior (38px) a proposito: varias vistas
+   calculan su alto con `calc(100vh - Npx)` contando con esta barra. */
 .tab {
-    background-color: #ffffff;
-    color: #000000;
-    border: none;
-    padding: 8px 12px;
-    border-radius: 4px;
+    background-color: var(--color-tab-pill-bg);
+    color: var(--color-tab-pill-fg);
+    border: 1px solid var(--color-tab-pill-border);
+    padding: 4px 6px 4px 12px;
+    border-radius: var(--radius-pill);
     cursor: pointer;
-    font-size: 14px;
-    margin-right: 10px;
+    font-size: 13px;
+    margin-right: 8px;
     display: flex;
     align-items: center;
-    flex: 0 1 200px;
-    min-width: 120px;
+    gap: 9px;
+    flex: 0 1 220px;
+    min-width: 150px;
+    min-height: 40px;
     box-sizing: border-box;
+    transition: background-color .15s ease, color .15s ease, box-shadow .15s ease;
 }
 .tab.tf-overflowed { display: none; }
 
     .tab:hover {
-        background-color: #eeeeee;
+        background-color: var(--color-tab-hover);
     }
 
     .tab.active {
-        background-color: #f0f0f0;
-        border-bottom: 2px solid #007BFF;
-        font-weight: bold;
+        background-color: var(--color-tab-pill-active-bg);
+        border-color: transparent;
+        color: var(--color-tab-pill-active-fg);
+        /* Anillo separado de la pastilla, como el foco del navegador. */
+        box-shadow: 0 0 0 2px var(--color-surface), 0 0 0 4px var(--color-primary);
     }
 
     .tab .tab-icon {
-        width: 20px;
-        height: 20px;
-        margin-right: 8px;
+        flex: 0 0 auto;
+        width: 18px;
+        height: 18px;
+        object-fit: contain;
+    }
+
+    /* Titulo y numero apilados; el bloque es quien se encoge. */
+    .tab .tab-labels {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        flex: 1 1 auto;
+        min-width: 0;
+        line-height: 1.2;
     }
 
     .tab .tab-text {
-        flex: 1 1 auto;
-        color: #000000;
-        margin-right: 5px;
-        max-width: none;
+        color: inherit;
+        font-weight: 600;
         overflow: hidden;
         white-space: nowrap;
         text-overflow: ellipsis;
         min-width: 0;
     }
 
-        .tab .tab-text:hover {
-            color: #000000;
-        }
+    .tab .tab-sub {
+        color: var(--color-tab-pill-sub);
+        font-size: 11px;
+        font-weight: 500;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+
+    .tab.active .tab-sub { color: var(--color-tab-pill-active-sub); }
 
     .tab .close-tab {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
         background: none;
         border: none;
-        color: #000000;
+        border-radius: 50%;
+        color: inherit;
         cursor: pointer;
-        font-size: 14px;
-        margin-left: 8px;
+        font-size: 16px;
+        line-height: 1;
+        opacity: .7;
+        padding: 0;
     }
 
         .tab .close-tab:hover {
-            color: #000000;
-            background: rgba(128, 128, 128, 0.5);
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-            border-radius: 30%;
-        }
-
-    .tab span {
-        margin-left: 5px;
-        cursor: pointer;
-        color: #ff5630;
-    }
-
-        .tab span:hover {
-            color: #ff0000;
+            background: rgba(128, 128, 128, 0.28);
+            opacity: 1;
         }
 
 /* ── Tab overflow ("···") button + popup ─────────────────────────────────── */

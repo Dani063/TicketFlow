@@ -1,17 +1,15 @@
-import mimetypes
-
 from django.conf import settings
 from django.core import signing
 from django.db.models import Count, Q
-from django.http import FileResponse, Http404, HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET
 
-from app.api import APIValidationError
+from app.api import APIValidationError, json_error
 from app.models import Attachment, HelpArticle, HelpCategory, HelpCenter, HelpSection
-from app.permissions import can_view_ticket
+from app.permissions import can_manage_help_content
 from app.public_forms import COPY as FORM_COPY, PublicTicketForm
 from app.services.attachments import AttachmentService
 from app.services.help_centers import (
@@ -20,6 +18,7 @@ from app.services.help_centers import (
     normalize_help_locale,
     public_base_url,
 )
+from app.services.help_editor import is_public_help_host
 
 
 UI = {
@@ -31,7 +30,7 @@ UI = {
         "try_request": "Si no encuentras la respuesta, envíanos una solicitud.", "home": "Inicio",
         "related": "Artículos relacionados", "request_title": "Contacta con soporte",
         "request_intro": "Describe tu duda o incidencia. Recibirás la confirmación por correo y podrás responder a ese mensaje para aportar más información.",
-        "attachments_help": "Hasta 5 archivos de 15 MB. PDF, imágenes, Office, CSV, TXT, ZIP o LOG.",
+        "attachments_help": "Hasta 5 archivos de 15 MB cada uno (25 MB en total). PDF, imágenes, Office, CSV, TXT, ZIP o LOG.",
         "send": "Enviar solicitud", "sending": "Enviando...", "success_title": "Hemos recibido tu solicitud",
         "success_body": "Nuestro equipo la revisará lo antes posible. Te hemos enviado un correo de confirmación; puedes responder a ese mensaje para añadir información.",
         "reference": "Tu referencia", "back_help": "Volver al centro de ayuda", "language": "Idioma",
@@ -44,7 +43,7 @@ UI = {
         "try_request": "If you cannot find the answer, send us a request.", "home": "Home",
         "related": "Related articles", "request_title": "Contact support",
         "request_intro": "Describe your question or issue. You will receive confirmation by email and can reply to that message with more information.",
-        "attachments_help": "Up to 5 files of 15 MB. PDF, images, Office, CSV, TXT, ZIP or LOG.",
+        "attachments_help": "Up to 5 files of 15 MB each (25 MB total). PDF, images, Office, CSV, TXT, ZIP or LOG.",
         "send": "Submit request", "sending": "Sending...", "success_title": "We've received your request",
         "success_body": "Our team will review it as soon as possible. We sent you a confirmation email; reply to it if you need to add information.",
         "reference": "Your reference", "back_help": "Back to help centre", "language": "Language",
@@ -56,6 +55,7 @@ PUBLIC_ERROR_EN = {
     "too_many_files": "You can attach up to five files.",
     "file_type_not_allowed": "One of the selected file types is not allowed.",
     "file_too_large": "Each attachment must be no larger than 15 MB.",
+    "attachments_too_large": "All attachments together must be no larger than 25 MB.",
     "rate_limited": "You have submitted too many requests. Wait a few minutes before trying again.",
     "portal_brand_missing": "This support portal is temporarily unavailable. Please try again later.",
 }
@@ -93,6 +93,11 @@ def _context(request, center, locale, **extra):
         "other_locale": "en" if locale == "es" else "es",
         "locale_switch_url": reverse("help_home", args=[center.slug, "en" if locale == "es" else "es"]),
         "brand_style": f"--brand-primary:{center.primary_color};--brand-accent:{center.accent_color}",
+        "can_manage_help": (
+            getattr(settings, "HELP_EDITOR_ENABLED", True)
+            and can_manage_help_content(request.user)
+            and not is_public_help_host(request)
+        ),
     }
     context.update(extra)
     return context
@@ -261,16 +266,21 @@ def help_robots(request):
 
 @require_GET
 def attachment_download(request, attachment_id):
-    attachment = get_object_or_404(Attachment.objects.select_related("ticket"), id=attachment_id)
-    if not attachment.ticket_id or not can_view_ticket(request.user, attachment.ticket):
+    attachment = get_object_or_404(Attachment.objects.select_related('ticket', 'comment'), id=attachment_id)
+    if not AttachmentService.can_access(request.user, attachment):
         raise Http404
-    if attachment.storage_backend == "s3":
-        return redirect(AttachmentService.presigned_url(attachment))
-    if not attachment.storage_key:
-        # Adjuntos heredados conservan la URL original.
-        return redirect(attachment.file_url)
-    content_type = attachment.file_type or mimetypes.guess_type(attachment.original_name)[0] or "application/octet-stream"
-    return FileResponse(
-        AttachmentService.open_local(attachment), as_attachment=True,
-        filename=attachment.original_name or "attachment", content_type=content_type,
-    )
+    try:
+        return AttachmentService.download_response(attachment)
+    except APIValidationError as exc:
+        return AttachmentService.secure_response(json_error(exc.code, exc.message, status=exc.status))
+
+
+@require_GET
+def attachment_preview(request, attachment_id):
+    attachment = get_object_or_404(Attachment.objects.select_related('ticket', 'comment'), id=attachment_id)
+    if not AttachmentService.can_access(request.user, attachment):
+        raise Http404
+    try:
+        return AttachmentService.preview_response(attachment, thumbnail=request.GET.get('thumbnail') == '1')
+    except APIValidationError as exc:
+        return AttachmentService.secure_response(json_error(exc.code, exc.message, status=exc.status))

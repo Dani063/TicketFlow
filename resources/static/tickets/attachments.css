@@ -1,0 +1,349 @@
+/* TicketFlow attachment cards. Load after create_ticket.css.
+ * Lato / existing semantic tokens; borders describe files, violet marks actions.
+ * Compact left-aligned hierarchy: thumbnail | name.ext + size | separate actions.
+ */
+.tf-att-gallery,
+.tf-att-pending,
+.tf-att-dialog {
+    --att-surface: var(--color-surface, #fff);
+    --att-muted-surface: var(--color-surface-2, #f8fafc);
+    --att-border: var(--color-border, #e2e8f0);
+    --att-text: var(--color-text, #1e293b);
+    --att-muted: var(--color-text-muted, #475569);
+    --att-primary: var(--color-primary, #7c3aed);
+    box-sizing: border-box;
+    color: var(--att-text);
+    font-family: var(--font-sans, 'Lato', sans-serif);
+    font-size: 13px;
+    line-height: 1.4;
+    text-align: start;
+}
+
+.tf-att-gallery *,
+.tf-att-pending *,
+.tf-att-dialog * { box-sizing: border-box; }
+
+.tf-att-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+    gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    margin-block: 8px;
+}
+
+.tf-att-card {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    align-content: start;
+    align-items: center;
+    gap: 6px 10px;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid var(--att-border);
+    border-radius: 8px;
+    background: var(--att-surface);
+    color: var(--att-text);
+}
+
+.tf-att-thumb {
+    position: relative;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    width: 40px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: var(--att-muted-surface);
+    color: var(--att-muted);
+    font-size: 23px;
+}
+.tf-att-thumb-preview { cursor: pointer; }
+.tf-att-card-image .tf-att-thumb { grid-column: 1 / -1; width: 100%; height: 128px; }
+.tf-att-card-image .tf-att-info { grid-column: 1 / -1; }
+
+.tf-att-thumb .tf-att-thumbnail {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    border: 0;
+    object-fit: cover;
+}
+
+.tf-att-info { min-width: 0; }
+.tf-att-name,
+.tf-att-dialog-title {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    font-weight: 700;
+    color: var(--att-text);
+}
+.tf-att-name-stem {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.tf-att-name-ext {
+    flex: 0 0 auto;
+    max-width: 60%;
+    overflow-wrap: anywhere;
+}
+.tf-att-size {
+    margin: 3px 0 0;
+    color: var(--att-muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.tf-att-card > .tf-att-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+}
+.tf-att-actions,
+.tf-att-zoom {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+}
+
+.tf-att-gallery .tf-att-action,
+.tf-att-dialog .tf-att-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 36px;
+    min-width: 36px;
+    max-width: 100%;
+    padding: 6px 8px;
+    margin: 0;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--att-text);
+    font: inherit;
+    line-height: 1.3;
+    text-align: center;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+
+.tf-att-gallery .tf-att-download,
+.tf-att-dialog .tf-att-download { border-color: var(--att-border); }
+.tf-att-action > .fas { flex: 0 0 auto; }
+.tf-att-action > span { min-width: 0; }
+.tf-att-gallery .tf-att-action:hover:not(:disabled),
+.tf-att-dialog .tf-att-action:hover:not(:disabled) {
+    border-color: var(--att-primary);
+    background: var(--color-primary-soft, #ede9fe);
+}
+.tf-att-gallery .tf-att-action:focus-visible,
+.tf-att-dialog .tf-att-action:focus-visible,
+.tf-att-thumb-preview:focus-visible,
+.tf-att-table-scroll:focus-visible,
+.tf-att-composer #attach-btn:focus-visible {
+    outline: 2px solid var(--color-primary, #7c3aed);
+    outline-offset: 2px;
+}
+.tf-att-gallery .tf-att-action:disabled,
+.tf-att-dialog .tf-att-action:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+/* Override the legacy one-line, horizontally scrolling pills only when mounted. */
+.compose-toolbar:has(> .tf-att-pending) { flex-wrap: wrap; height: auto; }
+.compose-toolbar .pending-attachments.tf-att-pending,
+.pending-attachments.tf-att-pending {
+    display: block;
+    order: 4;
+    flex: 1 0 100%;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    max-height: none;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    white-space: normal;
+}
+.tf-att-pending .tf-att-pending-list { margin: 6px 0 0; }
+#pending-attachments.tf-att-pending.tf-att-has-files {
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: min(32vh, 320px);
+    max-height: min(32dvh, 320px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+/* The legacy composer cannot shrink, which can push Send beneath the footer.
+ * Let only the editor and pending queue share the available pane height. */
+.message-input.tf-att-composer:has(.tf-att-has-files) { min-height: 0; max-height: calc(100% - 110px); flex-shrink: 1; }
+.tf-att-composer:has(.tf-att-has-files) > .quill-toolbar,
+.tf-att-composer:has(.tf-att-has-files) > .compose-toolbar { flex-shrink: 0; }
+.tf-att-composer:has(.tf-att-has-files) > .quill-editor.ql-container { min-height: 80px; flex-shrink: 1; }
+.column2:has(.tf-att-composer .tf-att-has-files) > .messages-box { box-sizing: border-box; min-height: 50px; }
+.tf-att-summary {
+    padding-block: 6px 2px;
+    color: var(--att-muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+.tf-att-notice,
+.tf-att-hydration-error {
+    margin: 6px 0;
+    color: var(--color-danger, #dc2626);
+    overflow-wrap: anywhere;
+}
+.tf-att-state {
+    grid-column: 1 / -1;
+    min-width: 0;
+    color: var(--att-muted);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+.tf-att-card[data-state="uploaded"] .tf-att-state::before {
+    content: '✓ ';
+    color: var(--color-success, #16a34a);
+    font-weight: 700;
+}
+.tf-att-card[data-state="error"],
+.tf-att-card[data-state="cancel-error"] { border-color: var(--color-danger, #dc2626); }
+.tf-att-card[data-state="error"] .tf-att-state,
+.tf-att-card[data-state="cancel-error"] .tf-att-state { color: var(--color-danger, #dc2626); }
+.tf-att-progress {
+    grid-column: 1 / -1;
+    appearance: none;
+    display: block;
+    width: 100%;
+    height: 4px;
+    border: 0;
+    border-radius: 2px;
+    overflow: hidden;
+    background: var(--att-border);
+    accent-color: var(--att-primary);
+}
+.tf-att-progress::-webkit-progress-bar { background: var(--att-border); }
+.tf-att-progress::-webkit-progress-value { background: var(--att-primary); }
+.tf-att-progress::-moz-progress-bar { background: var(--att-primary); }
+.tf-att-composer #attach-btn { min-width: 36px; min-height: 36px; }
+.tf-att-composer.tf-att-dragover {
+    outline: 2px solid var(--color-primary, #7c3aed);
+    outline-offset: -2px;
+}
+.tf-att-composer.tf-att-dragover .dropzone-overlay {
+    display: flex;
+    pointer-events: none;
+    background: var(--color-primary-soft, #ede9fe);
+    color: var(--color-text, #1e293b);
+}
+.tf-att-locked .tf-att-composer #attach-btn { cursor: not-allowed; opacity: .5; }
+
+/* Native top-layer dialog stays clear of the sticky ticket footer. */
+.tf-att-dialog {
+    width: min(1080px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+    height: min(820px, calc(100vh - 32px));
+    height: min(820px, calc(100dvh - 32px));
+    max-height: calc(100dvh - 32px);
+    margin: auto;
+    padding: 0;
+    border: 1px solid var(--att-border);
+    border-radius: 12px;
+    background: var(--att-surface);
+    overflow: hidden;
+    box-shadow: var(--shadow-lg, 0 12px 32px rgba(15, 23, 42, .14));
+}
+.tf-att-dialog[open] { display: flex; flex-direction: column; }
+.tf-att-dialog::backdrop { background: rgba(15, 23, 42, .68); }
+.tf-att-dialog-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--att-border);
+}
+.tf-att-dialog-heading { flex: 1 1 200px; min-width: 0; }
+.tf-att-dialog-title { margin: 0; font-size: 16px; line-height: 1.4; }
+.tf-att-preview-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--att-border);
+}
+.tf-att-position { color: var(--att-muted); padding-inline: 4px; font-variant-numeric: tabular-nums; }
+.tf-att-zoom { margin-inline-start: auto; }
+.tf-att-pages { display: flex; flex: 1 0 100%; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; border-top: 1px solid var(--att-border); padding-top: 6px; }
+.tf-att-preview-status {
+    margin: 0;
+    padding: 8px 16px;
+    color: var(--att-muted);
+    overflow-wrap: anywhere;
+}
+.tf-att-preview-status:empty { padding: 0; }
+.tf-att-preview-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    padding: 16px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    background: var(--att-muted-surface);
+}
+.tf-att-preview-image {
+    display: block;
+    height: auto;
+    margin: 0 auto;
+    object-fit: contain;
+    transform-origin: top left;
+}
+.tf-att-pdf-canvas { display: block; max-width: none; margin-inline: auto; background: #fff; }
+.tf-att-text {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--att-text);
+    font: 13px/1.6 ui-monospace, Consolas, monospace;
+}
+.tf-att-table-scroll { max-width: 100%; overflow: auto; }
+.tf-att-csv { border-collapse: collapse; background: var(--att-surface); color: var(--att-text); font-size: 13px; }
+.tf-att-csv td { min-width: 80px; max-width: 360px; padding: 8px 12px; border: 1px solid var(--att-border); vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
+.tf-att-preview-note { margin: 12px 0 0; color: var(--att-muted); font-size: 12px; }
+.tf-att-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.tf-att-gallery[hidden],
+.tf-att-pending [hidden],
+.tf-att-dialog [hidden] { display: none; }
+
+@media (max-width: 480px) {
+    .tf-att-gallery { grid-template-columns: minmax(0, 1fr); }
+    .tf-att-dialog { width: calc(100vw - 12px); max-width: calc(100vw - 12px); height: calc(100dvh - 12px); max-height: calc(100dvh - 12px); border-radius: 8px; }
+    .tf-att-dialog-head { padding: 10px; }
+    .tf-att-dialog-heading { flex-basis: 100%; }
+    .tf-att-dialog-head > .tf-att-actions { flex: 1; }
+    .tf-att-preview-toolbar { padding: 6px; }
+    .tf-att-zoom { flex-basis: 100%; justify-content: center; }
+    .tf-att-preview-body { padding: 10px; }
+    .tf-att-gallery .tf-att-action,
+    .tf-att-dialog .tf-att-action { min-height: 40px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tf-att-gallery *, .tf-att-dialog *, .tf-att-composer { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
