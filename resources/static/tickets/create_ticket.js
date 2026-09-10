@@ -308,9 +308,13 @@ window.initTicketPane = function (root, ctx) {
         right.appendChild(timestamp);
         header.append(avatar, meta, right);
         message.appendChild(header);
+        if (['agent', 'customer', 'internal'].includes(data.speaker_kind)) message.classList.add('speaker-' + data.speaker_kind);
         if (data.content || data.html_body) {
             const body = element('div', 'msg-body');
-            if (data.html_body) {
+            if (data.conversation_html) {
+                // Misma plantilla saneada que la carga inicial y los fragmentos SPA.
+                body.innerHTML = data.conversation_html;
+            } else if (data.html_body) {
                 const html = element('div', 'email-html');
                 // Only the server-sanitized comment HTML enters this surface.
                 html.innerHTML = data.html_body;
@@ -327,7 +331,7 @@ window.initTicketPane = function (root, ctx) {
             message.appendChild(files);
         }
         box.appendChild(message);
-        box.scrollTop = box.scrollHeight;
+        scrollToLatestMessage(box);
     }
 
     async function createTicketWithAttachments() {
@@ -725,9 +729,17 @@ window.initTicketPane = function (root, ctx) {
             .catch(error => console.error('Error al cargar el ticket:', error));
     }
 
+    // El comienzo del último mensaje debe quedar visible, incluso si es largo.
+    // Ir al final mostraba firmas/controles en vez de la respuesta del remitente.
+    function scrollToLatestMessage(box) {
+        const messages = box.querySelectorAll(':scope > .message');
+        const last = messages[messages.length - 1];
+        if (last) box.scrollTop += last.getBoundingClientRect().top - box.getBoundingClientRect().top - 12;
+    }
+
     // ---- Scroll al último comentario ----
     const messagesBox = rootEl.querySelector('#messagesBox');
-    if (messagesBox) messagesBox.scrollTop = messagesBox.scrollHeight;
+    if (messagesBox) scrollToLatestMessage(messagesBox);
 
     // ---- Avatares: color por nombre ----
     function avatarColor(name) {
@@ -769,24 +781,8 @@ window.initTicketPane = function (root, ctx) {
         });
     });
 
-    // ---- Blockquotes colapsables ----
-    rootEl.querySelectorAll('.msg-body').forEach(body => {
-        const quotes = body.querySelectorAll('blockquote');
-        if (!quotes.length) return;
-        quotes.forEach(q => {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'quote-toggle';
-            btn.innerHTML = '<i class="fas fa-ellipsis-h"></i> Ver mensaje anterior';
-            btn.addEventListener('click', () => {
-                const expanded = q.classList.toggle('quote-expanded');
-                btn.innerHTML = expanded
-                    ? '<i class="fas fa-minus"></i> Ocultar'
-                    : '<i class="fas fa-ellipsis-h"></i> Ver mensaje anterior';
-            });
-            q.before(btn);
-        });
-    });
+    // El historial y las firmas usan <details> en la plantilla compartida.
+    // Las citas normales e intercaladas siguen visibles y no requieren listeners.
 
     // ---- Macros panel ----
     const macroBtn    = rootEl.querySelector('#macro-btn');

@@ -1,0 +1,46 @@
+<div class="conversation" data-conversation>
+    <div class="conversation-text">{{ conversation.html|safe }}</div>
+    {% if conversation.footer_html %}
+    <details class="conversation-details conversation-footer">
+        <summary>Ver firma y avisos</summary>
+        <div class="conversation-text">{{ conversation.footer_html|safe }}</div>
+    </details>
+    {% endif %}
+    {% if conversation.history %}
+    <details class="conversation-details conversation-history">
+        <summary>Historial citado · {{ conversation.history|length }} mensaje{{ conversation.history|length|pluralize:"s" }}</summary>
+        <p class="conversation-hint">Mensajes anteriores incluidos en este correo, separados por remitente.</p>
+        <ol class="conversation-thread">
+            {% for message in conversation.history %}
+            <li class="conversation-entry">
+                <div class="conversation-entry-header">
+                    <strong>{{ message.author|default:"Remitente no identificado" }}</strong>
+                    {% if message.date %}<span>{{ message.date }}</span>{% endif %}
+                </div>
+                {% if message.label %}<p class="conversation-hint">{{ message.label }}</p>{% endif %}
+                <div class="conversation-text">{{ message.html|safe }}</div>
+                {% if message.footer_html %}
+                <details class="conversation-details conversation-footer">
+                    <summary>Ver firma y avisos</summary>
+                    <div class="conversation-text">{{ message.footer_html|safe }}</div>
+                </details>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ol>
+    </details>
+    {% endif %}
+    {% if conversation.duplicate_count %}
+    <p class="conversation-hint">{{ conversation.duplicate_count }} mensaje{{ conversation.duplicate_count|pluralize:"s" }} citado{{ conversation.duplicate_count|pluralize:"s" }} ya aparece{{ conversation.duplicate_count|pluralize:"n" }} en la conversación.</p>
+    {% endif %}
+    {% if conversation.extras_html %}
+    <details class="conversation-details">
+        <summary>Ver cabeceras y avisos del correo</summary>
+        <div class="conversation-text">{{ conversation.extras_html|safe }}</div>
+    </details>
+    {% endif %}
+    <details class="conversation-details conversation-original">
+        <summary>Ver mensaje original</summary>
+        <div class="conversation-original-content">{{ conversation.original_html|safe }}</div>
+    </details>
+</div>

@@ -171,6 +171,7 @@ class EmailIngestionService:
                 "subject": subject,
                 "description": text_body or html_body or "",
                 "content": text_body or html_body or "",
+                "html_body": html_body,
                 "status": "open",
                 "priority": None,
                 "requester_id": requester.id,

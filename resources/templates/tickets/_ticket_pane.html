@@ -237,7 +237,7 @@
                 {% for item in feed %}
                 {% if item.item_type == 'comment' %}
                 {% with c=item.obj %}
-                <div class="message{% if not c.is_public %} internal{% endif %}" data-comment-id="{{ c.pk }}">
+                <div class="message speaker-{{ c.speaker_kind }}{% if not c.is_public %} internal{% endif %}" data-comment-id="{{ c.pk }}">
                     <div class="msg-header">
                         <div class="msg-avatar" data-initials="{{ c.user.name|slice:':1'|upper }}">{{ c.user.name|slice:':1'|upper }}</div>
                         <div class="msg-meta">
@@ -255,11 +255,7 @@
                         </div>
                     </div>
                     {% if c.content or c.html_body %}<div class="msg-body">
-                        {% if c.html_body %}
-                            <div class="email-html">{{ c.html_body|safe }}</div>
-                        {% else %}
-                            {{ c.content|urlize|linebreaksbr }}
-                        {% endif %}
+                        {% include 'tickets/_conversation_body.html' with conversation=c.conversation %}
                     </div>{% endif %}
                     {% if c.attachment_cards %}
                     <div class="tf-attachments" data-attachment-gallery>

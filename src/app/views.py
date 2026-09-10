@@ -33,6 +33,7 @@ from .api import APIValidationError, api_login_required, json_error, json_ok, pa
 from .constants import CHANNEL_CHOICES, SERVICE_CHOICES, SLA_AT_RISK_WINDOW_MINUTES, TICKET_TYPE_CHOICES
 from .permissions import can_manage_users, can_update_ticket, can_view_ticket, is_admin as permission_is_admin, is_agent as permission_is_agent
 from .sanitizers import sanitize_email_html
+from .services.conversation import prepare_comments
 from .services.assignment import AssignmentService
 from .services.attachments import AttachmentService
 from .services.comments import CommentService
@@ -2035,7 +2036,7 @@ def create_ticket(request):
         events_list = list(ticket_obj.events.select_related('actor').order_by('created_at'))
 
         feed = []
-        for c in comments_list:
+        for c in prepare_comments(comments_list):
             c.attachment_cards = [AttachmentService.metadata(a) for a in c.attachment_set.all()
                                   if a.ticket_id == ticket_obj.id]
             feed.append({'item_type': 'comment', 'obj': c})
@@ -2173,10 +2174,19 @@ def add_comment(request, ticket_id):
 
     # adjuntos del comentario para el frontend
     atts = [AttachmentService.metadata(a) for a in comment.attachment_set.order_by('id')]
+    visible_comments = ticket.comment_set.select_related('user', 'user__role').order_by('created_at', 'id')
+    if not _is_agent(request.user):
+        visible_comments = visible_comments.filter(is_public=True)
+    presented = prepare_comments(list(visible_comments))
+    published = next(c for c in presented if c.pk == comment.pk)
+    from django.template.loader import render_to_string
+    conversation_html = render_to_string('tickets/_conversation_body.html', {'conversation': published.conversation})
     return JsonResponse({
         'id': comment.id,
         'content': comment.content,
         'html_body': comment.html_body or '',
+        'conversation_html': conversation_html,
+        'speaker_kind': published.speaker_kind,
         'created_at': comment.created_at.strftime('%Y-%m-%d %H:%M:%S'),
         'created_at_iso': comment.created_at.isoformat(),
         'ticket_id': ticket.id,
