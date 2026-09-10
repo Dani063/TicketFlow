@@ -15,9 +15,12 @@ esta identidad. No hacen falta claves estáticas ni un pod adicional.
 
 El CD corporativo consume los manifiestos del repositorio **Recordia-Kubernetes**,
 carpeta `DEV/Recordia/Manifests/TicketFlow.UI/`; `k8s/configmap.yaml` de este
-repositorio es solo una referencia. Los cuatro ConfigMaps de DEV deben llevar
-la misma configuración de almacenamiento. El `.env` descargado al arrancar
-completa valores ausentes, pero no sobrescribe variables del proceso.
+repositorio es solo una referencia. Los cuatro componentes ya reciben
+`SHORT_ENV=DEV`; con ese valor la aplicación usa por defecto el bucket y prefijo
+DEV de la tabla. `TicketFlow/attachment_config.py` concentra estos valores.
+Se pueden sobrescribir explícitamente en sus ConfigMaps o en el `.env`.
+El `.env` descargado al arrancar completa valores ausentes, pero no sobrescribe
+variables del proceso. Prioridad: proceso > `.env` > valores por entorno.
 
 La activación de esta entrega es únicamente para DEV. El bucket de STA queda
 documentado para una promoción posterior.
@@ -119,8 +122,10 @@ conceder el mismo conjunto mínimo de acciones para ese ARN.
 
 1. Verificar bucket, permisos y EKS Pod Identity. La policy dedicada debe
    permitir también `s3:AbortMultipartUpload` para limpiar subidas fallidas.
-2. Publicar los cuatro ConfigMaps de DEV en Recordia-Kubernetes y la imagen
-   de TicketFlow con la precedencia de configuración corregida.
+2. Publicar la imagen de TicketFlow con la configuración por entorno y la
+   precedencia corregida. Los manifiestos actuales ya declaran `SHORT_ENV=DEV`,
+   por lo que no es imprescindible editar los ConfigMaps para esta activación.
+   Si se establecen overrides, deben ser coherentes entre los cuatro componentes.
 3. Ejecutar el CD `DEV-CD-Kubernetes`, tipo `Manifests`, carpeta `TicketFlow.UI`,
    proyecto `Recordia`, seleccionando `pipelines.templates@feature/kubernetes`
    en Resources. El cambio de imagen reinicia los pods con la nueva configuración.

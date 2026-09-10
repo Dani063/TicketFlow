@@ -14,6 +14,7 @@ from django.core.management.base import CommandError
 from django.test import SimpleTestCase, override_settings
 
 from TicketFlow.settings import _load_project_environment
+from TicketFlow.attachment_config import attachment_storage_config
 from app.services.attachments import AttachmentService
 
 
@@ -42,6 +43,46 @@ class EnvironmentPrecedenceTests(SimpleTestCase):
             with patch.dict(os.environ, {}, clear=True):
                 _load_project_environment(path)
                 self.assertEqual(os.environ["ATTACHMENT_STORAGE_BACKEND"], "local")
+
+
+class EnvironmentStorageDefaultsTests(SimpleTestCase):
+    def test_dev_deployments_enable_the_provisioned_private_bucket(self):
+        config = attachment_storage_config({"SHORT_ENV": "DEV"})
+        self.assertEqual(config["ATTACHMENT_STORAGE_BACKEND"], "s3")
+        self.assertEqual(config["PUBLIC_ATTACHMENTS_S3_BUCKET"], "dev-ticketflow-filestorage")
+        self.assertEqual(config["HELP_CONTENT_S3_BUCKET"], "dev-ticketflow-filestorage")
+        self.assertEqual(config["ATTACHMENT_STORAGE_PREFIX"], "dev")
+
+    def test_other_environments_do_not_receive_dev_bucket(self):
+        for environment in ({}, {"SHORT_ENV": "STA"}, {"SHORT_ENV": "PRO"}):
+            with self.subTest(environment=environment):
+                config = attachment_storage_config(environment)
+                self.assertEqual(config["ATTACHMENT_STORAGE_BACKEND"], "auto")
+                self.assertEqual(config["PUBLIC_ATTACHMENTS_S3_BUCKET"], "")
+                self.assertEqual(config["HELP_CONTENT_S3_BUCKET"], "")
+
+    def test_explicit_storage_configuration_overrides_dev_defaults(self):
+        environment = {
+            "SHORT_ENV": "DEV",
+            "ATTACHMENT_STORAGE_BACKEND": "s3",
+            "PUBLIC_ATTACHMENTS_S3_BUCKET": "custom-private-bucket",
+            "PUBLIC_ATTACHMENTS_S3_REGION": "eu-central-1",
+            "ATTACHMENT_STORAGE_PREFIX": "custom",
+            "HELP_CONTENT_S3_BUCKET": "custom-help-bucket",
+            "HELP_CONTENT_S3_REGION": "eu-west-1",
+        }
+        config = attachment_storage_config(environment)
+        for key, value in environment.items():
+            if key != "SHORT_ENV":
+                self.assertEqual(config[key], value)
+
+    def test_explicit_empty_bucket_remains_a_configuration_error_in_s3_mode(self):
+        config = attachment_storage_config({"SHORT_ENV": "DEV", "PUBLIC_ATTACHMENTS_S3_BUCKET": ""})
+        self.assertEqual(config["PUBLIC_ATTACHMENTS_S3_BUCKET"], "")
+        with override_settings(**config):
+            from app.api import APIValidationError
+            with self.assertRaises(APIValidationError):
+                AttachmentService._storage_backend()
 
 
 class SignedDownloadTests(SimpleTestCase):

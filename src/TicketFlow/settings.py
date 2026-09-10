@@ -15,6 +15,7 @@ import posixpath
 import logging as _logging
 from pathlib import Path
 from dotenv import load_dotenv
+from TicketFlow.attachment_config import attachment_storage_config
 
 
 def _ssm_client():
@@ -579,12 +580,13 @@ PUBLIC_TICKET_EMAIL_WINDOW_MINUTES = int(os.getenv('PUBLIC_TICKET_EMAIL_WINDOW_M
 # configurar HTTP_X_FORWARDED_FOR (se toma el ultimo salto añadido por el proxy).
 PUBLIC_CLIENT_IP_HEADER = os.getenv('PUBLIC_CLIENT_IP_HEADER', 'REMOTE_ADDR')
 
-# Adjuntos privados: local en desarrollo, S3 privado en produccion cuando se
-# define el bucket. Nunca se expone la URL de almacenamiento directamente.
-ATTACHMENT_STORAGE_BACKEND = os.getenv('ATTACHMENT_STORAGE_BACKEND', 'auto').strip().lower()
-ATTACHMENT_STORAGE_PREFIX = os.getenv('ATTACHMENT_STORAGE_PREFIX', '').strip('/ ')
-PUBLIC_ATTACHMENTS_S3_BUCKET = os.getenv('PUBLIC_ATTACHMENTS_S3_BUCKET', '')
-PUBLIC_ATTACHMENTS_S3_REGION = os.getenv('PUBLIC_ATTACHMENTS_S3_REGION', os.getenv('AWS_REGION', 'eu-west-1'))
+# Adjuntos privados: S3 en DEV o al configurar un bucket; local por defecto
+# fuera de DEV. Las descargas S3 requieren autorización y una URL temporal.
+_attachment_storage = attachment_storage_config(os.environ)
+ATTACHMENT_STORAGE_BACKEND = _attachment_storage['ATTACHMENT_STORAGE_BACKEND']
+ATTACHMENT_STORAGE_PREFIX = _attachment_storage['ATTACHMENT_STORAGE_PREFIX']
+PUBLIC_ATTACHMENTS_S3_BUCKET = _attachment_storage['PUBLIC_ATTACHMENTS_S3_BUCKET']
+PUBLIC_ATTACHMENTS_S3_REGION = _attachment_storage['PUBLIC_ATTACHMENTS_S3_REGION']
 PUBLIC_ATTACHMENT_MAX_FILES = int(os.getenv('PUBLIC_ATTACHMENT_MAX_FILES', '5'))
 PUBLIC_ATTACHMENT_MAX_BYTES = int(os.getenv('PUBLIC_ATTACHMENT_MAX_BYTES', str(15 * 1024 * 1024)))
 PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES = int(os.getenv('PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES', str(25 * 1024 * 1024)))
@@ -606,8 +608,8 @@ PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS = {
 # Recursos de artículos: privados en el almacenamiento y servidos por una URL
 # estable de TicketFlow. Si no se configura un bucket específico, reutiliza el
 # bucket privado de adjuntos; en desarrollo usa MEDIA_ROOT.
-HELP_CONTENT_S3_BUCKET = os.getenv('HELP_CONTENT_S3_BUCKET', PUBLIC_ATTACHMENTS_S3_BUCKET)
-HELP_CONTENT_S3_REGION = os.getenv('HELP_CONTENT_S3_REGION', PUBLIC_ATTACHMENTS_S3_REGION)
+HELP_CONTENT_S3_BUCKET = _attachment_storage['HELP_CONTENT_S3_BUCKET']
+HELP_CONTENT_S3_REGION = _attachment_storage['HELP_CONTENT_S3_REGION']
 HELP_CONTENT_ASSET_MAX_BYTES = int(os.getenv('HELP_CONTENT_ASSET_MAX_BYTES', str(20 * 1024 * 1024)))
 HELP_CONTENT_ALLOWED_EXTENSIONS = {
     item.strip().lower() for item in os.getenv(
