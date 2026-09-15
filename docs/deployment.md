@@ -139,8 +139,11 @@ En DEV deben fijarse explícitamente `OUTBOUND_EMAIL_ENABLED=false` e
 `INBOUND_MARK_READ_ENABLED=false`, tanto en `DEV/TicketFlow.UI/.env` del bucket
 `recordia-config` como en los ConfigMaps de sus procesos. DEV puede ingerir todo
 el correo compartido sin enviar respuestas ni cambiar el estado de lectura.
-La migración `0061_mailboxsynccursor` depende de `0059_merge_sta_dev`; puede
-desplegarse sin las tablas de hechos de reporting que siguen en desarrollo.
+El orden del historial es `0059_merge_sta_dev` → `0061_mailboxsynccursor` →
+`0062_reporting_fact_tables`. La numeración salta el 0060 a propósito: las
+tablas de hechos se escribieron antes, pero `0061` ya estaba aplicada en DEV
+declarando `0059` como dependencia, así que colarlas por delante daría
+`InconsistentMigrationHistory`. No reordenar la cadena.
 
 ---
 
@@ -151,3 +154,37 @@ Definidas en `settings.py` bajo `CELERY_BEAT_SCHEDULE`:
 | Tarea | Intervalo | Descripción |
 |---|---|---|
 | `app.tasks.poll_m365_mailboxes` | 120 s | Ingesta incremental de buzones M365 (delta query, cursor por entorno) |
+| `app.tasks.refresh_reporting_facts` | 300 s | Recalcula las tablas de hechos de `/reporting/` (ver abajo) |
+
+---
+
+## Tablas de hechos de `/reporting/`
+
+La migración `0062_reporting_fact_tables` crea `TicketFact`, `TicketStatusInterval` y
+`ReportingFactState`. Son derivados puros del modelo transaccional: **la migración las
+crea vacías y hay que poblarlas**.
+
+```bash
+python main.py rebuild_reporting_facts            # backfill completo
+python main.py rebuild_reporting_facts --stale-only  # solo lo rancio
+```
+
+Orden recomendado al desplegar:
+
+1. `migrate`
+2. `rebuild_reporting_facts` (una vez; en el histórico completo tarda minutos)
+3. Arrancar web y beat con normalidad
+
+**Qué pasa si se olvida el paso 2:** nada se rompe. Mientras `ReportingFactState` no
+tenga marca de backfill, el reporting vuelve a reconstruir desde la auditoría — más
+lento, pero correcto. Además `refresh_reporting_facts` (beat, cada 5 min) detecta que
+faltan hechos y hace el backfill por su cuenta en la primera pasada, dentro del worker
+y sin tocar el pool web. Ejecutar el comando a mano solo acelera el arranque.
+
+La detección de qué recalcular es **autorreparable y sin estado propio**: compara
+`Ticket.updated_at` con el que tenía cuando se calcularon sus hechos. Si beat estuvo
+caído, la siguiente pasada recupera todo el retraso sola.
+
+> El pod web nunca escribe en estas tablas. Si hiciera falta regenerarlas en caliente,
+> el comando se puede lanzar desde un pod de worker sin parar el servicio: mientras
+> corre, el reporting sigue sirviendo por el camino de reconstrucción.

@@ -13,6 +13,7 @@ from app.services.attachments import AttachmentService
 from app.services.email_ingestion import EmailIngestionService
 from app.services.metrics import record_metric
 from app.services.msgraph import GRAPH_BASE, get_graph_token
+from app.services.reporting_facts import refresh_stale_facts
 from app.services.satisfaction import SatisfactionService
 from app.services.sla import SLAService
 
@@ -372,7 +373,14 @@ def poll_m365_mailboxes():
                 'poll_m365 [%s]: buzón compartido con %s; se ingiere una sola vez como %s',
                 target['mailbox'], ', '.join(target['shared_with']), target['brand'].name,
             )
-        seen += _sync_mailbox(target, headers, environment)
+        try:
+            seen += _sync_mailbox(target, headers, environment)
+        except Exception:
+            # Un buzón roto (incluida su propia fila de cursor) no puede dejar sin
+            # ingerir a los demás: el bucle por marcas de antes hacía `continue`.
+            logger.exception('poll_m365 [%s]: sincronización abortada', target['mailbox'])
+            record_metric('email.inbound.sync_aborted',
+                          labels={'mailbox': target['mailbox'], 'environment': environment})
     return f'{seen} message(s)'
 
 
@@ -388,6 +396,21 @@ def cleanup_orphan_attachments():
             break
     logger.info("attachment_orphan_cleanup_completed", extra=totals)
     return totals
+
+
+@shared_task(name='app.tasks.refresh_reporting_facts')
+def refresh_reporting_facts():
+    """Mantiene al día las tablas de hechos que alimentan /reporting/.
+
+    Es lo que permite que un informe no reconstruya el histórico en cada
+    petición: aquí se paga el coste de releer auditorías, una sola vez por
+    ticket y fuera del pool web.
+
+    La selección es autorreparable (compara updated_at contra el de los hechos),
+    así que una pasada perdida se recupera en la siguiente sin estado adicional.
+    """
+    processed = refresh_stale_facts()
+    return f'facts_refreshed: {processed}'
 
 
 @shared_task(name='app.tasks.auto_assign_unassigned_tickets')

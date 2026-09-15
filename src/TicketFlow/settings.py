@@ -461,6 +461,14 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'app.tasks.offer_satisfaction_surveys',
         'schedule': 900.0,  # Cada 15 min; el retardo real lo fija SATISFACTION_SURVEY_DELAY_HOURS
     },
+    'refresh-reporting-facts': {
+        'task': 'app.tasks.refresh_reporting_facts',
+        # Cada 5 min: es el desfase máximo que puede tener /reporting/ respecto
+        # a la operativa. Subirlo abarata el beat; bajarlo acerca el informe al
+        # tiempo real. El coste es proporcional a los tickets tocados, no al
+        # histórico, así que una pasada en vacío es prácticamente gratis.
+        'schedule': 300.0,
+    },
     'cleanup-orphan-attachments': {
         'task': 'app.tasks.cleanup_orphan_attachments',
         'schedule': 3600.0,

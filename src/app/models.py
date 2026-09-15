@@ -284,6 +284,13 @@ class TicketEvent(models.Model):
                 fields=['ticket', 'field_name', 'created_at'],
                 name='app_evt_tkt_field_time',
             ),
+            # El reporting busca eventos de un tipo dentro de un rango sin saber
+            # de qué ticket son ("¿qué se resolvió esta semana?"). Sin este
+            # índice esa consulta degenera en un escaneo de toda la auditoría.
+            models.Index(
+                fields=['field_name', 'created_at'],
+                name='app_evt_field_time',
+            ),
         ]
 
 class AttachmentDraft(models.Model):
@@ -971,3 +978,126 @@ class PublicTicketAttempt(models.Model):
             models.Index(fields=["center", "ip_hash", "created_at"], name="public_ticket_ip_idx"),
             models.Index(fields=["center", "email_hash", "created_at"], name="public_ticket_email_idx"),
         ]
+
+
+class TicketFact(models.Model):
+    """Hechos precalculados por ticket: la tabla de hechos de /reporting/.
+
+    Hasta ahora cada peticion de reporting reconstruia en Python el ciclo de vida
+    de cada ticket releyendo ``TicketEvent`` y ``Comment``. Eso hacia que el coste
+    del informe dependiera del historico completo y no del rango pedido. Aqui se
+    persiste ese mismo calculo una sola vez por ticket, para que un informe sea
+    una lectura acotada en lugar de un replay.
+
+    Solo guarda lo que el reporting lee de verdad: los hechos del ciclo de vida y
+    las marcas de tiempo con las que se acotan las consultas. Las dimensiones
+    (producto, grupo, agente, empresa...) se siguen leyendo de ``Ticket``, que ya
+    tiene los indices compuestos adecuados: tener dos copias del mismo dato solo
+    anade una forma de que diverjan.
+
+    La mantiene ``app.tasks.refresh_reporting_facts`` (beat) y el backfill inicial
+    ``python main.py rebuild_reporting_facts``. Es un derivado puro: se puede
+    borrar y regenerar entera sin perder informacion de negocio.
+    """
+
+    ticket = models.OneToOneField(
+        Ticket, on_delete=models.CASCADE, primary_key=True, related_name="fact",
+    )
+
+    # --- Marcas de tiempo con las que se acota el informe --------------------
+    # Copiadas de Ticket para que build_sla descarte de un solo indice los
+    # tickets que no pueden aportar nada al rango pedido.
+    created_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(null=True, blank=True)
+    sla_breached_at = models.DateTimeField(null=True, blank=True)
+
+    # --- Hechos del ciclo de vida -------------------------------------------
+    agent_replies = models.PositiveIntegerField(default=0)
+    first_reply_at = models.DateTimeField(null=True, blank=True)
+    first_reply_hours = models.FloatField(null=True, blank=True)
+    first_assignment_at = models.DateTimeField(null=True, blank=True)
+    first_assignment_hours = models.FloatField(null=True, blank=True)
+    first_resolution_at = models.DateTimeField(null=True, blank=True)
+    first_resolution_hours = models.FloatField(null=True, blank=True)
+    full_resolution_at = models.DateTimeField(null=True, blank=True)
+    full_resolution_hours = models.FloatField(null=True, blank=True)
+    last_assignment_at = models.DateTimeField(null=True, blank=True)
+    assignment_to_resolution_hours = models.FloatField(null=True, blank=True)
+    assignee_stations = models.PositiveIntegerField(default=0)
+    group_stations = models.PositiveIntegerField(default=0)
+    reopens = models.PositiveIntegerField(default=0)
+
+    # La espera del solicitante sigue corriendo mientras el ticket esta abierto,
+    # asi que no se puede congelar en un numero. Se guarda lo ya acumulado y el
+    # instante desde el que sigue sumando (NULL = reloj parado), y la lectura
+    # completa el tramo pendiente contra el ``now`` del informe. Asi el valor es
+    # exacto para cualquier corte sin recalcular nada.
+    requester_wait_seconds = models.FloatField(default=0.0)
+    requester_wait_open_since = models.DateTimeField(null=True, blank=True)
+
+    # --- Control de frescura -------------------------------------------------
+    # source_updated_at guarda el Ticket.updated_at con el que se calculo la fila:
+    # comparar contra el actual detecta los tickets rancios sin guardar estado.
+    source_updated_at = models.DateTimeField(null=True, blank=True)
+    computed_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["created_at"], name="app_fact_created_idx"),
+            models.Index(fields=["full_resolution_at"], name="app_fact_resolved_idx"),
+            models.Index(fields=["first_reply_at"], name="app_fact_first_reply_idx"),
+            models.Index(fields=["sla_breached_at"], name="app_fact_sla_breach_idx"),
+            models.Index(fields=["updated_at"], name="app_fact_updated_idx"),
+        ]
+
+    def __str__(self):
+        return f"Hechos del ticket #{self.ticket_id}"
+
+
+class ReportingFactState(models.Model):
+    """Marca de que las tablas de hechos cubren ya todo el historico.
+
+    Hace falta una marca explicita y no un simple «¿hay alguna fila?»: mientras
+    el refresco se pone al dia, las tablas estan a medias, y una cola calculada a
+    medias no es un informe lento sino un dato falso. Hasta que esta marca
+    existe, /reporting/ sigue reconstruyendo desde la auditoria.
+
+    La escriben ``rebuild_all_facts`` y cada pasada completa de
+    ``refresh_stale_facts``, que ademas sirve de latido: ``backfilled_at`` dice
+    cuando se comprobo por ultima vez que no quedaba nada rancio.
+    """
+
+    singleton = models.PositiveSmallIntegerField(primary_key=True, default=1)
+    backfilled_at = models.DateTimeField(null=True, blank=True)
+    tickets = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"Hechos de reporting al dia: {self.backfilled_at or 'nunca'}"
+
+
+class TicketStatusInterval(models.Model):
+    """Tramos continuos de un ticket en un mismo estado normalizado.
+
+    Sustituye la reconstrucción del backlog, que releía todas las auditorías de
+    todos los tickets para cada uno de los 42 cortes del gráfico. Con estos
+    tramos, «cuántos tickets estaban abiertos el día D» es un rango indexado.
+
+    ``ended_at`` a NULL significa que el tramo sigue vigente. Un ticket reabierto
+    genera varios tramos no resueltos, así que el conteo sigue siendo exacto.
+    """
+
+    ticket = models.ForeignKey(
+        Ticket, on_delete=models.CASCADE, related_name="status_intervals",
+    )
+    status = models.CharField(max_length=32)
+    started_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "started_at", "ended_at"], name="app_interval_state_span"),
+            models.Index(fields=["ticket", "started_at"], name="app_interval_ticket_idx"),
+        ]
+
+    def __str__(self):
+        return f"#{self.ticket_id} {self.status} desde {self.started_at}"

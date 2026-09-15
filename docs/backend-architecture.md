@@ -360,6 +360,41 @@ Soportan `GET` (listar), `POST` (crear), `PUT` (actualizar) y `DELETE` (desactiv
 > solo acumula desde su introducción — el due se limpia al responder y no es
 > retro-computable. `sla_breached_at` es la fuente de verdad del incumplimiento.
 
+#### Tablas de hechos (pre-agregación)
+
+Las nueve zonas de `/reporting/` (`?section=…`, en `app/services/reporting_metrics.py`)
+**no reconstruyen el ciclo de vida de los tickets en cada petición**. Leen dos tablas
+derivadas que mantiene Celery:
+
+| Tabla | Contenido | Sustituye a |
+|---|---|---|
+| `TicketFact` | Un registro por ticket: respuestas de agente, relojes de primera respuesta / asignación / resolución, estaciones, reaperturas y espera del solicitante | Releer `TicketEvent` + `Comment` de cada ticket en cada petición |
+| `TicketStatusInterval` | Tramos continuos por estado (`ended_at` NULL = vigente) | Replicar la máquina de estados una vez por cada corte del gráfico de backlog |
+| `ReportingFactState` | Marca de que el backfill cubre todo el histórico | — |
+
+Ambas son **derivados puros**: se pueden vaciar y regenerar sin perder información de
+negocio (`python main.py rebuild_reporting_facts`).
+
+Consecuencia de diseño: el coste de un informe pasa a ser proporcional al **rango
+pedido y a la cola viva**, no al tamaño del histórico. Antes varias zonas cargaban
+todos los tickets que habían existido nunca con independencia del rango.
+
+Piezas que conviene conocer antes de tocar nada:
+
+- `_lifecycle_facts(tickets)` lee `TicketFact`; `_lifecycle_facts_from_source(tickets)`
+  es el cálculo caro desde la auditoría. Solo lo invocan el constructor de hechos y,
+  como respaldo, los tickets que aún no lo tienen calculado (deja un `WARNING`
+  `reporting_facts_missing`).
+- `_state_at()` sigue siendo la **definición de referencia** del estado histórico.
+  `_status_timeline()` la recorre una sola vez para persistirla, y un test compara
+  ambas corte a corte: si divergen, el backlog miente.
+- Mientras `ReportingFactState` no tenga marca, el reporting vuelve al camino antiguo.
+  Es lento pero correcto; publicar una cola calculada a medias sería un dato falso.
+- Los `.only()` de `_ticket_events` y `_agent_comments` **tienen que incluir
+  `is_superuser`**: es lo que lee `is_agent()`, y omitirlo convierte cada fila en una
+  consulta diferida. `app/tests_reporting_facts.py` vigila eso y el resto de
+  presupuestos de consultas por zona.
+
 ---
 
 ## Tareas periódicas (Celery Beat)
