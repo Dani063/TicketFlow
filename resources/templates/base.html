@@ -89,7 +89,7 @@
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/select2@4.0.13/dist/js/select2.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
-    <script src="{% static 'tickets/quill-composer.js' %}?v=s4.8"></script>
+    <script src="{% static 'tickets/quill-composer.js' %}?v=s4.9"></script>
 
     <script src="{% static 'tickets/utils.js' %}?v=s4.7"></script>
     <script src="{% static 'tickets/filters.js' %}?v=s4.7"></script>
@@ -100,8 +100,9 @@
     <!-- create_ticket.js loaded globally so initTicketPane is available even
          when the user navigates Home → ticket via SPA (no full page reload). -->
     <script src="{% static 'tickets/attachments.js' %}?v=s7.0"></script>
-    <script src="{% static 'tickets/create_ticket.js' %}?v=s8.0"></script>
+    <script src="{% static 'tickets/create_ticket.js' %}?v=s8.1"></script>
     <script src="{% static 'tickets/ai_reply.js' %}?v=s4.8"></script>
+    <script src="{% static 'tickets/ticket_live.js' %}?v=s1.0"></script>
 
     {% block extra_js %}{% endblock %}
 </body>

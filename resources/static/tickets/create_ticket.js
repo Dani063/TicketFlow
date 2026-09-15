@@ -1430,6 +1430,23 @@ window.initTicketPane = function (root, ctx) {
         });
     }
 
+    // ---- Refresco automatico (el poller vive en ticket_live.js) ------------
+    // El intervalo NO se crea aqui a proposito: tabs.js conserva los panes
+    // inactivos detached-pero-vivos en su cache, asi que un intervalo por pane
+    // seguiria sondeando tickets que ya nadie mira. Este pane solo publica lo
+    // que el poller necesita; el decide a cual sondear.
+    let _lastCommentId = 0;
+    rootEl.querySelectorAll('[data-comment-id]').forEach(el => {
+        const id = parseInt(el.getAttribute('data-comment-id'), 10);
+        if (Number.isFinite(id) && id > _lastCommentId) _lastCommentId = id;
+    });
+    rootEl.__tfLive = {
+        ticketId: ctx.ticketId,
+        lastCommentId: _lastCommentId,
+        serverStatus: (rootEl.querySelector('#selected-status')?.textContent || '').trim().toLowerCase(),
+        appendComment: appendPublishedComment,
+        hasPendingFieldChanges: hasTicketFieldChanges,
+    };
 
 };
 

@@ -2151,6 +2151,39 @@ def take_ticket(request, ticket_id):
 
 # Funcionalidades de Comentarios
 
+def _comment_payload(comment, ticket):
+    """Forma canonica de un comentario para el frontend.
+
+    La consumen add_comment (publicacion propia) y ticket_live (refresco por
+    sondeo), de modo que ambas rutas pintan el mismo DOM y no pueden divergir.
+    `comment` tiene que venir de prepare_comments: de ahi salen `conversation`
+    y `speaker_kind`. El autor se lee del propio comentario y no del usuario de
+    la peticion, porque en el sondeo casi nunca son el mismo.
+    """
+    from django.template.loader import render_to_string
+
+    author = comment.user
+    return {
+        'id': comment.id,
+        'content': comment.content,
+        'html_body': comment.html_body or '',
+        'conversation_html': render_to_string(
+            'tickets/_conversation_body.html', {'conversation': comment.conversation},
+        ),
+        'speaker_kind': comment.speaker_kind,
+        'created_at': comment.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'created_at_iso': comment.created_at.isoformat(),
+        'ticket_id': ticket.id,
+        'user_id': author.id if author else None,
+        'username': author.name if author else '',
+        'user_role': author.role.role_name if author and author.role else None,
+        'is_public': comment.is_public,
+        'attachments': [
+            AttachmentService.metadata(a) for a in comment.attachment_set.order_by('id')
+        ],
+    }
+
+
 @api_login_required
 @require_POST
 def add_comment(request, ticket_id):
@@ -2172,30 +2205,65 @@ def add_comment(request, ticket_id):
     except APIValidationError as exc:
         return json_error(exc.code, exc.message, status=exc.status)
 
-    # adjuntos del comentario para el frontend
-    atts = [AttachmentService.metadata(a) for a in comment.attachment_set.order_by('id')]
     visible_comments = ticket.comment_set.select_related('user', 'user__role').order_by('created_at', 'id')
     if not _is_agent(request.user):
         visible_comments = visible_comments.filter(is_public=True)
     presented = prepare_comments(list(visible_comments))
     published = next(c for c in presented if c.pk == comment.pk)
-    from django.template.loader import render_to_string
-    conversation_html = render_to_string('tickets/_conversation_body.html', {'conversation': published.conversation})
+    payload = _comment_payload(published, ticket)
+    payload['new_status'] = applied_status
+    return JsonResponse(payload)
+
+
+@api_login_required
+@require_GET
+def ticket_live(request, ticket_id):
+    """Novedades de un ticket desde el ultimo comentario que vio el cliente.
+
+    La llama el refresco automatico del pane cada pocos segundos, asi que el
+    caso normal —nada nuevo— tiene que ser barato: son dos consultas, la del
+    ticket y la de los ids posteriores a `after`, y devuelve `comments: []`.
+    Solo cuando hay algo nuevo se paga prepare_comments, que necesita la
+    conversacion entera para deduplicar las citas de los correos.
+
+    La visibilidad es la misma que en add_comment: quien no es agente no ve los
+    comentarios internos, ni aqui ni al publicar.
+    """
+    ticket = get_object_or_404(Ticket.objects.select_related('assignee'), id=ticket_id)
+    if not can_view_ticket(request.user, ticket):
+        return json_error("forbidden", "No tienes acceso a este ticket.", status=403)
+
+    try:
+        after = int(request.GET.get('after') or 0)
+    except (TypeError, ValueError):
+        after = 0
+
+    visible = ticket.comment_set.all()
+    if not _is_agent(request.user):
+        visible = visible.filter(is_public=True)
+
+    new_ids = set(visible.filter(id__gt=after).values_list('id', flat=True))
+    comments = []
+    if new_ids:
+        presented = prepare_comments(list(
+            visible.select_related('user', 'user__role').order_by('created_at', 'id')
+        ))
+        comments = [_comment_payload(c, ticket) for c in presented if c.pk in new_ids]
+
     return JsonResponse({
-        'id': comment.id,
-        'content': comment.content,
-        'html_body': comment.html_body or '',
-        'conversation_html': conversation_html,
-        'speaker_kind': published.speaker_kind,
-        'created_at': comment.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-        'created_at_iso': comment.created_at.isoformat(),
-        'ticket_id': ticket.id,
-        'user_id': request.user.id,
-        'username': request.user.name,
-        'user_role': request.user.role.role_name if request.user.role else None,
-        'is_public': comment.is_public,
-        'attachments': list(atts),
-        'new_status': applied_status,
+        'ticket': {
+            'status': ticket.status,
+            'status_display': ticket.get_status_display(),
+            'assignee_id': ticket.assignee_id,
+            'assignee_name': ticket.assignee.name if ticket.assignee else '',
+            'priority': ticket.priority or '',
+            'updated_at': (
+                timezone.localtime(ticket.updated_at).strftime('%d/%m/%Y %H:%M')
+                if ticket.updated_at else ''
+            ),
+        },
+        'comments': comments,
+        'last_comment_id': max(new_ids) if new_ids else after,
     })
 
 
