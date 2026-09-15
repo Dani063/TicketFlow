@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import Brand, Comment, Group, HelpArticle, HelpArticleAsset, HelpArticleRevision, HelpCategory, HelpCenter, HelpSection, OutboundEmailLog, ProductLine, ResponseTemplate, Role, SatisfactionRating, SatisfactionReason, SLAPolicy, Ticket, TicketAIAnalysis, User
+from .models import Brand, Comment, Group, HelpArticle, HelpArticleAsset, HelpArticleRevision, HelpCategory, HelpCenter, HelpSection, MailboxSyncCursor, OutboundEmailLog, ProductLine, ResponseTemplate, Role, SatisfactionRating, SatisfactionReason, SLAPolicy, Ticket, TicketAIAnalysis, User
 
 # ====== Ticket ======
 
@@ -113,6 +113,22 @@ class OutboundEmailLogAdmin(admin.ModelAdmin):
     search_fields = ("to_email", "subject", "provider_message_id")
     readonly_fields = [f.name for f in OutboundEmailLog._meta.fields]
     list_select_related = ("brand",)
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(MailboxSyncCursor)
+class MailboxSyncCursorAdmin(admin.ModelAdmin):
+    """Solo lectura salvo el borrado, que es la palanca de operacion: borrar una
+    fila reinicia el cursor y la siguiente vuelta vuelve a partir de la ventana
+    de INBOUND_DELTA_LOOKBACK_MINUTES."""
+
+    list_display = ("environment", "mailbox", "link_kind", "last_result",
+                    "last_message_count", "last_synced_at", "updated_at")
+    list_filter = ("environment", "last_result")
+    search_fields = ("mailbox", "environment")
+    readonly_fields = [f.name for f in MailboxSyncCursor._meta.fields]
 
     def has_add_permission(self, request):
         return False

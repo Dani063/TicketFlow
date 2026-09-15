@@ -541,6 +541,28 @@ AI_SIMILAR_TICKETS_K = int(os.getenv('AI_SIMILAR_TICKETS_K', '3'))
 AI_MAX_BODY_CHARS = int(os.getenv('AI_MAX_BODY_CHARS', '6000'))
 AI_REQUEST_TIMEOUT_SECONDS = int(os.getenv('AI_REQUEST_TIMEOUT_SECONDS', '30'))
 
+# === Email entrante (poll de buzones M365) ===
+# Nombre del entorno: es el espacio de nombres del cursor de sincronización, así
+# que DOS ENTORNOS NO DEBEN COMPARTIRLO. Se deriva del prefijo de SSM
+# (/Recordia/Staging/Ticketflow -> 'Staging') para no exigir una variable nueva
+# en los manifiestos; ENVIRONMENT_NAME la pisa cuando haga falta ser explícito.
+_ssm_environment = ''
+if _ssm_prefix:
+    _ssm_parts = [part for part in _ssm_prefix.strip('/').split('/') if part]
+    if len(_ssm_parts) >= 2:
+        _ssm_environment = _ssm_parts[1]
+ENVIRONMENT_NAME = os.getenv('ENVIRONMENT_NAME') or _ssm_environment or 'local'
+# Ventana que se ingiere al estrenar cursor (o al reiniciarlo). Acota el primer
+# delta: sin ella Graph devolvería la carpeta entera y se ingeriría el histórico.
+INBOUND_DELTA_LOOKBACK_MINUTES = int(os.getenv('INBOUND_DELTA_LOOKBACK_MINUTES', '60'))
+# Tope de páginas por vuelta. Al alcanzarlo se guarda el nextLink y se continúa
+# en la siguiente pasada del beat: acota el trabajo por tick, no lo pierde.
+INBOUND_DELTA_MAX_PAGES = int(os.getenv('INBOUND_DELTA_MAX_PAGES', '20'))
+# Marcar como leído ya NO es el cursor, solo cortesía para quien mire el buzón.
+# Debe quedar encendido en un único entorno (el "dueño" del buzón) y apagado en
+# el resto, para no ensuciar el estado de lectura de un buzón compartido.
+INBOUND_MARK_READ_ENABLED = os.getenv('INBOUND_MARK_READ_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
+
 # === Email saliente (confirmaciones al cliente) ===
 # SES autentica con el rol IAM del pod (como SQS/SSM): sin credenciales SMTP.
 # Kill switch global; en local conviene dejarlo a false (BBDD compartida).

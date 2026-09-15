@@ -113,6 +113,35 @@ Todas vienen del ConfigMap `ticketflow-config` y el Secret `ticketflow-secrets`.
 | `ARTIFACT_VERSION` | Imagen CI/CD | Tag con la que se construyó la imagen; alimenta automáticamente el identificador visual de versión |
 | `TICKETFLOW_VERSION` | Opcional | Override explícito de la versión visual; tiene prioridad sobre `ARTIFACT_VERSION` |
 
+### Ingesta de correo: un cursor por entorno
+
+| Variable | Defecto | Descripción |
+|---|---|---|
+| `ENVIRONMENT_NAME` | derivado de `AWS_SSM_PREFIX` | Espacio de nombres del cursor de buzones. **Dos entornos no pueden compartirlo** |
+| `INBOUND_MARK_READ_ENABLED` | `true` | Marca los mensajes como leídos tras ingerirlos. Debe quedar en `true` en **un solo entorno** |
+| `INBOUND_DELTA_LOOKBACK_MINUTES` | `60` | Ventana que se ingiere al estrenar o reiniciar un cursor |
+| `INBOUND_DELTA_MAX_PAGES` | `20` | Tope de páginas de delta por vuelta; el resto continúa en la siguiente |
+
+El puntero de lectura vive en `MailboxSyncCursor`, en la BBDD de cada entorno, y no
+en el flag `isRead` del buzón. Eso es lo que permite que DEV y STA lean el mismo
+buzón físico sin quitarse el correo: antes el primero que pasaba marcaba el mensaje
+como leído y el otro ya no lo veía.
+
+Al desplegar por primera vez, **cada entorno arranca ingiriendo la última hora** del
+buzón (`INBOUND_DELTA_LOOKBACK_MINUTES`). Es deliberado: sin esa cota, el primer
+delta devolvería la carpeta entera y se crearían tickets de todo el histórico.
+
+Borrar la fila del cursor en `/django-admin/app/mailboxsynccursor/` reinicia la
+sincronización de ese buzón. Es también la vía para forzar un rearranque si el
+cursor se queda en `last_result=error`.
+
+En DEV deben fijarse explícitamente `OUTBOUND_EMAIL_ENABLED=false` e
+`INBOUND_MARK_READ_ENABLED=false`, tanto en `DEV/TicketFlow.UI/.env` del bucket
+`recordia-config` como en los ConfigMaps de sus procesos. DEV puede ingerir todo
+el correo compartido sin enviar respuestas ni cambiar el estado de lectura.
+La migración `0061_mailboxsynccursor` depende de `0059_merge_sta_dev`; puede
+desplegarse sin las tablas de hechos de reporting que siguen en desarrollo.
+
 ---
 
 ## Tareas programadas (beat)
@@ -121,4 +150,4 @@ Definidas en `settings.py` bajo `CELERY_BEAT_SCHEDULE`:
 
 | Tarea | Intervalo | Descripción |
 |---|---|---|
-| `app.tasks.poll_m365_mailboxes` | 120 s | Consulta buzones M365 vía Microsoft Graph API |
+| `app.tasks.poll_m365_mailboxes` | 120 s | Ingesta incremental de buzones M365 (delta query, cursor por entorno) |

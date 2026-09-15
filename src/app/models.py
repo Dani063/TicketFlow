@@ -533,6 +533,49 @@ class AutomationExecution(models.Model):
         unique_together = [('rule', 'ticket', 'event_key')]
 
 
+class MailboxSyncCursor(models.Model):
+    """Puntero de sincronización de un buzón M365, **propio de cada entorno**.
+
+    Antes el puntero de «qué me queda por leer» era el flag ``isRead`` del propio
+    buzón de Exchange. Eso es estado compartido y mutable: con DEV y STA leyendo
+    el mismo buzón físico, el primero que pasaba marcaba el mensaje como leído y
+    el otro ya no lo veía nunca (no cumplía ``$filter=isRead eq false``). Una
+    carrera pura, y el perdedor no tenía forma de recuperar el correo.
+
+    El ``deltaLink`` de Graph es un token de estado opaco **por consumidor**: cada
+    entorno guarda el suyo aquí y avanza su propia secuencia sobre la misma
+    carpeta, sin tocar el buzón ni pisar a nadie.
+
+    La fila se identifica por la carpeta *física*, no por la dirección: las cuatro
+    direcciones de soporte son alias del mismo buzón y ``/users/<alias>/mailFolders/Inbox``
+    resuelve a la misma carpeta para todas.
+    """
+
+    # Los id de carpeta de Graph son largos (>255) y no caben en un índice de
+    # MySQL, así que la clave indexada es su sha256 y el id crudo va aparte.
+    environment = models.CharField(max_length=64, db_index=True)
+    folder_key = models.CharField(max_length=64)
+    folder_id = models.TextField()
+    mailbox = models.EmailField()
+    delta_link = models.TextField(blank=True, default='')
+    # 'delta' = ronda completa; 'partial' = se alcanzó el tope de páginas y el
+    # enlace guardado es un nextLink, que también es reanudable.
+    link_kind = models.CharField(max_length=16, blank=True, default='')
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    last_result = models.CharField(max_length=64, blank=True, default='')
+    last_error = models.TextField(null=True, blank=True)
+    last_message_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('environment', 'folder_key')]
+        ordering = ['environment', 'mailbox']
+
+    def __str__(self):
+        return f"{self.environment}:{self.mailbox}"
+
+
 class InboundEmailLog(models.Model):
     STATUS_RECEIVED = 'received'
     STATUS_PROCESSED = 'processed'

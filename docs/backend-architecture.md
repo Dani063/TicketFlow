@@ -223,6 +223,39 @@ que importa el SDK y mapea errores a `AIRetryableError`/`AIPermanentError`).
 - Histórico completo en `TicketAIAnalysis` (confianza por campo, razonamiento, versión de
   prompt/modelo, tokens, latencia) — base del feedback loop del Q3.
 
+### Cursor de sincronización de buzones — `MailboxSyncCursor`
+
+El puntero de «qué me queda por leer» vive en la BBDD de **cada entorno**, no en el
+buzón. Antes era el flag `isRead` de Exchange, que es estado compartido: con DEV y
+STA leyendo el mismo buzón físico, el primero que pasaba marcaba el mensaje como
+leído y el otro ya no lo veía (no cumplía `$filter=isRead eq false`). El correo se
+perdía para el entorno perdedor sin dejar rastro.
+
+`poll_m365_mailboxes` usa ahora **delta query** de Graph
+(`/users/{buzón}/mailFolders/{id}/messages/delta`). El `@odata.deltaLink` es un token
+de estado opaco por consumidor: cada entorno guarda el suyo en `MailboxSyncCursor` y
+avanza su propia secuencia sobre la misma carpeta, sin mutar nada.
+
+Reglas al tocar esta zona:
+
+- **`ENVIRONMENT_NAME` es el espacio de nombres del cursor y dos entornos no pueden
+  compartirlo.** Por defecto se deriva de `AWS_SSM_PREFIX` (`/Recordia/Staging/…` →
+  `Staging`), que ya difiere entre DEV y STA.
+- La fila se identifica por la **carpeta física**, no por la dirección: las cuatro
+  direcciones de soporte son alias del mismo buzón y resuelven al mismo `folder_id`.
+  `_mailbox_targets` las agrupa para consultar la carpeta una sola vez — sin eso,
+  cada marca ingeriría el mismo mensaje y saldrían tantos tickets como marcas. Lo
+  tapaba `isRead`; ahora lo sostiene la agrupación.
+- **El primer delta se acota por fecha** (`INBOUND_DELTA_LOOKBACK_MINUTES`). Sin cota,
+  Graph devuelve la carpeta entera y se ingiere todo el histórico del buzón.
+- Si una vuelta falla, **el cursor no avanza**: se reintenta desde el último enlace
+  bueno. La reentrega es inocua porque `InboundEmailLog` con `unique(brand, message_id)`
+  ya la absorbe (contrato at-least-once, como SQS).
+- Marcar como leído (`INBOUND_MARK_READ_ENABLED`) ya **no es el cursor**, solo cortesía
+  para quien mire el buzón. Debe quedar encendido en un único entorno.
+- Borrar la fila del cursor en el admin reinicia la sincronización: la siguiente
+  vuelta arranca de nuevo desde la ventana de *lookback*.
+
 ### `EmailIngestionService` — `email_ingestion.py`
 
 Convierte un mensaje de Graph API en ticket/comentario. Llamado por `tasks._process_message`.
@@ -333,7 +366,7 @@ Soportan `GET` (listar), `POST` (crear), `PUT` (actualizar) y `DELETE` (desactiv
 
 | Tarea | Frecuencia | Servicio |
 |---|---|---|
-| `poll_m365_mailboxes` | 120 s | `EmailIngestionService` |
+| `poll_m365_mailboxes` | 120 s | `EmailIngestionService` (cursor por entorno en `MailboxSyncCursor`) |
 | `auto_assign_unassigned_tickets` | 300 s | `AssignmentService.auto_assign_unassigned` |
 | `mark_sla_breaches` | 300 s | `SLAService.mark_breaches` |
 | `notify_sla_at_risk` | 300 s | `SLAService.notify_at_risk` (aviso 60 min antes del vencimiento) |
