@@ -11,7 +11,7 @@ regenerar enteras sin perder informacion de negocio.
 
 import logging
 
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import F, Q
 from django.utils import timezone
 
@@ -108,11 +108,16 @@ def refresh_ticket_facts(ticket_ids, now=None):
         return 0
 
     facts = _lifecycle_facts_from_source(tickets, now=now)
+    # El upsert se expresa distinto segun el motor: MySQL lo resuelve con
+    # ON DUPLICATE KEY UPDATE y NO admite que se le diga por que columna, asi
+    # que pasarle unique_fields levanta NotSupportedError; PostgreSQL y SQLite,
+    # al reves, lo exigen. El flag de Django es justo esa diferencia.
+    upsert = {'update_conflicts': True, 'update_fields': _UPDATE_FIELDS}
+    if connection.features.supports_update_conflicts_with_target:
+        upsert['unique_fields'] = ['ticket']
     TicketFact.objects.bulk_create(
         [TicketFact(**_fact_kwargs(t, facts[t.id], now)) for t in tickets],
-        update_conflicts=True,
-        update_fields=_UPDATE_FIELDS,
-        unique_fields=["ticket"],
+        **upsert,
     )
 
     # Los tramos de estado se reconstruyen enteros: son pocos por ticket y

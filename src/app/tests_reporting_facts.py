@@ -7,6 +7,7 @@ cambia ningun numero publicado.
 """
 
 from datetime import datetime, time, timedelta
+from unittest import mock
 
 from django.core.management import call_command
 from django.db import connection
@@ -136,6 +137,40 @@ class _FactFixture(TestCase):
             _aware(datetime.combine(date_from, time.min)),
             _aware(datetime.combine(today, time.max)),
         )
+
+
+class UpsertBackendCompatibilityTests(_FactFixture):
+    """El upsert de TicketFact tiene que valer en MySQL, que es DEV y produccion.
+
+    La suite corre sobre SQLite, que admite `unique_fields` en bulk_create con
+    update_conflicts. MySQL no: resuelve el upsert con ON DUPLICATE KEY UPDATE y
+    levanta NotSupportedError si se le indica la columna. Eso hizo que la tarea
+    refresh_reporting_facts pasara los tests y fallara cada 5 minutos en DEV, asi
+    que aqui se simula el flag del motor en vez de confiar en el backend local.
+    """
+
+    def _bulk_kwargs_with_target(self, supported):
+        captured = {}
+        original = TicketFact.objects.bulk_create
+
+        def spy(objs, **kwargs):
+            captured.update(kwargs)
+            return original(objs, **kwargs)
+
+        with mock.patch.object(
+            type(connection.features), "supports_update_conflicts_with_target", supported,
+        ), mock.patch.object(TicketFact.objects, "bulk_create", side_effect=spy):
+            refresh_ticket_facts([self.simple.id])
+        return captured
+
+    def test_mysql_no_recibe_unique_fields(self):
+        kwargs = self._bulk_kwargs_with_target(False)
+        self.assertTrue(kwargs["update_conflicts"])
+        self.assertNotIn("unique_fields", kwargs)
+
+    def test_postgres_y_sqlite_si_lo_reciben(self):
+        kwargs = self._bulk_kwargs_with_target(True)
+        self.assertEqual(kwargs["unique_fields"], ["ticket"])
 
 
 class StatusTimelineTests(_FactFixture):
