@@ -797,6 +797,65 @@ class HelpCenter(models.Model):
     def locale_supported(self, locale):
         return locale in (self.supported_locales or [self.default_locale])
 
+    # Identidad visual de las paginas publicas. Son propiedades y no campos a proposito:
+    # los ficheros se versionan en resources/static/help_centers/brand/ siguiendo la
+    # convencion <slug>-logo.png / <slug>-icon-<px>.png, asi que no hace falta ni
+    # migracion ni un dato en BBDD que pueda quedar apuntando a un fichero inexistente.
+    # Un centro sin ficheros propios cae en el logotipo de TicketFlow.
+
+    BRAND_ASSET_SLUGS = frozenset({"ecomfax", "recordia"})
+
+    @property
+    def has_brand_assets(self):
+        return self.slug in self.BRAND_ASSET_SLUGS
+
+    @property
+    def logo_static_path(self):
+        if not self.has_brand_assets:
+            return "tickets/logo.png"
+        return f"help_centers/brand/{self.slug}-logo.png"
+
+    @property
+    def icon_static_path(self):
+        if not self.has_brand_assets:
+            return "tickets/logo.png"
+        return f"help_centers/brand/{self.slug}-icon-180.png"
+
+    @property
+    def icon_small_static_path(self):
+        if not self.has_brand_assets:
+            return "tickets/logo.png"
+        return f"help_centers/brand/{self.slug}-icon-32.png"
+
+    # Documentacion legal que se sirve desde resources/static/help_centers/legal/.
+    # Se enlaza desde el pie; si se anade un PDF nuevo hay que declararlo aqui.
+    LEGAL_DOCUMENTS = {
+        "ecomfax": [
+            {"file": "eula-es.pdf", "es": "Acuerdo de licencia (EULA)", "en": "Licence agreement (ES)"},
+            {"file": "eula-en.pdf", "es": "Acuerdo de licencia (inglés)", "en": "Licence agreement (EULA)"},
+            {"file": "certificado-ens.pdf", "es": "Certificado ENS", "en": "ENS certificate"},
+        ],
+        "recordia": [
+            {"file": "declaracion-lopdgdd.pdf", "es": "Declaración LOPDGDD", "en": "LOPDGDD statement"},
+        ],
+    }
+
+    def legal_documents(self, locale="es"):
+        locale = "en" if locale == "en" else "es"
+        return [
+            {"label": row[locale], "path": f"help_centers/legal/{self.slug}/{row['file']}"}
+            for row in self.LEGAL_DOCUMENTS.get(self.slug, [])
+        ]
+
+    @property
+    def theme_color(self):
+        """Color de la barra del navegador movil.
+
+        No usa primary_color: ese campo guarda el navy heredado de la importacion de
+        Zendesk y ya no es el color con el que se pinta la cabecera. Ver brand.css.
+        """
+        return {"ecomfax": "#0093e9", "recordia": "#1b2487"}.get(self.slug, self.primary_color)
+
 
 class HelpCategory(models.Model):
     center = models.ForeignKey(HelpCenter, on_delete=models.CASCADE, related_name="categories")

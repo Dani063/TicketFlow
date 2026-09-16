@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.core import signing
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -35,6 +35,10 @@ UI = {
         "success_body": "Nuestro equipo la revisará lo antes posible. Te hemos enviado un correo de confirmación; puedes responder a ese mensaje para añadir información.",
         "reference": "Tu referencia", "back_help": "Volver al centro de ayuda", "language": "Idioma",
         "choose_center": "Elige el producto sobre el que necesitas ayuda", "updated": "Actualizado",
+        "footer_help": "Centro de ayuda", "footer_legal": "Documentación legal",
+        "footer_contact": "Contacto", "footer_rights": "Todos los derechos reservados.",
+        "footer_contact_note": "Escríbenos y abriremos un ticket con tu consulta.",
+        "switch_language": "English",
     },
     "en": {
         "help_center": "Help centre", "search": "Search help", "search_placeholder": "How can we help?",
@@ -48,6 +52,10 @@ UI = {
         "success_body": "Our team will review it as soon as possible. We sent you a confirmation email; reply to it if you need to add information.",
         "reference": "Your reference", "back_help": "Back to help centre", "language": "Language",
         "choose_center": "Choose the product you need help with", "updated": "Updated",
+        "footer_help": "Help centre", "footer_legal": "Legal documents",
+        "footer_contact": "Contact", "footer_rights": "All rights reserved.",
+        "footer_contact_note": "Write to us and we will open a ticket with your question.",
+        "switch_language": "Español",
     },
 }
 
@@ -93,6 +101,7 @@ def _context(request, center, locale, **extra):
         "other_locale": "en" if locale == "es" else "es",
         "locale_switch_url": reverse("help_home", args=[center.slug, "en" if locale == "es" else "es"]),
         "brand_style": f"--brand-primary:{center.primary_color};--brand-accent:{center.accent_color}",
+        "legal_documents": center.legal_documents(locale),
         "can_manage_help": (
             getattr(settings, "HELP_EDITOR_ENABLED", True)
             and can_manage_help_content(request.user)
@@ -132,7 +141,9 @@ def help_category(request, center_slug, locale, category_slug):
     center = _center_or_404(request, center_slug)
     locale = normalize_help_locale(locale, center)
     category = get_object_or_404(
-        HelpCategory.objects.prefetch_related("sections__articles"),
+        HelpCategory.objects.prefetch_related(
+            Prefetch("sections__articles", queryset=HelpArticle.objects.filter(published=True))
+        ),
         center=center, locale=locale, slug=category_slug, published=True,
     )
     return render(request, "help_center/category.html", _context(request, center, locale, category=category))

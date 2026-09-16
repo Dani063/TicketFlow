@@ -1,0 +1,169 @@
+/* Capa de marca compartida por las paginas publicas: /help/ y la encuesta de satisfaccion.
+   Se carga ANTES de public_help.css y de satisfaction.css, que consumen estos tokens.
+
+   Tres reglas que hay que respetar al tocar este fichero:
+
+   1. Los tokens propios llevan prefijo --hc-. Los nombres --brand-primary y --brand-accent
+      estan ocupados: public_views.py:95 y views.py:3535 los inyectan en el atributo style
+      del <body>, y un valor inline gana a una regla de clase, asi que no se pueden
+      redefinir desde aqui. Se conservan como legado y ya no gobiernan el diseno.
+
+   2. Los valores por defecto van sobre body, NO sobre :root. Una declaracion propia de
+      body siempre gana al valor heredado de html, asi que el orden de carga de las hojas
+      deja de importar.
+
+   3. Nada de alias dentro de :root. Un var() se sustituye en el elemento donde aplica la
+      declaracion que lo referencia: si se escribe ":root { --x: var(--hc-y) }", --x queda
+      congelado al valor de html y nunca ve el valor de marca, que vive en body. Ese error
+      exacto es el que tiene satisfaction.css:15 y por el que el panel lateral de la
+      encuesta sale siempre con el navy de eComFax. */
+
+/* ── Tipografia ─────────────────────────────────────────────────────────── */
+/* Poppins para titulares y Roboto para cuerpo, como la web de Recordia.
+   Autoalojadas: la zona publica no carga ninguna CDN externa. */
+
+@font-face { font-family: "Poppins"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/poppins-600-latin.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Poppins"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/poppins-600-latin-ext.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Poppins"; font-style: normal; font-weight: 700; font-display: swap; src: url("fonts/poppins-700-latin.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Poppins"; font-style: normal; font-weight: 700; font-display: swap; src: url("fonts/poppins-700-latin-ext.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+/* Roboto se sirve como fuente variable: un unico fichero cubre todo el rango de pesos. */
+@font-face { font-family: "Roboto"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("fonts/roboto-var-latin.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Roboto"; font-style: normal; font-weight: 100 900; font-display: swap; src: url("fonts/roboto-var-latin-ext.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+
+/* ── Tokens neutros + respaldo TicketFlow ───────────────────────────────── */
+/* Estos son los valores que ve el hub de /help/ y la encuesta cuando el ticket no
+   tiene centro asociado (views.py:3535 deja center a None y la clase cae en
+   sv-brand--ticketflow). Cada marca los pisa en su bloque de mas abajo. */
+
+body {
+    --hc-radius-pill: 999px;
+    --hc-radius-box: 28px;
+    --hc-radius-sm: 14px;
+
+    --hc-surface: #ffffff;
+    --hc-paper: #f4f7fb;
+    --hc-line: #dfe5ef;
+    --hc-shadow: 0 18px 50px rgba(23, 32, 51, .10);
+    --hc-shadow-soft: 0 2px 18px rgba(139, 170, 193, .35);
+
+    --hc-ink: #172033;
+    --hc-muted: #647087;
+    --hc-on-cta: #ffffff;
+    --hc-focus: #58d8f7;
+
+    /* Naranja de accion. --hc-cta es el de los botones y enlaces de tamano normal y
+       tiene que cumplir AA sobre blanco; --hc-cta-strong es el vivo, reservado al CTA
+       grande del hero y a acentos graficos, donde solo aplica el umbral de 3:1. */
+    --hc-cta: #c63000;
+    --hc-cta-strong: #ff4800;
+    --hc-cta-hover: #9e2600;
+
+    /* Cabecera. La imagen superpuesta no se declara como token: una url() relativa
+       dentro de una custom property resuelve su base de forma distinta segun el motor.
+       Va en reglas normales, al final de cada bloque de marca. */
+    --hc-grad-angle: 135deg;
+    --hc-grad-from: #24213f;
+    --hc-grad-to: #58d8f7;
+    --hc-hero-overlay-size: cover;
+    --hc-hero-overlay-pos: center;
+    --hc-hero-overlay-opacity: .5;
+    /* Velo direccional bajo la columna de texto. Es obligatorio: sin el, el blanco cae
+       a 1,5-1,8 de contraste sobre el extremo claro de los dos gradientes de marca. */
+    --hc-hero-scrim: linear-gradient(90deg, rgba(4, 18, 40, .48) 0 46%, rgba(4, 18, 40, 0) 86%);
+    /* Corte diagonal del borde inferior del hero, el mismo recurso que usan las
+       secciones .diagonal de ecomfax.com (alli es un skewY de -3 grados). Se aplica
+       con clip-path para no inclinar tambien el borde de arriba, que va pegado a la
+       barra de navegacion. */
+    --hc-hero-slant: clamp(34px, 4.2vw, 78px);
+
+    --hc-footer: #172033;
+
+    /* Alias de compatibilidad. help_editor.css no define ningun :root propio y consume
+       estos nombres, asi que hereda la paleta de marca por esta via sin tocarlo.
+       Tienen que estar en body para que el var() vea el valor de la marca. */
+    --display: "Poppins", system-ui, "Segoe UI", sans-serif;
+    --body: "Roboto", system-ui, "Segoe UI", sans-serif;
+    --ink: var(--hc-ink);
+    --muted: var(--hc-muted);
+    --paper: var(--hc-paper);
+    --surface: var(--hc-surface);
+    --line: var(--hc-line);
+    --violet: var(--hc-cta);
+    --focus: var(--hc-focus);
+    --shadow: var(--hc-shadow);
+}
+
+/* ── eComFax ────────────────────────────────────────────────────────────── */
+/* Gradiente y naranja tomados de https://www.ecomfax.com/es/. El angulo se gira a
+   135deg (la web usa 315deg) para que el extremo oscuro quede bajo el texto del hero. */
+
+.hc-brand--ecomfax,
+.sv-brand--ecomfax {
+    --hc-grad-from: #0093e9;
+    --hc-grad-to: #80d0c7;
+    --hc-hero-overlay-size: 620px auto, 100px auto;
+    --hc-hero-overlay-pos: right -150px top -170px, left 0 bottom 0;
+    --hc-hero-overlay-opacity: .45;
+
+    --hc-cta: #c63000;
+    --hc-cta-strong: #ff4800;
+    --hc-cta-hover: #9e2600;
+
+    --hc-ink: #1a3754;
+    --hc-footer: #181e23;
+}
+
+.hc-brand--ecomfax .hc-hero::before {
+    background-image: url("brand/ecomfax-hero-circles.png"), url("brand/ecomfax-hero-dots.png");
+}
+
+.sv-brand--ecomfax .sv-aside::before {
+    background-image: url("brand/ecomfax-hero-circles.png");
+    background-size: 520px auto;
+    background-position: right -130px top -150px;
+}
+
+/* ── Recordia ───────────────────────────────────────────────────────────── */
+/* Gradiente, naranja y navy tomados de https://sta-landing.recordia.net/es/. */
+
+.hc-brand--recordia,
+.sv-brand--recordia {
+    --hc-grad-from: #1b2487;
+    --hc-grad-to: #35e4ff;
+    --hc-hero-overlay-size: cover;
+    --hc-hero-overlay-pos: center right;
+    --hc-hero-overlay-opacity: .55;
+
+    --hc-cta: #d13b00;
+    --hc-cta-strong: #d13b00;
+    --hc-cta-hover: #a62f00;
+
+    --hc-ink: #001d4d;
+    --hc-footer: #001d4d;
+}
+
+.hc-brand--recordia .hc-hero::before,
+.sv-brand--recordia .sv-aside::before {
+    background-image: url("brand/recordia-hero-overlay.png");
+}
+
+/* Recordia no usa anillos: su recurso grafico es la cinta de capsulas redondeadas de
+   la cabecera de su web. Se reutiliza esa misma imagen, muy atenuada, como textura de
+   las zonas blancas, en lugar del anillo generico de public_help.css. La reticula de
+   puntos si se mantiene, porque su isotipo es justamente una nube de puntos. */
+.hc-brand--recordia .hc-main::before {
+    width: calc(var(--hc-ring) * 2.1);
+    height: calc(var(--hc-ring) * 0.86);
+    aspect-ratio: auto;
+    border: 0;
+    border-radius: 0;
+    background: url("brand/recordia-hero-overlay.png") no-repeat center / contain;
+    opacity: .2;
+}
+
+/* La cinta es apaisada, asi que necesita su propio encuadre en cada variante: los
+   insets de public_help.css estan calculados para un anillo cuadrado. */
+.hc-brand--recordia .hc-main--a::before { inset: 30px -300px auto auto; }
+.hc-brand--recordia .hc-main--b::before { inset: 190px auto auto -330px; }
+.hc-brand--recordia .hc-main--c::before { inset: -60px -380px auto auto; }
+.hc-brand--recordia .hc-main--d::before { inset: auto -250px 20px auto; }

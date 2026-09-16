@@ -1,27 +1,21 @@
 /* Encuesta de satisfacción: página pública para clientes finales.
 
-   Autónoma a propósito — no hereda de home.css ni del sistema de temas de la app,
-   porque quien la abre no tiene sesión ni preferencia de tema guardada.
+   Comparte la capa de marca de las páginas públicas: help_centers/brand.css se carga
+   antes que esta hoja y aporta las tipografías, los radios y la paleta de cada centro
+   a través de la clase sv-brand--<slug> del <body>. Aquí solo se consumen.
 
-   Sigue la identidad de Recordia: navy corporativo, azul para los títulos de
-   sección, naranja para la acción principal y superficie casi blanca. Es
-   deliberadamente de tema CLARO y no atiende a prefers-color-scheme: el producto
-   Recordia no tiene variante oscura y un cliente final con el sistema en oscuro
-   debe ver exactamente lo mismo que el resto de la plataforma. */
+   Sigue siendo autónoma respecto a la app interna: no hereda de home.css ni del sistema
+   de temas, porque quien la abre no tiene sesión ni preferencia de tema guardada. Es
+   deliberadamente de tema CLARO y no atiende a prefers-color-scheme.
+
+   Cuidado con --brand-primary y --brand-accent: views.py:3535 los inyecta en el atributo
+   style del <body> y son legado, ya no gobiernan el diseño. Y sobre todo, NO declares
+   aquí alias del tipo ":root { --x: var(--hc-y) }": un var() se sustituye en el elemento
+   donde aplica la declaración, así que en :root (<html>) nunca vería el valor de la marca,
+   que vive en <body>. Ese era exactamente el motivo de que el panel lateral saliese
+   siempre con el navy de eComFax aunque el ticket fuese de Recordia. */
 
 :root {
-    --brand-primary: #24213f;
-    --brand-accent: #ffb703;
-    --sv-navy: var(--brand-primary);
-    --sv-navy-deep: #172033;
-    --sv-blue: #1976f0;          /* títulos de sección y foco */
-    --sv-orange: #ef7d00;        /* acción principal */
-    --sv-orange-dark: #d66f00;
-    --sv-bg: #fbfcfe;
-    --sv-surface: #ffffff;
-    --sv-text: #2b3245;
-    --sv-muted: #6b7590;
-    --sv-border: #e3e8f4;
     --sv-good: #12a150;
     --sv-bad: #e5484d;
 }
@@ -31,9 +25,9 @@
 body {
     margin: 0;
     min-height: 100vh;
-    background: var(--sv-bg);
-    color: var(--sv-text);
-    font-family: "Aptos", "Segoe UI Variable Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--hc-surface);
+    color: #2b3245;
+    font-family: var(--body);
     font-size: 15px;
     line-height: 1.55;
 }
@@ -43,7 +37,7 @@ body {
     z-index: 10;
     inset: 0 0 auto;
     height: 5px;
-    background: linear-gradient(90deg, var(--brand-accent) 0 28%, #7c3aed 28% 33%, var(--brand-primary) 33%);
+    background: linear-gradient(90deg, var(--hc-cta-strong) 0 30%, var(--hc-grad-from) 30% 100%);
 }
 
 /* --- Estructura: dos paneles, como el login de Recordia --- */
@@ -61,46 +55,62 @@ body {
     align-items: center;
     justify-content: center;
     padding: 48px;
-    background: var(--sv-navy);
+    background: linear-gradient(var(--hc-grad-angle), var(--hc-ink) 0%, color-mix(in srgb, var(--hc-grad-from), var(--hc-ink) 35%) 100%);
     color: #fff;
 }
 
-/* Nube de puntos del logotipo, reproducida con gradientes para no añadir un
-   asset más: la marca del ticket puede no ser Recordia, así que el guiño es
-   gráfico y no una imagen de marca concreta. */
+/* La imagen superpuesta de cada marca la declara brand.css; aquí solo el encuadre. */
 .sv-aside::before {
     content: "";
     position: absolute;
-    top: -80px;
-    right: -80px;
-    width: 520px;
-    height: 520px;
-    background-image:
-        radial-gradient(circle at center, #29b6f6 0 8px, transparent 9px),
-        radial-gradient(circle at center, #1565c0 0 5px, transparent 6px);
-    background-size: 56px 56px, 56px 56px;
-    background-position: 0 0, 28px 28px;
-    /* El degradado de máscara adelgaza la nube hacia abajo y a la izquierda,
-       igual que el logotipo de Recordia. */
-    mask-image: radial-gradient(circle at 70% 25%, #000 0, transparent 72%);
-    -webkit-mask-image: radial-gradient(circle at 70% 25%, #000 0, transparent 72%);
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
     opacity: .5;
     pointer-events: none;
 }
 
-.sv-aside-inner { position: relative; max-width: 340px; }
+/* Velo direccional: sin él el texto blanco no llega a AA sobre el extremo claro
+   de los gradientes de marca. */
+.sv-aside::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(160deg, rgba(4, 18, 40, .42) 0 60%, rgba(4, 18, 40, .12) 100%);
+    pointer-events: none;
+}
 
+.sv-aside-inner { position: relative; z-index: 1; max-width: 340px; }
+
+/* Los logotipos aportados son para fondo claro: el «Fax» de eComFax y la palabra
+   «recordia» son navy y desaparecerian sobre el panel oscuro. Van sobre una placa
+   blanca en vez de recolorear el asset de marca. */
 .sv-logo {
     display: block;
-    font-size: 30px;
+    height: 38px;
+    width: auto;
+    box-sizing: content-box;
+    padding: 16px 22px;
+    border-radius: var(--hc-radius-box);
+    background: #fff;
+}
+
+/* Respaldo cuando la marca del ticket no tiene logotipo propio: el nombre en texto,
+   que sobre el panel oscuro se lee en blanco y no necesita placa. */
+.sv-logo--text {
+    height: auto;
+    padding: 0;
+    background: none;
+    font-family: var(--display);
+    font-size: 28px;
     font-weight: 700;
-    letter-spacing: -.01em;
     line-height: 1.2;
 }
 
 .sv-claim {
-    margin: 14px 0 0;
-    color: #c3c9e4;
+    margin: 22px 0 0;
+    color: rgba(255, 255, 255, .9);
     font-size: 15px;
 }
 
@@ -108,6 +118,7 @@ body {
 .sv-claim:first-child {
     margin: 0;
     color: #fff;
+    font-family: var(--display);
     font-size: 24px;
     font-weight: 600;
     line-height: 1.35;
@@ -118,7 +129,7 @@ body {
     align-items: center;
     justify-content: center;
     padding: 48px 32px;
-    background: var(--sv-surface);
+    background: var(--hc-surface);
 }
 
 .sv-panel { width: 100%; max-width: 420px; }
@@ -128,25 +139,26 @@ body {
 .sv-ticket {
     display: inline-block;
     margin-bottom: 14px;
-    padding: 3px 10px;
-    border-radius: 999px;
-    background: #eef4ff;
-    color: var(--sv-blue);
+    padding: 5px 14px;
+    border-radius: var(--hc-radius-pill);
+    background: var(--hc-paper);
+    color: var(--hc-ink);
     font-size: 12px;
     font-weight: 600;
 }
 
 .sv-title {
     margin: 0 0 6px;
-    color: var(--sv-navy-deep);
+    color: var(--hc-ink);
+    font-family: var(--display);
     font-size: 26px;
     font-weight: 700;
     line-height: 1.25;
 }
 
-.sv-subject { margin: 0 0 22px; color: var(--sv-muted); font-size: 14px; }
+.sv-subject { margin: 0 0 22px; color: var(--hc-muted); font-size: 14px; }
 
-.sv-note { margin: 0 0 18px; color: var(--sv-muted); font-size: 14px; }
+.sv-note { margin: 0 0 18px; color: var(--hc-muted); font-size: 14px; }
 .sv-error { margin: 0 0 18px; color: var(--sv-bad); font-size: 14px; font-weight: 500; }
 
 /* --- Opciones de voto --- */
@@ -157,17 +169,20 @@ body {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 13px 15px;
-    border: 1px solid var(--sv-border);
-    border-radius: 6px;
-    background: var(--sv-surface);
+    padding: 14px 22px;
+    border: 1px solid var(--hc-line);
+    border-radius: var(--hc-radius-pill);
+    background: var(--hc-surface);
     cursor: pointer;
     transition: border-color .15s, background .15s, box-shadow .15s;
 }
-.sv-option:hover { border-color: var(--sv-blue); background: #f7faff; }
-.sv-option input { accent-color: var(--sv-blue); flex: none; }
-.sv-face { font-size: 25px; color: var(--sv-muted); flex: none; line-height: 1; }
-.sv-option span { font-weight: 500; color: var(--sv-navy-deep); }
+.sv-option:hover { border-color: var(--hc-cta); background: var(--hc-paper); }
+.sv-option input { accent-color: var(--hc-cta); flex: none; }
+/* Las caras son SVG con el mismo viewBox: los glifos ☺ y ☹ tienen metricas
+   distintas en cada fuente y se veian de tamanos diferentes. */
+.sv-face { width: 26px; height: 26px; flex: none; color: var(--hc-muted);
+    fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.sv-option span { font-weight: 500; color: var(--hc-ink); }
 
 /* :has() da el estado seleccionado sin JS; los navegadores que no lo soportan
    simplemente ven el radio marcado, que sigue siendo visible. */
@@ -192,7 +207,7 @@ body {
 .sv-label {
     display: block;
     margin-bottom: 6px;
-    color: var(--sv-navy-deep);
+    color: var(--hc-ink);
     font-size: 14px;
     font-weight: 600;
 }
@@ -200,53 +215,66 @@ body {
 .sv-field select,
 .sv-field textarea {
     width: 100%;
-    padding: 11px 13px;
-    border: 1px solid var(--sv-border);
-    border-radius: 6px;
-    background: var(--sv-surface);
-    color: var(--sv-text);
+    padding: 12px 20px;
+    border: 1px solid var(--hc-line);
+    border-radius: var(--hc-radius-pill);
+    background: var(--hc-surface);
+    color: #2b3245;
     font: inherit;
     resize: vertical;
 }
+.sv-field textarea { border-radius: var(--hc-radius-box); }
 /* Chevron propio en SVG embebido: con appearance:none el nativo desaparece y el
-   select se confundiría con un campo de texto. */
+   select se confundiría con un campo de texto. El trazo va en gris neutro porque
+   un data URI no puede leer las variables de marca. */
 .sv-field select {
     appearance: none;
-    padding-right: 38px;
+    padding-right: 42px;
     cursor: pointer;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath d='M1 1l6 6 6-6' fill='none' stroke='%231976f0' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath d='M1 1l6 6 6-6' fill='none' stroke='%236b7590' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
-    background-position: right 14px center;
+    background-position: right 18px center;
 }
 .sv-field select:focus,
 .sv-field textarea:focus {
     outline: none;
-    border-color: var(--sv-blue);
-    box-shadow: 0 0 0 3px rgba(25, 118, 240, .15);
+    border-color: var(--hc-cta);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--hc-cta), transparent 82%);
 }
 
 .sv-submit {
     width: 100%;
-    padding: 12px 16px;
+    min-height: 52px;
+    padding: 12px 24px;
     border: 0;
-    border-radius: 6px;
-    background: var(--sv-orange);
-    color: #fff;
+    border-radius: var(--hc-radius-pill);
+    background: var(--hc-cta);
+    color: var(--hc-on-cta);
     font: inherit;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
     transition: background .15s;
 }
-.sv-submit:hover { background: var(--sv-orange-dark); }
-.sv-submit:focus-visible { outline: 3px solid rgba(239, 125, 0, .4); outline-offset: 2px; }
+.sv-submit:hover { background: var(--hc-cta-hover); }
+.sv-submit:focus-visible { outline: 3px solid color-mix(in srgb, var(--hc-cta), transparent 60%); outline-offset: 2px; }
 
 /* --- Estados finales --- */
 
 .sv-result-ico {
     display: block;
     font-size: 40px;
-    color: var(--sv-blue);
+    color: var(--hc-cta);
     margin-bottom: 16px;
+}
+
+svg.sv-result-ico {
+    width: 46px;
+    height: 46px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 .sv-result-ico--good { color: var(--sv-good); }
 .sv-result-ico--bad { color: var(--sv-bad); }
@@ -260,10 +288,9 @@ body {
         justify-content: flex-start;
         min-height: 0;
     }
-    .sv-aside::before { width: 260px; height: 260px; inset: -30% -20% auto auto; opacity: .4; }
     .sv-aside-inner { max-width: none; }
-    .sv-logo { font-size: 24px; }
-    .sv-claim { font-size: 14px; }
+    .sv-logo { height: 26px; padding: 12px 16px; }
+    .sv-claim { margin-top: 14px; font-size: 14px; }
     .sv-main { padding: 32px 24px 48px; align-items: flex-start; }
     .sv-title { font-size: 22px; }
 }

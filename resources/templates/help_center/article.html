@@ -4,6 +4,7 @@
 {% if editor_preview %}<a href="{% url 'help_editor_article_edit' article.id %}?revision={{ preview_revision.id }}">Volver al editor</a>{% else %}<a href="{% url 'help_editor_article_edit' article.id %}">Editar artículo</a><a href="{% url 'help_editor_article_history' article.id %}">Historial</a>{% endif %}
 <a href="{% url 'help_editor_article_new' center.slug locale %}">Nuevo artículo</a>
 {% endblock %}
+{% block decor %}c{% endblock %}
 {% block content %}<div class="hc-wrap hc-article-layout">
 <article class="hc-article">{% if editor_preview %}<div class="hce-preview-banner"><strong>Previsualización de la revisión {{ preview_revision.number }}</strong><span>Este contenido todavía no es público.</span></div>{% endif %}<nav class="hc-breadcrumb" aria-label="Breadcrumb"><a href="{% url 'help_home' center.slug locale %}">{{ ui.home }}</a><span>/</span><a href="{% url 'help_category' center.slug locale article.section.category.slug %}">{{ article.section.category.name }}</a><span>/</span><a href="{% url 'help_section' center.slug locale article.section.slug %}">{{ article.section.name }}</a></nav>
 <header class="hc-article__header"><span class="hc-eyebrow">{{ article.section.name }}</span><h1>{{ article.title }}</h1>{% if article.source_updated_at %}<p>{{ ui.updated }} {{ article.source_updated_at|date:'d/m/Y' }}</p>{% endif %}</header>

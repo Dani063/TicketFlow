@@ -13,7 +13,7 @@
         <section class="hce-timeline">
             {% for item in revisions %}
             <article class="hce-revision {% if item.id == article.published_revision_id %}hce-revision--current{% endif %}">
-                <div class="hce-revision__marker"><span>{{ item.number }}</span></div>
+                <div class="hce-revision__marker"><span>v{{ item.number }}</span></div>
                 <div class="hce-revision__body">
                     <header><div><h2>{{ item.title }}</h2><p>{{ item.created_at|date:'d/m/Y H:i' }} · {% if item.created_by %}{{ item.created_by.name|default:item.created_by.email }}{% else %}Sistema{% endif %}</p></div><span class="hce-revision__status hce-revision__status--{{ item.status }}">{{ item.get_status_display }}</span></header>
                     <p class="hce-revision__note">{{ item.change_note|default:'Sin resumen del cambio' }}</p>
