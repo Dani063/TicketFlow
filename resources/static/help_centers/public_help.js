@@ -12,6 +12,12 @@
             });
         });
     }
+    var emailLinks = document.querySelectorAll('.hc-email[data-hc-mail]');
+    Array.prototype.forEach.call(emailLinks, function (link) {
+        var address = link.getAttribute('data-hc-mail').split('').reverse().join('');
+        link.href = 'mailto:' + address;
+        link.textContent = address;
+    });
     var form = document.getElementById('public-ticket-form');
     if (form) {
         form.addEventListener('submit', function () {

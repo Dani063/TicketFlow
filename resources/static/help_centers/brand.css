@@ -70,11 +70,6 @@ body {
     /* Velo direccional bajo la columna de texto. Es obligatorio: sin el, el blanco cae
        a 1,5-1,8 de contraste sobre el extremo claro de los dos gradientes de marca. */
     --hc-hero-scrim: linear-gradient(90deg, rgba(4, 18, 40, .48) 0 46%, rgba(4, 18, 40, 0) 86%);
-    /* Corte diagonal del borde inferior del hero, el mismo recurso que usan las
-       secciones .diagonal de ecomfax.com (alli es un skewY de -3 grados). Se aplica
-       con clip-path para no inclinar tambien el borde de arriba, que va pegado a la
-       barra de navegacion. */
-    --hc-hero-slant: clamp(34px, 4.2vw, 78px);
 
     --hc-footer: #172033;
 

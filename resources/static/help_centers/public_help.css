@@ -41,10 +41,10 @@ img, iframe, video { max-width: 100%; }
    por marca) y velo direccional (::after). El velo no es decorativo: sin el, el texto
    blanco cae por debajo de AA sobre el extremo claro de los dos gradientes. */
 
-.hc-hero { position: relative; overflow: hidden; color: #fff; background: linear-gradient(var(--hc-grad-angle), var(--hc-grad-from) 0%, var(--hc-grad-to) 100%); clip-path: polygon(0 0, 100% 0, 100% calc(100% - var(--hc-hero-slant)), 0 100%); }
+.hc-hero { position: relative; overflow: hidden; color: #fff; background: linear-gradient(var(--hc-grad-angle), var(--hc-grad-from) 0%, var(--hc-grad-to) 100%); }
 .hc-hero::before { content: ""; position: absolute; inset: 0; background-size: var(--hc-hero-overlay-size); background-position: var(--hc-hero-overlay-pos); background-repeat: no-repeat; opacity: var(--hc-hero-overlay-opacity); pointer-events: none; }
 .hc-hero::after { content: ""; position: absolute; inset: 0; background: var(--hc-hero-scrim); pointer-events: none; }
-.hc-hero__inner { position: relative; z-index: 1; padding-block: clamp(58px, 8vw, 104px) calc(clamp(58px, 8vw, 104px) + var(--hc-hero-slant) * .55); }
+.hc-hero__inner { position: relative; z-index: 1; padding-block: clamp(58px, 8vw, 104px); }
 .hc-hero h1 { width: min(780px, 100%); margin: 10px 0 16px; font: 700 clamp(38px, 6vw, 62px)/1.06 var(--display); letter-spacing: -.02em; }
 .hc-hero p { width: min(620px, 100%); margin: 0 0 32px; color: rgba(255, 255, 255, .88); font-size: 18px; }
 .hc-eyebrow { color: var(--hc-cta); font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
@@ -230,9 +230,7 @@ img, iframe, video { max-width: 100%; }
 
 .hc-footer { color: rgba(255, 255, 255, .74); background: var(--hc-footer); }
 .hc-footer__grid { display: grid; grid-template-columns: minmax(0, 1.5fr) repeat(3, minmax(0, 1fr)); gap: 40px 48px; padding-block: 62px 42px; }
-/* Los logotipos de marca son para fondo claro, asi que sobre el pie oscuro van sobre
-   una placa blanca en vez de recolorearse. */
-.hc-footer__logo { display: block; height: 28px; width: auto; box-sizing: content-box; padding: 13px 18px; border-radius: var(--hc-radius-box); background: #fff; }
+.hc-footer__brand-name { margin: 0; color: #fff; font: 700 20px/1.3 var(--display); letter-spacing: -.01em; }
 .hc-footer__brand p { max-width: 300px; margin: 20px 0 0; font-size: 14px; }
 .hc-footer__col h2 { margin: 0 0 16px; color: #fff; font: 600 15px/1.3 var(--display); }
 .hc-footer__col ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }

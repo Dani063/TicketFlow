@@ -38,6 +38,7 @@ UI = {
         "footer_help": "Centro de ayuda", "footer_legal": "Documentación legal",
         "footer_contact": "Contacto", "footer_rights": "Todos los derechos reservados.",
         "footer_contact_note": "Escríbenos y abriremos un ticket con tu consulta.",
+        "footer_email_label": "Escríbenos por email",
         "switch_language": "English",
     },
     "en": {
@@ -55,6 +56,7 @@ UI = {
         "footer_help": "Help centre", "footer_legal": "Legal documents",
         "footer_contact": "Contact", "footer_rights": "All rights reserved.",
         "footer_contact_note": "Write to us and we will open a ticket with your question.",
+        "footer_email_label": "Email us",
         "switch_language": "Español",
     },
 }

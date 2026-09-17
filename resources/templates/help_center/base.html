@@ -11,8 +11,8 @@
     <link rel="icon" type="image/png" sizes="32x32" href="{% static center.icon_small_static_path %}">
     <link rel="apple-touch-icon" href="{% static center.icon_static_path %}">
     <title>{% block title %}{{ ui.help_center }} · {{ center.name }}{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'help_centers/brand.css' %}?v=2.0">
-    <link rel="stylesheet" href="{% static 'help_centers/public_help.css' %}?v=2.0">
+    <link rel="stylesheet" href="{% static 'help_centers/brand.css' %}?v=2.1">
+    <link rel="stylesheet" href="{% static 'help_centers/public_help.css' %}?v=2.1">
     {% if can_manage_help %}<link rel="stylesheet" href="{% static 'help_centers/help_editor.css' %}?v=2.0">{% endif %}
 </head>
 <body class="hc-body hc-brand--{{ center.slug }}" style="{{ brand_style }}">
@@ -62,7 +62,7 @@
 <footer class="hc-footer">
     <div class="hc-wrap hc-footer__grid">
         <div class="hc-footer__brand">
-            <img class="hc-footer__logo" src="{% static center.logo_static_path %}" alt="{{ center.name }}">
+            <p class="hc-footer__brand-name">{{ center.name }}</p>
             <p>{% if locale == 'es' %}{{ center.tagline_es }}{% else %}{{ center.tagline_en }}{% endif %}</p>
         </div>
         <nav class="hc-footer__col" aria-label="{{ ui.footer_help }}">
@@ -81,7 +81,7 @@
         {% endif %}
         <div class="hc-footer__col">
             <h2>{{ ui.footer_contact }}</h2>
-            {% if center.brand.support_email %}<ul><li><a href="mailto:{{ center.brand.support_email }}">{{ center.brand.support_email }}</a></li></ul>{% endif %}
+            {% if center.brand.support_email %}<ul><li><a class="hc-email" data-hc-mail="{{ center.brand.support_email|slice:'::-1' }}">{{ ui.footer_email_label }}</a></li></ul>{% endif %}
             <p>{{ ui.footer_contact_note }}</p>
         </div>
     </div>
@@ -89,6 +89,6 @@
         <span>© {% now "Y" %} {{ center.name }}. {{ ui.footer_rights }}</span>
     </div>
 </footer>
-<script src="{% static 'help_centers/public_help.js' %}?v=2.0" defer></script>
+<script src="{% static 'help_centers/public_help.js' %}?v=2.1" defer></script>
 </body>
 </html>
