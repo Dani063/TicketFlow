@@ -301,6 +301,7 @@ hasta ahora:
 | `SimilarTicketIndex` | `similar.py` | Búsqueda de tickets similares por embeddings (coseno en memoria; migrable a OpenSearch k-NN sin tocar llamadores). |
 | — | `ticket_exports.py` | Renderizado del informe PDF de tickets filtrados (reportlab). |
 | — | `ticket_reply.py` | Asistencia de respuesta IA: borradores a partir del ticket, comentarios públicos y casos similares. No persiste nada. |
+| `UserAdminService` | `user_admin.py` | CRUD y reglas de negocio del panel de administración de usuarios (validaciones, último admin, auto-desactivación/eliminación). Extraído de `views.admin_users_api`. |
 
 > `HelpAssetService.safe_name` delega en `AttachmentService.safe_name` (antes eran dos
 > implementaciones idénticas copiadas).
@@ -373,7 +374,7 @@ Soportan `GET` (listar), `POST` (crear), `PUT` (actualizar) y `DELETE` (desactiv
 
 | Endpoint | Contenido |
 |---|---|
-| `/reporting/data/` | KPIs (creados, resueltos vía `TicketEvent`, backlog, % SLA, breaches, satisfacción), series diarias creados/cerrados, distribuciones (estado/prioridad/tipo/canal) y desglose por marca (incluye bucket «Sin marca»). Filtros `brand`, `from`, `to` (≤366 días); cache 60 s. |
+| `/reporting/data/` | Sin `?section=`: payload legacy (`reporting_metrics.build_legacy_overview`) — KPIs (creados, resueltos vía `TicketEvent`, backlog, % SLA, breaches, satisfacción), series diarias creados/cerrados, distribuciones (estado/prioridad/tipo/canal) y desglose por marca (incluye bucket «Sin marca»). Con `?section=…`, delega en `build_reporting_section` (ver tablas de hechos abajo). Filtros `brand`, `from`, `to` (≤366 días); cache 60 s. |
 | `/reporting/export.csv` | Export CSV en streaming (BOM UTF-8 para Excel, `;` como separador) del conjunto filtrado. |
 
 > Limitación documentada: el cumplimiento de primera respuesta (`first_response_met`)
@@ -462,10 +463,18 @@ USE_SQLITE=1 DISABLE_AWS_SSM=1 python src/main.py test app
 
 ## Deuda técnica conocida (no ejecutar sin plan dedicado)
 
-- `app/views.py` (~3600 líneas) tiene funciones que aún mezclan lógica de negocio en la
-  vista en vez de delegar a `app/services/`: `filter_tickets` (motor de la tabla de
-  tickets, ~420 líneas), `reporting_data` (~300), `admin_users_api` (~170), `create_ticket`
-  (~130). Extraerlas a servicio es un refactor grande — no mezclar con limpiezas menores.
+- `app/views.py` (`filter_tickets`, motor de la tabla de tickets, ~420 líneas) sigue
+  concentrando la lógica de paginación/orden/contadores de `/tickets/filter/` directamente
+  en la vista. **No es un candidato de limpieza rápida**: el propio `CLAUDE.md` lo señala
+  como el código más delicado del repo (claves de caché y consolidación de queries
+  afinadas a mano); tocarlo exige un plan propio con verificación exhaustiva.
+- `create_ticket` (~130 líneas) se revisó y **no es un caso real de lógica de negocio en
+  la vista**: el POST ya delega en `TicketService.create_or_update_from_post`; las líneas
+  restantes son construcción de contexto de página (historial, feed, adjuntos) para el GET,
+  razonable en una vista Django.
+- `admin_users_api` y la rama legacy de `reporting_data` (sin `?section=`) **ya se
+  extrajeron** a `services/user_admin.py` (`UserAdminService`) y
+  `services/reporting_metrics.py` (`build_legacy_overview`) respectivamente.
 - `app/tests.py` (~2150 líneas) y `app/test_ticket_exports.py` rompen la convención
   `tests_<feature>.py` que sigue el resto de la suite. Dividir/renombrar es otro cambio
   grande, pendiente de planificarse aparte.

@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from statistics import median
 
-from django.db.models import Count, OuterRef, Q, Subquery
-from django.db.models.functions import Lower, TruncMonth, Trim
+from django.db.models import Case, Count, IntegerField, Min, OuterRef, Q, Subquery, When
+from django.db.models.functions import ExtractHour, ExtractWeekDay, Lower, TruncDate, TruncMonth, Trim
 from django.utils import timezone
 
 from app.models import (
@@ -30,6 +30,10 @@ LIFECYCLE_EVENT_NAMES = (
     "assignee_id", "assignee", "asignado",
     "group_id", "group", "grupo",
 )
+
+# Zona legacy (sin ?section=): con muestras minusculas el porcentaje de CSAT
+# por agente es ruido puro, asi que por debajo de este minimo no se publica.
+_LEGACY_SATISFACTION_MIN_SAMPLE = 3
 
 STATUS_ALIASES = {
     "new": "open",
@@ -1920,3 +1924,264 @@ def build_reporting_section(section, filters, date_from, date_to, start_dt, end_
         payload["comparison"] = {"from": str(previous_from), "to": str(previous_to)}
         payload["insight"] = "No hay muestra comparable suficiente en el periodo anterior."
     return payload
+
+
+def build_legacy_overview(brand_id, date_from, date_to, start_dt, end_dt):
+    """Payload de /reporting/ sin ?section= (KPIs, series y distribuciones).
+
+    Predecesor de build_reporting_section: no usa las tablas de hechos, relee
+    tickets/eventos/valoraciones directamente. Se mantiene tal cual para no
+    alterar los numeros que ya ve el dashboard legacy.
+    """
+    live = Ticket.objects.filter(is_deleted=False, merged_into__isnull=True)
+    if brand_id:
+        live = live.filter(brand_id=brand_id)
+    created_qs = live.filter(created_at__range=(start_dt, end_dt))
+
+    # KPIs sobre los tickets creados en el rango.
+    # Compliance de primera respuesta solo acumula desde que first_response_met
+    # existe (el due se limpia al responder: no es retro-computable); breached
+    # via sla_breached_at es la fuente de verdad del incumplimiento.
+    kpis = created_qs.aggregate(
+        created=Count('id'),
+        breached=Count(Case(When(sla_breached_at__isnull=False, then=1), output_field=IntegerField())),
+        with_sla=Count(Case(When(
+            Q(resolution_due_at__isnull=False) | Q(first_response_due_at__isnull=False)
+            | Q(sla_breached_at__isnull=False) | Q(first_response_met__isnull=False),
+            then=1), output_field=IntegerField())),
+        fr_met=Count(Case(When(first_response_met=True, then=1), output_field=IntegerField())),
+        fr_measured=Count(Case(When(first_response_met__isnull=False, then=1), output_field=IntegerField())),
+    )
+    sla_compliance = (
+        round((kpis['with_sla'] - kpis['breached']) / kpis['with_sla'] * 100)
+        if kpis['with_sla'] else None
+    )
+
+    # Snapshot actual del backlog (no depende del rango): mide la cola viva.
+    snapshot = live.aggregate(
+        backlog=Count(Case(When(status__in=('open', 'pending'), then=1), output_field=IntegerField())),
+        open_now=Count(Case(When(status='open', then=1), output_field=IntegerField())),
+        pending_now=Count(Case(When(status='pending', then=1), output_field=IntegerField())),
+        unassigned=Count(Case(When(
+            Q(status__in=('open', 'pending')) & Q(assignee__isnull=True), then=1),
+            output_field=IntegerField())),
+    )
+    backlog = snapshot['backlog']
+
+    def _resolved_qs(s, e):
+        qs = TicketEvent.objects.filter(
+            field_name='status',
+            new_value__in=('resolved', 'closed'),
+            created_at__range=(s, e),
+            ticket__is_deleted=False,
+            ticket__merged_into__isnull=True,
+        )
+        if brand_id:
+            qs = qs.filter(ticket__brand_id=brand_id)
+        return qs
+
+    resolved_events = _resolved_qs(start_dt, end_dt)
+    resolved = resolved_events.values('ticket_id').distinct().count()
+
+    # Reaperturas: tickets que volvieron de resuelto/cerrado a open/pending en el rango.
+    reopened_qs = TicketEvent.objects.filter(
+        field_name='status',
+        old_value__in=('resolved', 'closed'),
+        new_value__in=('open', 'pending'),
+        created_at__range=(start_dt, end_dt),
+        ticket__is_deleted=False,
+        ticket__merged_into__isnull=True,
+    )
+    if brand_id:
+        reopened_qs = reopened_qs.filter(ticket__brand_id=brand_id)
+    reopened = reopened_qs.values('ticket_id').distinct().count()
+
+    # Tiempo medio de resolución (horas): desde la creación del ticket hasta su
+    # primer evento de resolución dentro del rango.
+    res_rows = list(
+        resolved_events.values('ticket_id').annotate(
+            resolved_at=Min('created_at'),
+            opened_at=Min('ticket__created_at'),
+        )
+    )
+    durations = [
+        (r['resolved_at'] - r['opened_at']).total_seconds() / 3600.0
+        for r in res_rows
+        if r['resolved_at'] and r['opened_at'] and r['resolved_at'] >= r['opened_at']
+    ]
+    avg_resolution_hours = round(sum(durations) / len(durations), 1) if durations else None
+
+    # Deltas vs periodo equivalente inmediatamente anterior (▲/▼ estilo dashboard).
+    period_len = end_dt - start_dt
+    prev_start, prev_end = start_dt - period_len, start_dt
+    created_prev = live.filter(created_at__range=(prev_start, prev_end)).count()
+    resolved_prev = _resolved_qs(prev_start, prev_end).values('ticket_id').distinct().count()
+
+    ratings = SatisfactionRating.objects.filter(
+        created_at__range=(start_dt, end_dt), score__in=('good', 'bad'),
+        ticket__is_deleted=False,
+    )
+    if brand_id:
+        ratings = ratings.filter(ticket__brand_id=brand_id)
+    good = ratings.filter(score='good').count()
+    bad = ratings.filter(score='bad').count()
+    satisfaction = round(good / (good + bad) * 100) if (good + bad) else None
+
+    # Tasa de respuesta: solo medible en las valoraciones nativas, que son las que
+    # registran la oferta (score='offered'). Lo importado de Zendesk no la trae.
+    offered_qs = SatisfactionRating.objects.filter(
+        offered_at__range=(start_dt, end_dt),
+        source=SatisfactionRating.SOURCE_NATIVE,
+        ticket__is_deleted=False,
+    )
+    if brand_id:
+        offered_qs = offered_qs.filter(ticket__brand_id=brand_id)
+    offered = offered_qs.count()
+    answered = offered_qs.filter(score__in=('good', 'bad')).count()
+    response_rate = round(answered / offered * 100) if offered else None
+
+    # CSAT por agente. Con muestras minúsculas el porcentaje es ruido puro, así que
+    # por debajo del mínimo no se publica.
+    agent_rows = []
+    for row in ratings.values('assignee__name').annotate(
+        n_good=Count(Case(When(score='good', then=1), output_field=IntegerField())),
+        n_bad=Count(Case(When(score='bad', then=1), output_field=IntegerField())),
+    ):
+        total = row['n_good'] + row['n_bad']
+        if total < _LEGACY_SATISFACTION_MIN_SAMPLE:
+            continue
+        agent_rows.append({
+            'agent': row['assignee__name'] or '— Sin asignar —',
+            'good': row['n_good'],
+            'bad': row['n_bad'],
+            'total': total,
+            'pct': round(row['n_good'] / total * 100),
+        })
+    agent_rows.sort(key=lambda r: (-r['pct'], -r['total']))
+    agent_rows = agent_rows[:15]
+
+    # Motivos de los votos negativos. Une el catálogo nativo (reason_choice) con el
+    # texto libre que trae el histórico de Zendesk (reason).
+    reason_counts = {}
+    for row in (ratings.filter(score='bad')
+                .values('reason_choice__label', 'reason').annotate(n=Count('id'))):
+        label = (row['reason_choice__label'] or (row['reason'] or '').strip()
+                 or '— Sin motivo indicado —')
+        reason_counts[label] = reason_counts.get(label, 0) + row['n']
+    reason_rows = sorted(
+        ({'label': label, 'n': n} for label, n in reason_counts.items()),
+        key=lambda r: -r['n'],
+    )[:10]
+
+    # Series diarias: creados y cerrados
+    created_series = list(
+        created_qs.annotate(day=TruncDate('created_at')).values('day')
+        .annotate(n=Count('id')).order_by('day')
+    )
+    closed_series = list(
+        live.filter(closed_at__range=(start_dt, end_dt))
+        .annotate(day=TruncDate('closed_at')).values('day')
+        .annotate(n=Count('id')).order_by('day')
+    )
+
+    # Distribución de carga: creados por hora del día (0-23) y por día de la
+    # semana — clave para dimensionar turnos del equipo de soporte.
+    hour_map = {
+        row['h']: row['n']
+        for row in created_qs.annotate(h=ExtractHour('created_at')).values('h')
+        .annotate(n=Count('id')) if row['h'] is not None
+    }
+    by_hour = [hour_map.get(h, 0) for h in range(24)]
+    # ExtractWeekDay: 1=domingo … 7=sábado (convención Django). Reordenamos a L-D.
+    wd_map = {
+        row['wd']: row['n']
+        for row in created_qs.annotate(wd=ExtractWeekDay('created_at')).values('wd')
+        .annotate(n=Count('id')) if row['wd'] is not None
+    }
+    _wd_order = [2, 3, 4, 5, 6, 7, 1]  # lunes…domingo
+    by_weekday = [wd_map.get(d, 0) for d in _wd_order]
+
+    # Tickets abiertos más antiguos: lista accionable para atacar el backlog.
+    oldest_rows = [
+        {
+            'id': t.id,
+            'subject': t.subject,
+            'status': t.status,
+            'assignee': t.assignee.name if t.assignee else None,
+            'created': t.created_at.strftime('%Y-%m-%d') if t.created_at else None,
+            'age_days': (timezone.now() - t.created_at).days if t.created_at else None,
+        }
+        for t in live.filter(status__in=('open', 'pending'))
+        .select_related('assignee').order_by('created_at')[:10]
+    ]
+
+    def _dist(field):
+        return [
+            {'label': row[field] or '—', 'n': row['n']}
+            for row in created_qs.values(field).annotate(n=Count('id')).order_by('-n')
+        ]
+
+    # Desglose por marca (siempre sobre el rango; muestra el bucket sin marca
+    # para medir cobertura de entidad)
+    brand_rows = [
+        {
+            'brand': row['brand__name'] or '— Sin marca —',
+            'created': row['n'],
+            'open': row['n_open'],
+            'breached': row['n_breached'],
+        }
+        for row in Ticket.objects.filter(
+            is_deleted=False, merged_into__isnull=True,
+            created_at__range=(start_dt, end_dt),
+        ).values('brand__name').annotate(
+            n=Count('id'),
+            n_open=Count(Case(When(status__in=('open', 'pending'), then=1), output_field=IntegerField())),
+            n_breached=Count(Case(When(sla_breached_at__isnull=False, then=1), output_field=IntegerField())),
+        ).order_by('-n')
+    ]
+
+    return {
+        'ok': True,
+        'range': {'from': str(date_from), 'to': str(date_to), 'brand_id': brand_id},
+        'kpis': {
+            'created': kpis['created'],
+            'created_prev': created_prev,
+            'resolved': resolved,
+            'resolved_prev': resolved_prev,
+            'backlog': backlog,
+            'open_now': snapshot['open_now'],
+            'pending_now': snapshot['pending_now'],
+            'unassigned': snapshot['unassigned'],
+            'sla_compliance_pct': sla_compliance,
+            'sla_breached': kpis['breached'],
+            'first_response_met': kpis['fr_met'],
+            'first_response_measured': kpis['fr_measured'],
+            'avg_resolution_hours': avg_resolution_hours,
+            'reopened': reopened,
+            'satisfaction_pct': satisfaction,
+            'satisfaction_good': good,
+            'satisfaction_bad': bad,
+            'satisfaction_offered': offered,
+            'satisfaction_answered': answered,
+            'satisfaction_response_rate_pct': response_rate,
+        },
+        'satisfaction': {
+            'by_agent': agent_rows,
+            'reasons': reason_rows,
+            'min_sample': _LEGACY_SATISFACTION_MIN_SAMPLE,
+        },
+        'series': {
+            'created': [{'day': str(r['day']), 'n': r['n']} for r in created_series],
+            'closed': [{'day': str(r['day']), 'n': r['n']} for r in closed_series],
+            'by_hour': by_hour,
+            'by_weekday': by_weekday,
+        },
+        'oldest_open': oldest_rows,
+        'distributions': {
+            'status': _dist('status'),
+            'priority': _dist('priority'),
+            'type': _dist('type'),
+            'channel': _dist('channel'),
+        },
+        'by_brand': brand_rows,
+    }
