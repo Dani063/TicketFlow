@@ -285,6 +285,27 @@ completo. `unread_for_user(user)` para el badge.
 `record_metric(name, value=1, labels={})` inserta un `OperationalMetric`. Nunca rompe el
 flujo de negocio: si falla, lo registra en el log y devuelve `None`.
 
+### Otros servicios
+
+Servicios existentes en `app/services/` con responsabilidad acotada, sin sección propia
+hasta ahora:
+
+| Servicio | Fichero | Responsabilidad |
+|---|---|---|
+| `AttachmentService` | `attachments.py` | Almacenamiento y descarga segura de adjuntos de tickets (hash, `storage_key`, nombre seguro). |
+| — (funciones de presentación) | `conversation.py` | Presentación reversible del correo en el hilo de conversación; nunca crea ni modifica comentarios. |
+| — | `help_centers.py` | Reglas compartidas por los portales públicos de Help Center (eComFax, Recordia): envío de solicitudes públicas, rate limiting. |
+| — | `help_content.py` | Saneado de HTML y extracción de texto compartidos por la importación y el editor del Help Center. |
+| `HelpAssetService` y afines | `help_editor.py` | Edición transaccional del Help Center: revisiones y almacenamiento de assets. |
+| — | `satisfaction.py` | Encuesta de satisfacción (CSAT) nativa: oferta, voto y catálogo de motivos (replica la mecánica de Zendesk). |
+| `SimilarTicketIndex` | `similar.py` | Búsqueda de tickets similares por embeddings (coseno en memoria; migrable a OpenSearch k-NN sin tocar llamadores). |
+| — | `ticket_exports.py` | Renderizado del informe PDF de tickets filtrados (reportlab). |
+| — | `ticket_reply.py` | Asistencia de respuesta IA: borradores a partir del ticket, comentarios públicos y casos similares. No persiste nada. |
+
+> `AttachmentService.safe_name` y `HelpAssetService.safe_name` son hoy idénticas
+> (`attachments.py` y `help_editor.py`) — candidatas a unificar en un futuro refactor, ver
+> deuda técnica más abajo.
+
 ---
 
 ## Modelos nuevos (`app/models.py`)
@@ -437,3 +458,17 @@ Para ejecutar la suite de tests sin infraestructura:
 ```bash
 USE_SQLITE=1 DISABLE_AWS_SSM=1 python src/main.py test app
 ```
+
+---
+
+## Deuda técnica conocida (no ejecutar sin plan dedicado)
+
+- `app/views.py` (~3600 líneas) tiene funciones que aún mezclan lógica de negocio en la
+  vista en vez de delegar a `app/services/`: `filter_tickets` (motor de la tabla de
+  tickets, ~420 líneas), `reporting_data` (~300), `admin_users_api` (~170), `create_ticket`
+  (~130). Extraerlas a servicio es un refactor grande — no mezclar con limpiezas menores.
+- `app/tests.py` (~2150 líneas) y `app/test_ticket_exports.py` rompen la convención
+  `tests_<feature>.py` que sigue el resto de la suite. Dividir/renombrar es otro cambio
+  grande, pendiente de planificarse aparte.
+- `AttachmentService.safe_name` (`attachments.py`) y `HelpAssetService.safe_name`
+  (`help_editor.py`) son idénticas — candidatas a unificar en un helper común.

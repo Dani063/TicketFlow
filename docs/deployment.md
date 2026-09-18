@@ -20,6 +20,14 @@ exec python3 main.py $PYTHON_ARGS
 | `deployment-worker.yaml` | `celery_worker` | Consumidor de tareas Celery |
 | `deployment-beat.yaml` | `celery_beat` | Scheduler de tareas periódicas |
 
+### Migración de base de datos
+
+No es un `Deployment` sino un `Job` (`k8s/job-migrate.yaml`, `name: ticketflow-migrate`) y
+**no usa `PYTHON_ARGS`**: llama directamente a `entrypoint.sh migrate`, el mismo
+`docker-entrypoint.sh` descrito en `CLAUDE.md` («Dos caminos de arranque divergentes»). Hay
+que borrar el Job anterior antes de reaplicar (`kubectl delete job ticketflow-migrate
+--ignore-not-found`) porque `spec.template` de un Job es inmutable.
+
 ---
 
 ## Flags disponibles
@@ -112,6 +120,21 @@ Todas vienen del ConfigMap `ticketflow-config` y el Secret `ticketflow-secrets`.
 | `CELERY_BROKER_URL` | — | Solo en local con Redis; en producción no definir (usa SQS) |
 | `ARTIFACT_VERSION` | Imagen CI/CD | Tag con la que se construyó la imagen; alimenta automáticamente el identificador visual de versión |
 | `TICKETFLOW_VERSION` | Opcional | Override explícito de la versión visual; tiene prioridad sobre `ARTIFACT_VERSION` |
+| `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS` | ConfigMap | Dominios servidos por marca; en `k8s/configmap.yaml` llevan placeholders de ejemplo |
+| `WEB_CONCURRENCY`, `GUNICORN_TIMEOUT` | ConfigMap | Nº de procesos y timeout de Gunicorn (no confundir con los flags `--workers`/`--timeout` de `start_web`; solo aplican en el camino de `docker-entrypoint.sh`) |
+| `SSO_LOGIN_API_URL`, `SSO_LOGIN_UI_URL` | ConfigMap | Endpoints del SSO corporativo |
+| `OUTBOUND_EMAIL_ENABLED`, `OUTBOUND_TICKET_CREATED_ENABLED`, `OUTBOUND_AGENT_REPLY_ENABLED` | ConfigMap | Kill switches de email saliente (global y por tipo) |
+| `SATISFACTION_SURVEY_ENABLED` | ConfigMap | Activa la encuesta CSAT nativa |
+| `PUBLIC_HELP_ENABLED`, `PUBLIC_TICKET_INTAKE_ENABLED` | ConfigMap | Activan el Help Center público y la creación pública de tickets |
+| `ECOMFAX_HELP_PUBLIC_URL`, `RECORDIA_HELP_PUBLIC_URL`, `PUBLIC_ECOMFAX_BRAND_NAME`, `PUBLIC_RECORDIA_BRAND_NAME` | ConfigMap | URL y nombre visible de cada Help Center por marca |
+| `ATTACHMENT_STORAGE_BACKEND`, `ATTACHMENT_STORAGE_PREFIX` | ConfigMap | Backend de almacenamiento de adjuntos y prefijo de claves S3 por entorno |
+| `PUBLIC_ATTACHMENTS_S3_BUCKET`, `PUBLIC_ATTACHMENTS_S3_REGION` | ConfigMap | Bucket/región S3 de adjuntos públicos |
+| `HELP_CONTENT_S3_BUCKET`, `HELP_CONTENT_S3_REGION` | ConfigMap | Bucket/región S3 de contenido del Help Center |
+| `PUBLIC_ATTACHMENT_MAX_FILES`, `PUBLIC_ATTACHMENT_MAX_BYTES`, `PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES` | ConfigMap | Límites de adjuntos en formularios públicos |
+| `ATTACHMENT_ORPHAN_MAX_AGE_HOURS` | ConfigMap | Antigüedad a partir de la cual `cleanup_orphan_attachments` borra adjuntos huérfanos |
+| `ATTACHMENT_DOWNLOAD_URL_TTL_SECONDS` | ConfigMap | TTL de las URL firmadas de descarga de adjuntos |
+| `OUTBOUND_EMAIL_ATTACHMENT_MAX_BYTES` | ConfigMap | Límite de tamaño de adjuntos en email saliente |
+| `PUBLIC_CLIENT_IP_HEADER` | ConfigMap | Cabecera de la que se lee la IP del cliente; el ingress debe sanear/añadir `X-Forwarded-For` |
 
 ### Ingesta de correo: un cursor por entorno
 

@@ -1,3 +1,5 @@
+"""Contrato HTTP/JSON común de las vistas API: envoltura de respuesta, errores y decoradores de auth."""
+
 import json
 from functools import wraps
 

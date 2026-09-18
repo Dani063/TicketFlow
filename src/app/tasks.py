@@ -1,3 +1,5 @@
+"""Tareas Celery: ingesta de buzones M365, asignación/SLA periódicos y envíos event-driven."""
+
 import hashlib
 import logging
 import os

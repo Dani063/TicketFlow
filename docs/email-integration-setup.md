@@ -22,6 +22,17 @@ Consulta de registros MX con `nslookup -type=MX <dominio>`:
 - `*.mail.protection.outlook.com` → Microsoft 365
 - `inbound-smtp.eu-west-1.amazonaws.com` → Amazon SES
 
+> **Corrección (verificado en código/Graph, no solo en el registro MX):** las cuatro
+> direcciones M365 de la tabla (`helpdesk@cloudwws.com`, `helpdesk@comunycarse.com`,
+> `soporte2@comunycarse.com`, `helpdesk@ecomfax.com`) **no son cuatro buzones
+> independientes: son alias de un único buzón físico** (mismo id de carpeta Inbox,
+> mismo contador de elementos). Consecuencia: `poll_m365_mailboxes` itera marcas y
+> asigna `brand` según qué marca está consultando en ese momento, no según el
+> destinatario real del mensaje — la atribución de marca del correo entrante es hoy
+> arbitraria. `_mailbox_targets` agrupa las cuatro direcciones para no consultar la
+> misma carpeta cuatro veces, pero no resuelve la atribución. Es un defecto pendiente
+> de decisión de negocio, no un bug de este documento.
+
 ---
 
 ## Azure AD — App Registration (Microsoft 365)
@@ -48,7 +59,7 @@ Permite que TicketFlow lea los buzones de helpdesk de los dominios en Microsoft 
 |---|---|---|
 | Mail.Read | Application (sin usuario) | Granted (admin consent) |
 | Mail.ReadWrite | Application (sin usuario) | Granted (admin consent) |
-| Mail.Send | Application (sin usuario) | ⚠️ **PENDIENTE de conceder** — requerido por el envío saliente vía Graph `sendMail` (marcas con `mailbox_type=m365`). Tras conceder, re-verificar la Application Access Policy con `Test-ApplicationAccessPolicy` (RestrictAccess también limita el envío, que es lo deseado). |
+| Mail.Send | Application (sin usuario) | ✅ **Concedido desde el 27/07/2026** — verificado (HTTP 202 en `sendMail` + copia visible en Enviados). Requerido por el envío saliente vía Graph `sendMail` (marcas con `mailbox_type=m365`). La Application Access Policy `RestrictAccess` también acota el envío, que es lo deseado. |
 
 ### Dónde gestionar la app
 [Azure Portal → App registrations → TicketFlow Mail Reader](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Overview/appId/ceccd3ef-7fad-49b8-8cd7-9fe2f5e3475c)
@@ -215,7 +226,7 @@ Implementadas como tareas periódicas de Celery Beat:
 | Adjuntos entrantes M365 | ✅ Implementado — requiere almacenamiento S3 activado en Kubernetes |
 | Email saliente (código: SESv2 + Graph sendMail) | ✅ Implementado — tras kill switch `OUTBOUND_EMAIL_ENABLED` |
 | Adjuntos en respuestas de agente | ✅ Implementado — SESv2 / Graph; Graph grande requiere `Mail.ReadWrite` |
-| Permiso Graph `Mail.Send` + admin consent | ⏳ Pendiente (bloquea envío M365) |
+| Permiso Graph `Mail.Send` + admin consent | ✅ Completado desde el 27/07/2026 |
 | SES production access + identidades DKIM + IAM `ses:SendEmail` | ⏳ Pendiente (bloquea envío SES) |
 | Confirmación de creación al cliente (acuse de recibo ES/EN) | ✅ Implementado — `OUTBOUND_TICKET_CREATED_ENABLED` |
 | Respuesta pública del agente al cliente (ES/EN) | ✅ Implementado — `OUTBOUND_AGENT_REPLY_ENABLED` |
