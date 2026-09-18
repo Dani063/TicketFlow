@@ -526,7 +526,6 @@ window.initTicketPane = function (root, ctx) {
                 const status = event.target.getAttribute('data-status');
                 selectedStatus.textContent = status;
                 dropdownContent.classList.remove('show');
-                console.log('Publicar ticket con estado:', status);
             }
         });
 

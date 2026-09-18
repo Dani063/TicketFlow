@@ -1778,7 +1778,6 @@ def sso_complete(request):
         data = parse_json_body(request)
         email = data.get('email')
         name = data.get('name', 'Usuario SSO')
-        # claims = data.get('claims', []) # Aquí puedes leer claims si los envías
 
         if not email:
             return json_error('email_required', 'Email es requerido para completar el SSO', status=400)
