@@ -289,9 +289,10 @@ def _attach_last_comments(ticket_list):
         lc_map[c.ticket_id] = c
     for t in ticket_list:
         lc = lc_map.get(t.id)
-        t.lc_author = lc.user.name if lc and lc.user else ''
-        t.lc_date   = lc.created_at.strftime('%d/%m/%Y %H:%M') if lc else ''
-        t.lc_body   = (lc.content or '')[:300] if lc else ''
+        t.lc_author   = lc.user.name if lc and lc.user else ''
+        t.lc_date     = lc.created_at.strftime('%d/%m/%Y %H:%M') if lc else ''
+        t.lc_body     = (lc.content or '')[:300] if lc else ''
+        t.lc_internal = bool(lc and not lc.is_public)
 
 
 def _parse_page_size(raw):
@@ -1027,6 +1028,7 @@ def filter_tickets(request):
                 "author": lc.user.name if lc and lc.user else "",
                 "date": lc.created_at.strftime("%d/%m/%Y %H:%M") if lc else "",
                 "body": (lc.content or "")[:300] if lc else "",
+                "is_internal": bool(lc and not lc.is_public),
             } if lc else None,
         })
     return JsonResponse({

@@ -1196,8 +1196,8 @@
 }
 
 #ticket-preview-card .tpc-comment-body {
-    background: #fefce8;
-    border-left: 3px solid #fbbf24;
+    background: #f1f5f9;
+    border-left: 3px solid #cbd5e1;
     padding: 8px 12px;
     border-radius: 4px;
     line-height: 1.5;
@@ -1206,4 +1206,10 @@
     -webkit-line-clamp: 4;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+/* Solo el amarillo de "nota interna" cuando el último comentario no es público. */
+#ticket-preview-card .tpc-comment-body.is-internal {
+    background: #fefce8;
+    border-left-color: #fbbf24;
 }

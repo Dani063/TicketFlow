@@ -1022,25 +1022,41 @@ window.initTicketPane = function (root, ctx) {
     }
 
     // ---- Historial de interacciones: popup en hover ----
-    const tlPopup = document.createElement('div');
-    tlPopup.id = 'tl-popup';
-    tlPopup.innerHTML = `
-        <div class="tlp-header">
-            <span class="tlp-badge" id="tlp-badge"></span>
-            <span class="tlp-ticket-num" id="tlp-ticket-num"></span>
-            <button class="tlp-close" type="button" title="Cerrar">&#x2715;</button>
-        </div>
-        <div class="tlp-subject" id="tlp-subject"></div>
-        <div class="tlp-desc" id="tlp-desc"></div>
-        <div class="tlp-sep" id="tlp-sep">Latest comment</div>
-        <div class="tlp-comment" id="tlp-comment"></div>
-    `;
-    document.body.appendChild(tlPopup);
+    // initTicketPane se ejecuta una vez por cada pestaña de ticket abierta:
+    // sin esta guarda, cada pestaña añadía su propio #tl-popup al body y los
+    // de pestañas anteriores quedaban huérfanos (nunca se ocultaban) si el
+    // usuario cambiaba de pestaña con el ratón todavía sobre un .tl-item, ya
+    // que entonces nunca llega a disparar el "mouseleave" que los cierra.
+    let tlPopup = document.getElementById('tl-popup');
+    if (!tlPopup) {
+        tlPopup = document.createElement('div');
+        tlPopup.id = 'tl-popup';
+        tlPopup.innerHTML = `
+            <div class="tlp-header">
+                <span class="tlp-badge" id="tlp-badge"></span>
+                <span class="tlp-ticket-num" id="tlp-ticket-num"></span>
+                <button class="tlp-close" type="button" title="Cerrar">&#x2715;</button>
+            </div>
+            <div class="tlp-subject" id="tlp-subject"></div>
+            <div class="tlp-desc" id="tlp-desc"></div>
+            <div class="tlp-sep" id="tlp-sep">Latest comment</div>
+            <div class="tlp-comment" id="tlp-comment"></div>
+        `;
+        document.body.appendChild(tlPopup);
+        tlPopup.addEventListener('mouseenter', () => clearTimeout(window.__tfTlHideTimer));
+        tlPopup.addEventListener('mouseleave', hideTlPopup);
+        tlPopup.querySelector('.tlp-close').addEventListener('click', () => {
+            clearTimeout(window.__tfTlHideTimer);
+            tlPopup.classList.remove('visible');
+        });
+    }
 
-    let tlHideTimer = null;
+    function hideTlPopup() {
+        window.__tfTlHideTimer = setTimeout(() => tlPopup.classList.remove('visible'), 150);
+    }
 
     function showTlPopup(item) {
-        clearTimeout(tlHideTimer);
+        clearTimeout(window.__tfTlHideTimer);
         const status   = item.dataset.status  || '';
         const id       = item.dataset.id      || '';
         const zid      = item.dataset.zid     || '';
@@ -1083,19 +1099,17 @@ window.initTicketPane = function (root, ctx) {
         tlPopup.classList.add('visible');
     }
 
-    function hideTlPopup() {
-        tlHideTimer = setTimeout(() => tlPopup.classList.remove('visible'), 150);
-    }
-
     rootEl.querySelectorAll('.tl-item').forEach(item => {
         item.addEventListener('mouseenter', () => showTlPopup(item));
         item.addEventListener('mouseleave', hideTlPopup);
-    });
-    tlPopup.addEventListener('mouseenter', () => clearTimeout(tlHideTimer));
-    tlPopup.addEventListener('mouseleave', hideTlPopup);
-    tlPopup.querySelector('.tlp-close').addEventListener('click', () => {
-        clearTimeout(tlHideTimer);
-        tlPopup.classList.remove('visible');
+        // Al hacer clic se navega a ese ticket y este pane puede quedar
+        // detached sin que el ratón llegue a salir del item (nunca dispara
+        // "mouseleave"): cerrar la vista previa de inmediato evita que se
+        // quede flotando sobre la pestaña de destino.
+        item.addEventListener('click', () => {
+            clearTimeout(window.__tfTlHideTimer);
+            tlPopup.classList.remove('visible');
+        });
     });
 
     // ===== Ajuste dinámico de altura del layout =====

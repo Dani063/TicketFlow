@@ -343,7 +343,8 @@
 :root[data-theme="dark"] #ticket-preview-card { background: var(--color-popover); border-color: var(--color-popover-border); color: var(--color-text); box-shadow: var(--shadow-popover-dark); }
 :root[data-theme="dark"] #ticket-preview-card .tpc-subject { color: var(--color-text); }
 :root[data-theme="dark"] #ticket-preview-card .tpc-desc { color: var(--color-text-muted); }
-:root[data-theme="dark"] #ticket-preview-card .tpc-comment-body { background: #1f2937; color: var(--color-text); border-left-color: var(--color-warning); }
+:root[data-theme="dark"] #ticket-preview-card .tpc-comment-body { background: #1f2937; color: var(--color-text); border-left-color: var(--color-border); }
+:root[data-theme="dark"] #ticket-preview-card .tpc-comment-body.is-internal { border-left-color: var(--color-warning); }
 :root[data-theme="dark"] #ticket-preview-card .tpc-comment-author { color: var(--color-text); }
 :root[data-theme="dark"] #ticket-preview-card .tpc-comment-date { color: var(--color-text-subtle); }
 

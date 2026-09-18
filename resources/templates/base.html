@@ -25,7 +25,7 @@
 
     {# Bump ?v= on each Sprint deploy to bust browser cache on legacy clients. #}
     <!-- CSS globales -->
-    <link rel="stylesheet" href="{% static 'tickets/style.css' %}?v=s6.5">
+    <link rel="stylesheet" href="{% static 'tickets/style.css' %}?v=s6.6">
     <link rel="stylesheet" href="{% static 'tickets/ui.css' %}?v=s6.0">
     <link rel="stylesheet" href="{% static 'tickets/toast.css' %}?v=s4.7">
     <link rel="stylesheet" href="{% static 'tickets/dialog.css' %}?v=s4.7">
@@ -39,7 +39,7 @@
     <link rel="stylesheet" href="{% static 'tickets/attachments.css' %}?v=s7.0">
     <!-- home.css is the shared sidebar-page stylesheet; load globally so
          SPA fragment swaps don't lose styling. -->
-    <link rel="stylesheet" href="{% static 'tickets/home.css' %}?v=s6.3">
+    <link rel="stylesheet" href="{% static 'tickets/home.css' %}?v=s6.4">
 
     {% block extra_css %}{% endblock %}
 </head>
@@ -95,12 +95,12 @@
     <script src="{% static 'tickets/filters.js' %}?v=s4.7"></script>
     <script src="{% static 'tickets/toast.js' %}?v=s4.7"></script>
     <script src="{% static 'tickets/dialog.js' %}?v=s4.7"></script>
-    <script src="{% static 'tickets/tabs.js' %}?v=s7.0"></script>
+    <script src="{% static 'tickets/tabs.js' %}?v=s7.1"></script>
     <script src="{% static 'tickets/theme.js' %}?v=s5.8"></script>
     <!-- create_ticket.js loaded globally so initTicketPane is available even
          when the user navigates Home → ticket via SPA (no full page reload). -->
     <script src="{% static 'tickets/attachments.js' %}?v=s7.0"></script>
-    <script src="{% static 'tickets/create_ticket.js' %}?v=s8.2"></script>
+    <script src="{% static 'tickets/create_ticket.js' %}?v=s8.3"></script>
     <script src="{% static 'tickets/ai_reply.js' %}?v=s4.8"></script>
     <script src="{% static 'tickets/ticket_live.js' %}?v=s1.0"></script>
 
