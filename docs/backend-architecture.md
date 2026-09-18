@@ -302,9 +302,8 @@ hasta ahora:
 | — | `ticket_exports.py` | Renderizado del informe PDF de tickets filtrados (reportlab). |
 | — | `ticket_reply.py` | Asistencia de respuesta IA: borradores a partir del ticket, comentarios públicos y casos similares. No persiste nada. |
 
-> `AttachmentService.safe_name` y `HelpAssetService.safe_name` son hoy idénticas
-> (`attachments.py` y `help_editor.py`) — candidatas a unificar en un futuro refactor, ver
-> deuda técnica más abajo.
+> `HelpAssetService.safe_name` delega en `AttachmentService.safe_name` (antes eran dos
+> implementaciones idénticas copiadas).
 
 ---
 
@@ -470,5 +469,3 @@ USE_SQLITE=1 DISABLE_AWS_SSM=1 python src/main.py test app
 - `app/tests.py` (~2150 líneas) y `app/test_ticket_exports.py` rompen la convención
   `tests_<feature>.py` que sigue el resto de la suite. Dividir/renombrar es otro cambio
   grande, pendiente de planificarse aparte.
-- `AttachmentService.safe_name` (`attachments.py`) y `HelpAssetService.safe_name`
-  (`help_editor.py`) son idénticas — candidatas a unificar en un helper común.

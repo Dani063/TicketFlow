@@ -365,10 +365,6 @@
     border: 0;
 }
 
-.pagination-bar {
-    flex-wrap: wrap;
-}
-
 /* ===== Responsive: progressively hide low-priority columns ===== */
 /* Column order (home/tickets_list):
    1=checkbox, 2=ID, 3=Asunto, 4=Solicitante, 5=Actualizado,
