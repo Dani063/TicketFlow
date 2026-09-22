@@ -22,7 +22,7 @@
     <span class="ticket-meta-dates">
         <span title="Creado">Creado: <strong>{{ ticket.created_at|date:"d/m/Y H:i" }}</strong></span>
         <span class="meta-sep">·</span>
-        <span title="Última actualización">Actualizado: <strong>{{ ticket.updated_at|date:"d/m/Y H:i" }}</strong></span>
+        <span title="Última actualización">Actualizado: <strong data-tf-updated>{{ ticket.updated_at|date:"d/m/Y H:i" }}</strong></span>
     </span>
     {% if can_use_internal and ticket.assignee_id != current_user_id %}
     <button type="button" id="take-it-btn" class="take-it-btn" data-ticket-id="{{ ticket.id }}" aria-label="Asignarme este ticket">

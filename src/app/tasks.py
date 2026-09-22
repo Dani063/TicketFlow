@@ -1,15 +1,21 @@
+"""Tareas Celery: ingesta de buzones M365, asignación/SLA periódicos y envíos event-driven."""
+
+import hashlib
 import logging
 import os
+from datetime import timedelta, timezone as dt_timezone
 from urllib.parse import quote
 
 import requests
 from django.conf import settings
+from django.utils import timezone
 from celery import shared_task
 from app.services.assignment import AssignmentService
 from app.services.attachments import AttachmentService
 from app.services.email_ingestion import EmailIngestionService
 from app.services.metrics import record_metric
 from app.services.msgraph import GRAPH_BASE, get_graph_token
+from app.services.reporting_facts import refresh_stale_facts
 from app.services.satisfaction import SatisfactionService
 from app.services.sla import SLAService
 
@@ -96,14 +102,257 @@ def _fetch_m365_attachments(mailbox, message_id, headers):
 
 
 # ---------------------------------------------------------------------------
+# Sincronización incremental de buzones (delta query)
+# ---------------------------------------------------------------------------
+
+def _folder_key(folder_id):
+    """Clave indexable de una carpeta: los id de Graph no caben en un índice."""
+    return hashlib.sha256(folder_id.encode('utf-8')).hexdigest()
+
+
+def _inbox_folder_id(mailbox, headers):
+    """Id de la carpeta Inbox *física* que hay detrás de una dirección."""
+    response = requests.get(
+        f'{GRAPH_BASE}/users/{quote(mailbox, safe="@")}/mailFolders/Inbox?$select=id',
+        headers=headers,
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json()['id']
+
+
+def _mailbox_targets(brands, headers):
+    """Agrupa las marcas por carpeta física: un destino a sincronizar por carpeta.
+
+    Las direcciones de soporte son alias de un mismo buzón, así que varias marcas
+    resuelven a la MISMA carpeta y hay que consultarla una sola vez. Sin agrupar,
+    cada marca ingeriría el mismo mensaje y saldrían tantos tickets como marcas
+    compartan buzón: hasta ahora lo tapaba isRead (la primera marca marcaba leído
+    y las demás ya no lo veían), y al dejar de usarlo la agrupación pasa a ser lo
+    que sostiene la atribución de marca. Se mantiene el criterio anterior — la
+    primera marca por id —, que sigue siendo arbitrario y sigue pendiente de una
+    decisión de negocio (ver CLAUDE.md).
+    """
+    targets = {}
+    for brand in brands:
+        mailbox = brand.support_email
+        try:
+            folder_id = _inbox_folder_id(mailbox, headers)
+        except Exception as exc:
+            logger.error('poll_m365 [%s]: no se pudo resolver la carpeta Inbox: %s', mailbox, exc)
+            continue
+        key = _folder_key(folder_id)
+        if key in targets:
+            targets[key]['shared_with'].append(brand.name)
+            continue
+        targets[key] = {
+            'folder_key': key,
+            'folder_id': folder_id,
+            'mailbox': mailbox,
+            'brand': brand,
+            'shared_with': [],
+        }
+    return list(targets.values())
+
+
+def _initial_delta_url(target):
+    """Primera vuelta de un cursor recién estrenado.
+
+    El filtro por fecha es imprescindible: un delta sin acotar devuelve la
+    carpeta ENTERA y se ingeriría todo el histórico del buzón. Graph solo admite
+    receivedDateTime ge/gt en delta, y codifica los parámetros dentro del token,
+    así que basta con ponerlo una vez: las vueltas siguientes lo heredan.
+    """
+    lookback = getattr(settings, 'INBOUND_DELTA_LOOKBACK_MINUTES', 60)
+    since = (timezone.now() - timedelta(minutes=lookback)).astimezone(dt_timezone.utc)
+    return (
+        f'{GRAPH_BASE}/users/{quote(target["mailbox"], safe="@")}'
+        f'/mailFolders/{quote(target["folder_id"], safe="")}/messages/delta'
+        '?$select=id,subject,from,body,receivedDateTime,conversationId,internetMessageHeaders,hasAttachments'
+        f'&$filter=receivedDateTime ge {since.strftime("%Y-%m-%dT%H:%M:%SZ")}'
+    )
+
+
+def _already_ingested(brand, message_id):
+    """Evita descargar adjuntos de algo que la deduplicación va a descartar.
+
+    Sin isRead como filtro, un mensaje ya procesado puede reaparecer en el delta
+    (cualquier actualización lo devuelve, incluido nuestro propio marcado como
+    leído). process_message lo descartaría igual, pero después de habernos traído
+    los adjuntos.
+    """
+    from app.models import InboundEmailLog
+
+    return InboundEmailLog.objects.filter(
+        brand=brand,
+        message_id=message_id,
+        status__in=(InboundEmailLog.STATUS_PROCESSED, InboundEmailLog.STATUS_DUPLICATE),
+    ).exists()
+
+
+def _ingest_message(msg, brand, mailbox, headers, mark_read):
+    """Procesa un mensaje; un fallo impide avanzar el cursor de esta vuelta."""
+    msg_id = msg['id']
+    if _already_ingested(brand, msg_id):
+        return 'skip_dup'
+
+    try:
+        attachments = (
+            _fetch_m365_attachments(mailbox, msg_id, headers)
+            if msg.get('hasAttachments')
+            else []
+        )
+        result = _process_message(msg, brand, attachments=attachments)
+        logger.info('poll_m365 [%s] %s… → %s', mailbox, msg_id[:16], result)
+    except Exception as exc:
+        logger.error('poll_m365 [%s] %s… error: %s', mailbox, msg_id[:16], exc)
+        # Con delta, avanzar tras un fallo perdería el mensaje para siempre:
+        # ya no existe el filtro de no leídos que lo devolvía en otra pasada.
+        raise
+
+    # Marcar como leído ya NO es el cursor: es cortesía para quien mire el buzón,
+    # y por eso puede apagarse en los entornos que no son dueños del buzón.
+    if mark_read:
+        try:
+            requests.patch(
+                f'{GRAPH_BASE}/users/{quote(mailbox, safe="@")}/messages/{quote(msg_id, safe="")}',
+                headers=headers,
+                json={'isRead': True},
+                timeout=10,
+            )
+        except Exception as exc:
+            logger.warning('poll_m365 [%s] mark-read failed %s…: %s', mailbox, msg_id[:16], exc)
+    return result
+
+
+class _ResyncRequired(Exception):
+    """El enlace guardado ya no sirve y hay que reiniciar la sincronización."""
+
+
+# Para entidades de Outlook el token de delta NO tiene caducidad fija: vive en una
+# caché interna de Graph y se desaloja sin aviso. Cuando pasa, la respuesta es un
+# 410 Gone o un 4xx con uno de estos códigos. Sin tratarlo, el buzón se quedaría
+# sin ingerir indefinidamente y en silencio, que es justo el fallo que este
+# cambio viene a eliminar.
+_RESYNC_ERROR_CODES = {'syncstatenotfound', 'resyncrequired', 'syncstatereset'}
+
+
+def _needs_resync(response):
+    if response.status_code == 410:
+        return True
+    if not 400 <= response.status_code < 500:
+        return False
+    try:
+        code = (response.json().get('error') or {}).get('code') or ''
+    except Exception:
+        return False
+    return code.lower() in _RESYNC_ERROR_CODES
+
+
+def _delta_round(url, target, headers, mark_read, max_pages, counter):
+    """Recorre una vuelta de delta. Devuelve el enlace con el que continuar.
+
+    Tanto el deltaLink (ronda cerrada) como el nextLink (ronda a medias por el
+    tope de páginas) son reanudables, así que los dos valen como cursor.
+    """
+    mailbox = target['mailbox']
+    link, kind = '', ''
+    for _ in range(max_pages):
+        response = requests.get(url, headers=headers, timeout=30)
+        if _needs_resync(response):
+            raise _ResyncRequired(f'HTTP {response.status_code}')
+        response.raise_for_status()
+        page = response.json()
+        for msg in page.get('value', []):
+            # Bajas y movimientos llegan como tombstones, sin cuerpo.
+            if '@removed' in msg or not msg.get('id'):
+                continue
+            counter['seen'] += 1
+            _ingest_message(msg, target['brand'], mailbox, headers, mark_read)
+
+        delta_link = page.get('@odata.deltaLink')
+        if delta_link:
+            return delta_link, 'delta'
+        next_link = page.get('@odata.nextLink')
+        if not next_link:
+            return link, kind
+        url, link, kind = next_link, next_link, 'partial'
+
+    logger.warning(
+        'poll_m365 [%s]: tope de %s páginas alcanzado; se continúa en la siguiente vuelta',
+        mailbox, max_pages,
+    )
+    return link, kind
+
+
+def _sync_mailbox(target, headers, environment):
+    """Avanza el cursor de un buzón para ESTE entorno. Devuelve mensajes vistos."""
+    from app.models import MailboxSyncCursor
+
+    cursor, _ = MailboxSyncCursor.objects.get_or_create(
+        environment=environment,
+        folder_key=target['folder_key'],
+        defaults={'folder_id': target['folder_id'], 'mailbox': target['mailbox']},
+    )
+    mailbox = target['mailbox']
+    max_pages = getattr(settings, 'INBOUND_DELTA_MAX_PAGES', 20)
+    mark_read = getattr(settings, 'INBOUND_MARK_READ_ENABLED', True)
+    counter = {'seen': 0}
+
+    try:
+        try:
+            link, kind = _delta_round(
+                cursor.delta_link or _initial_delta_url(target),
+                target, headers, mark_read, max_pages, counter,
+            )
+        except _ResyncRequired as exc:
+            logger.warning(
+                'poll_m365 [%s]: cursor caducado (%s); se reinicia la sincronización', mailbox, exc,
+            )
+            record_metric('email.inbound.delta_resync',
+                          labels={'mailbox': mailbox, 'environment': environment})
+            cursor.delta_link = ''
+            link, kind = _delta_round(
+                _initial_delta_url(target), target, headers, mark_read, max_pages, counter,
+            )
+    except Exception as exc:
+        # El cursor NO avanza: la próxima vuelta reintenta desde el último enlace
+        # bueno. La reentrega es inocua — la absorbe InboundEmailLog.
+        logger.error('poll_m365 [%s]: Graph delta error: %s', mailbox, exc)
+        cursor.last_result = 'error'
+        cursor.last_error = str(exc)[:2000]
+        cursor.save(update_fields=['last_result', 'last_error', 'updated_at'])
+        record_metric('email.inbound.delta_failed',
+                      labels={'mailbox': mailbox, 'environment': environment})
+        return counter['seen']
+
+    cursor.folder_id = target['folder_id']
+    cursor.mailbox = mailbox
+    if link:
+        cursor.delta_link = link
+        cursor.link_kind = kind
+    cursor.last_synced_at = timezone.now()
+    cursor.last_result = kind or 'empty'
+    cursor.last_error = None
+    cursor.last_message_count = counter['seen']
+    cursor.save()
+    return counter['seen']
+
+
+# ---------------------------------------------------------------------------
 # Celery tasks
 # ---------------------------------------------------------------------------
 
 @shared_task(name='app.tasks.poll_m365_mailboxes')
 def poll_m365_mailboxes():
+    """Ingesta incremental de los buzones M365 configurados.
+
+    Cada entorno lleva su propio cursor (MailboxSyncCursor), así que varios
+    entornos pueden leer el mismo buzón sin quitarse el correo unos a otros.
+    """
     from app.models import Brand
 
-    brands = Brand.objects.filter(mailbox_type='m365').exclude(support_email='')
+    brands = Brand.objects.filter(mailbox_type='m365').exclude(support_email='').order_by('id')
     if not brands.exists():
         logger.info('poll_m365: no brands with M365 mailbox configured')
         return 'no_brands'
@@ -112,53 +361,29 @@ def poll_m365_mailboxes():
         token = _get_graph_token()
     except Exception as exc:
         logger.error('poll_m365: token acquisition failed: %s', exc)
-        return
+        return 'token_error'
 
     headers = {
         'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json',
     }
-
-    for brand in brands:
-        mailbox = brand.support_email
-        url = (
-            f'{GRAPH_BASE}/users/{mailbox}/mailFolders/Inbox/messages'
-            '?$filter=isRead eq false'
-            '&$select=id,subject,from,body,receivedDateTime,conversationId,internetMessageHeaders,hasAttachments'
-            '&$top=50'
-            '&$orderby=receivedDateTime asc'
-        )
+    environment = getattr(settings, 'ENVIRONMENT_NAME', 'local')
+    seen = 0
+    for target in _mailbox_targets(brands, headers):
+        if target['shared_with']:
+            logger.info(
+                'poll_m365 [%s]: buzón compartido con %s; se ingiere una sola vez como %s',
+                target['mailbox'], ', '.join(target['shared_with']), target['brand'].name,
+            )
         try:
-            resp = requests.get(url, headers=headers, timeout=30)
-            resp.raise_for_status()
-        except Exception as exc:
-            logger.error('poll_m365 [%s]: Graph read error: %s', mailbox, exc)
-            continue
-
-        for msg in resp.json().get('value', []):
-            msg_id = msg['id']
-            try:
-                attachments = (
-                    _fetch_m365_attachments(mailbox, msg_id, headers)
-                    if msg.get('hasAttachments')
-                    else []
-                )
-                result = _process_message(msg, brand, attachments=attachments)
-                logger.info('poll_m365 [%s] %s… → %s', mailbox, msg_id[:16], result)
-            except Exception as exc:
-                logger.error('poll_m365 [%s] %s… error: %s', mailbox, msg_id[:16], exc)
-                continue
-
-            # Mark as read (best-effort; even on skip_dup so we don't keep seeing it)
-            try:
-                requests.patch(
-                    f'{GRAPH_BASE}/users/{mailbox}/messages/{msg_id}',
-                    headers=headers,
-                    json={'isRead': True},
-                    timeout=10,
-                )
-            except Exception as exc:
-                logger.warning('poll_m365 [%s] mark-read failed %s…: %s', mailbox, msg_id[:16], exc)
+            seen += _sync_mailbox(target, headers, environment)
+        except Exception:
+            # Un buzón roto (incluida su propia fila de cursor) no puede dejar sin
+            # ingerir a los demás: el bucle por marcas de antes hacía `continue`.
+            logger.exception('poll_m365 [%s]: sincronización abortada', target['mailbox'])
+            record_metric('email.inbound.sync_aborted',
+                          labels={'mailbox': target['mailbox'], 'environment': environment})
+    return f'{seen} message(s)'
 
 
 @shared_task(name='app.tasks.cleanup_orphan_attachments')
@@ -173,6 +398,21 @@ def cleanup_orphan_attachments():
             break
     logger.info("attachment_orphan_cleanup_completed", extra=totals)
     return totals
+
+
+@shared_task(name='app.tasks.refresh_reporting_facts')
+def refresh_reporting_facts():
+    """Mantiene al día las tablas de hechos que alimentan /reporting/.
+
+    Es lo que permite que un informe no reconstruya el histórico en cada
+    petición: aquí se paga el coste de releer auditorías, una sola vez por
+    ticket y fuera del pool web.
+
+    La selección es autorreparable (compara updated_at contra el de los hechos),
+    así que una pasada perdida se recupera en la siguiente sin estado adicional.
+    """
+    processed = refresh_stale_facts()
+    return f'facts_refreshed: {processed}'
 
 
 @shared_task(name='app.tasks.auto_assign_unassigned_tickets')

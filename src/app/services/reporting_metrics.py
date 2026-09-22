@@ -1,16 +1,23 @@
 """Métricas nativas de TicketFlow, organizadas por zonas de negocio."""
 
+import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from statistics import median
 
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import Case, Count, IntegerField, Min, OuterRef, Q, Subquery, When
+from django.db.models.functions import ExtractHour, ExtractWeekDay, Lower, TruncDate, TruncMonth, Trim
 from django.utils import timezone
 
-from app.models import Comment, ProductLine, SatisfactionRating, Ticket, TicketEvent
-from app.permissions import is_agent
+from app.models import (
+    Comment, ProductLine, ReportingFactState, SatisfactionRating, Ticket,
+    TicketEvent, TicketFact, TicketStatusInterval, User,
+)
+from app.permissions import AGENT_ROLE_NAMES, is_agent
 
+
+logger = logging.getLogger(__name__)
 
 UNSOLVED_STATUSES = ("open", "pending")
 SOLVED_STATUSES = ("resolved", "closed")
@@ -23,6 +30,10 @@ LIFECYCLE_EVENT_NAMES = (
     "assignee_id", "assignee", "asignado",
     "group_id", "group", "grupo",
 )
+
+# Zona legacy (sin ?section=): con muestras minusculas el porcentaje de CSAT
+# por agente es ruido puro, asi que por debajo de este minimo no se publica.
+_LEGACY_SATISFACTION_MIN_SAMPLE = 3
 
 STATUS_ALIASES = {
     "new": "open",
@@ -38,6 +49,13 @@ STATUS_ALIASES = {
 
 DIMENSION_LABELS = {
     "product": "Producto / servicio",
+}
+
+# Ruta ORM y etiqueta por defecto de cada dimension, para poder agruparla en SQL
+# desde una tabla relacionada en vez de recorrer tickets en Python. Tiene que
+# coincidir con lo que devuelve _dimension_value.
+DIMENSION_FIELDS = {
+    "product": ("ticket__product_line__name", "Sin clasificar"),
 }
 
 
@@ -73,23 +91,32 @@ class ReportFilters:
             ticket_type=(params.get("type") or "").strip(),
         )
 
-    def apply(self, qs, include_assignee=True):
+    def apply(self, qs, include_assignee=True, prefix=""):
+        """Aplica los filtros a un queryset de tickets.
+
+        ``prefix`` permite filtrar desde una tabla relacionada (``"ticket__"``
+        sobre comentarios o eventos) sin duplicar las reglas: asi la definicion
+        de "que entra en el informe" sigue viviendo en un unico sitio.
+        """
+        def field(name):
+            return f"{prefix}{name}"
+
         if self.unclassified_product:
-            qs = qs.filter(product_line__isnull=True)
+            qs = qs.filter(**{field("product_line__isnull"): True})
         elif self.product_line_id:
-            qs = qs.filter(product_line_id=self.product_line_id)
+            qs = qs.filter(**{field("product_line_id"): self.product_line_id})
         if self.group_id:
-            qs = qs.filter(assigned_group_id=self.group_id)
+            qs = qs.filter(**{field("assigned_group_id"): self.group_id})
         if include_assignee and self.assignee_id:
-            qs = qs.filter(assignee_id=self.assignee_id)
+            qs = qs.filter(**{field("assignee_id"): self.assignee_id})
         if self.organization_id:
-            qs = qs.filter(requester__organization_id=self.organization_id)
+            qs = qs.filter(**{field("requester__organization_id"): self.organization_id})
         if self.channel:
-            qs = qs.filter(channel=self.channel)
+            qs = qs.filter(**{field("channel"): self.channel})
         if self.priority:
-            qs = qs.filter(priority=self.priority)
+            qs = qs.filter(**{field("priority"): self.priority})
         if self.ticket_type:
-            qs = qs.filter(type=self.ticket_type)
+            qs = qs.filter(**{field("type"): self.ticket_type})
         return qs
 
     def cache_fragment(self):
@@ -113,6 +140,32 @@ def live_ticket_queryset(filters):
         "description", "requester__notes", "assignee__notes", "created_by__notes",
         "assigned_group__description", "assignee__role__description",
         "created_by__role__description",
+    )
+
+
+def live_ticket_filter(qs, filters, prefix="ticket__"):
+    """Acota un queryset relacionado (comentarios, eventos) a los tickets vivos.
+
+    Equivalente a ``live_ticket_queryset`` pero atravesando la relacion, para
+    poder filtrar por fecha sobre la tabla pequena en vez de resolver primero un
+    ``IN`` con la tabla de tickets entera.
+    """
+    qs = qs.filter(**{f"{prefix}is_deleted": False, f"{prefix}merged_into__isnull": True})
+    return filters.apply(qs, prefix=prefix)
+
+
+def agent_user_ids():
+    """Ids de los usuarios con rol de agente, resueltos en una sola consulta.
+
+    ``is_agent()`` mira ``is_superuser`` y el nombre del rol normalizado. Hacerlo
+    fila a fila sobre comentarios o eventos multiplicaba las consultas; aqui se
+    replica la misma regla en SQL (``Lower``+``Trim`` para igualar a
+    ``role_name()``) y se compara despues contra un ``set``.
+    """
+    return set(
+        User.objects.annotate(normalized_role=Lower(Trim("role__role_name")))
+        .filter(Q(is_superuser=True) | Q(normalized_role__in=AGENT_ROLE_NAMES))
+        .values_list("id", flat=True)
     )
 
 
@@ -203,6 +256,9 @@ def _ticket_events(ticket_ids, field_names=None, include_actor=True):
         rows = rows.select_related("actor", "actor__role").only(
             "id", "ticket_id", "actor_id", "field_name", "old_value", "new_value",
             "created_at", "actor__id", "actor__name", "actor__email",
+            # is_superuser lo lee is_agent(): sin el, cada acceso dispara una
+            # carga diferida, una consulta por fila.
+            "actor__is_superuser",
             "actor__role_id", "actor__role__role_name",
         )
     else:
@@ -225,8 +281,10 @@ def _agent_comments(ticket_ids):
         .select_related("user", "user__role")
         .only(
             "id", "ticket_id", "user_id", "created_at", "is_public",
-            "user__id", "user__name", "user__email", "user__role_id",
-            "user__role__role_name",
+            "user__id", "user__name", "user__email",
+            # Ver la nota de _ticket_events: is_agent() necesita is_superuser.
+            "user__is_superuser",
+            "user__role_id", "user__role__role_name",
         )
         .order_by("created_at", "id")
     )
@@ -236,11 +294,24 @@ def _agent_comments(ticket_ids):
     return grouped
 
 
-def _lifecycle_facts(tickets, now=None):
+def _requester_wait_hours(seconds, open_since, now):
+    """Cierra el tramo vivo del reloj de espera contra el ``now`` del informe."""
+    total = float(seconds or 0.0)
+    if open_since and now and now >= open_since:
+        total += (now - open_since).total_seconds()
+    return round(total / 3600.0, 4)
+
+
+def _lifecycle_facts_from_source(tickets, now=None):
     """Reconstruye los hechos por ticket desde comentarios y eventos.
 
     Los imports historicos usaban nombres de campo en castellano; _event_kind y
     _status los convierten en lectura sin alterar los registros originales.
+
+    Este es el camino **caro**: relee toda la auditoria de cada ticket. Ya no lo
+    usan las vistas, solo ``app.services.reporting_facts`` para poblar
+    ``TicketFact`` fuera del ciclo de peticion, y ``_lifecycle_facts`` como
+    respaldo puntual para tickets que aun no tienen hechos calculados.
     """
     now = now or timezone.now()
     ids = [ticket.id for ticket in tickets]
@@ -309,8 +380,17 @@ def _lifecycle_facts(tickets, now=None):
                 requester_wait_seconds += (event.created_at - cursor).total_seconds()
             cursor = event.created_at
             current_status = _status(event.new_value) or current_status
-        if cursor and stop_at >= cursor and current_status == "open":
-            requester_wait_seconds += (stop_at - cursor).total_seconds()
+        # El reloj de espera sigue corriendo mientras el ticket esta abierto, asi
+        # que no se puede congelar en un numero. Se separa lo ya consolidado del
+        # tramo vivo: TicketFact guarda ambos y cada informe cierra el tramo
+        # contra su propio ``now``, sin recalcular nada.
+        wait_open_since = None
+        if cursor and current_status == "open":
+            if full_resolution_at:
+                if stop_at >= cursor:
+                    requester_wait_seconds += (stop_at - cursor).total_seconds()
+            else:
+                wait_open_since = cursor
 
         facts[ticket.id] = {
             "ticket": ticket,
@@ -325,7 +405,11 @@ def _lifecycle_facts(tickets, now=None):
             "full_resolution_hours": _hours(ticket.created_at, full_resolution_at),
             "last_assignment_at": last_assignment_at,
             "assignment_to_resolution_hours": _hours(last_assignment_at, full_resolution_at),
-            "requester_wait_hours": round(requester_wait_seconds / 3600.0, 4),
+            "requester_wait_hours": _requester_wait_hours(
+                requester_wait_seconds, wait_open_since, stop_at
+            ),
+            "requester_wait_seconds": requester_wait_seconds,
+            "requester_wait_open_since": wait_open_since,
             "assignee_stations": len(assignees),
             "group_stations": len(groups),
             "reopens": reopen_count,
@@ -335,18 +419,154 @@ def _lifecycle_facts(tickets, now=None):
     return facts
 
 
+def _status_timeline(ticket, events):
+    """Convierte la auditoria de estado de un ticket en tramos continuos.
+
+    Reproduce exactamente la maquina de estados de ``_state_at`` — respaldos para
+    imports antiguos incluidos — pero recorriendola una sola vez de principio a
+    fin en lugar de por cada corte. El resultado se persiste en
+    ``TicketStatusInterval``, donde «cuantos tickets habia abiertos el dia D»
+    pasa a ser un rango indexado.
+
+    Devuelve una lista de ``(estado, inicio, fin)`` con ``fin`` a ``None`` en el
+    tramo vigente. Los tramos son contiguos y no se solapan.
+    """
+    if not ticket.created_at:
+        return []
+
+    created_events = [e for e in events if _event_kind(e.field_name) == "created"]
+    status_events = [e for e in events if _event_kind(e.field_name) == "status"]
+    created_state = _status(created_events[0].new_value) if created_events else ""
+
+    points = []  # (instante en que empieza a regir, estado)
+    if status_events:
+        state = created_state or _status(status_events[0].old_value) or "open"
+        points.append((ticket.created_at, state))
+        for event in status_events:
+            state = _status(event.new_value) or state
+            points.append((max(event.created_at, ticket.created_at), state))
+    else:
+        # Sin auditorias solo quedan las marcas del propio ticket. _state_at
+        # ignora aqui el estado del evento 'created' y da por abierto todo lo
+        # anterior a la resolucion; se replica tal cual para no alterar series
+        # historicas ya publicadas.
+        solved_at = ticket.resolved_at or ticket.closed_at
+        if solved_at:
+            points.append((ticket.created_at, "open"))
+            solved_state = ticket.status if ticket.status in SOLVED_STATUSES else "resolved"
+            points.append((max(solved_at, ticket.created_at), _status(solved_state)))
+        else:
+            points.append((ticket.created_at, created_state or "open"))
+            # El respaldo de _state_at solo proyecta Ticket.status a partir de
+            # hoy: antes de eso no hay ninguna prueba de que ya estuviera en ese
+            # estado.
+            today_start = timezone.make_aware(
+                datetime.combine(timezone.localdate(), time.min),
+                timezone.get_current_timezone(),
+            )
+            points.append((max(today_start, ticket.created_at), _status(ticket.status)))
+
+    intervals = []
+    for index, (started_at, state) in enumerate(points):
+        ended_at = points[index + 1][0] if index + 1 < len(points) else None
+        if ended_at is not None and ended_at <= started_at:
+            continue  # tramo de duracion cero: lo absorbe el siguiente
+        if intervals and intervals[-1][0] == state:
+            # Mismo estado que el tramo anterior: se fusionan para no inflar la tabla.
+            intervals[-1] = (state, intervals[-1][1], ended_at)
+            continue
+        intervals.append((state, started_at, ended_at))
+    return intervals
+
+
+def _fact_rows(ticket_ids):
+    """Lee TicketFact para los tickets indicados, en una sola consulta."""
+    if not ticket_ids:
+        return {}
+    return {
+        row.ticket_id: row
+        for row in TicketFact.objects.filter(ticket_id__in=ticket_ids)
+    }
+
+
+def _lifecycle_facts(tickets, now=None):
+    """Hechos por ticket leidos de ``TicketFact``.
+
+    Misma forma de dato que ``_lifecycle_facts_from_source`` — las zonas de
+    reporting no distinguen de donde vienen — pero sin releer una sola auditoria:
+    una consulta por lote en lugar de un replay por ticket.
+
+    Los tickets sin fila de hechos (creados entre dos pasadas del beat, o un
+    despliegue antes del backfill) se calculan al vuelo para no publicar un
+    informe incompleto. Es un camino de respaldo acotado: si se vuelve habitual,
+    el aviso de log indica que la tarea de refresco no esta al dia.
+    """
+    now = now or timezone.now()
+    if not tickets:
+        return {}
+
+    rows = _fact_rows([ticket.id for ticket in tickets])
+    facts = {}
+    missing = []
+    for ticket in tickets:
+        row = rows.get(ticket.id)
+        if row is None:
+            missing.append(ticket)
+            continue
+        facts[ticket.id] = {
+            "ticket": ticket,
+            "agent_replies": row.agent_replies,
+            "first_reply_at": row.first_reply_at,
+            "first_reply_hours": row.first_reply_hours,
+            "first_assignment_at": row.first_assignment_at,
+            "first_assignment_hours": row.first_assignment_hours,
+            "first_resolution_at": row.first_resolution_at,
+            "first_resolution_hours": row.first_resolution_hours,
+            "full_resolution_at": row.full_resolution_at,
+            "full_resolution_hours": row.full_resolution_hours,
+            "last_assignment_at": row.last_assignment_at,
+            "assignment_to_resolution_hours": row.assignment_to_resolution_hours,
+            "requester_wait_hours": _requester_wait_hours(
+                row.requester_wait_seconds, row.requester_wait_open_since, now
+            ),
+            "assignee_stations": row.assignee_stations,
+            "group_stations": row.group_stations,
+            "reopens": row.reopens,
+        }
+
+    if missing:
+        logger.warning(
+            "reporting_facts_missing", extra={"tickets": len(missing)},
+        )
+        facts.update(_lifecycle_facts_from_source(missing, now=now))
+    return facts
+
+
 def _solved_tickets(qs, start_dt, end_dt):
-    return list(
+    """Tickets resueltos dentro del rango.
+
+    Antes era un ``DISTINCT`` sobre el ``JOIN`` con la auditoria arrastrando los
+    siete ``select_related`` de ``live_ticket_queryset``: MySQL tenia que
+    deduplicar filas enormes. Ahora se resuelven primero los ids — la consulta de
+    eventos va acotada por fecha y apoyada en ``app_evt_field_time`` — y solo
+    despues se materializan los tickets que de verdad entran en el informe.
+    """
+    ids = set(
         qs.filter(
             Q(resolved_at__range=(start_dt, end_dt))
             | Q(closed_at__range=(start_dt, end_dt))
-            | Q(
-                events__field_name__in=STATUS_EVENT_NAMES,
-                events__new_value__in=("resolved", "closed", "solved"),
-                events__created_at__range=(start_dt, end_dt),
-            )
-        ).distinct()
+        ).values_list("id", flat=True)
     )
+    ids.update(
+        TicketEvent.objects.filter(
+            field_name__in=STATUS_EVENT_NAMES,
+            new_value__in=("resolved", "closed", "solved"),
+            created_at__range=(start_dt, end_dt),
+        ).values_list("ticket_id", flat=True)
+    )
+    if not ids:
+        return []
+    return list(qs.filter(id__in=ids))
 
 
 def _kpi(key, label, value, unit="", note=""):
@@ -453,9 +673,15 @@ def build_tickets(filters, date_from, date_to, start_dt, end_dt):
             created_at__date__lt=current_month_start,
         )
     )
-    for created_at in history_qs.values_list("created_at", flat=True):
-        local = timezone.localtime(created_at)
-        month_rows[local.year][local.month] += 1
+    # Cinco anos de tickets no se recorren fila a fila: el agrupado por mes lo
+    # hace la base de datos y solo vuelven los contadores.
+    for row in (
+        history_qs.annotate(month=TruncMonth("created_at"))
+        .values("month").annotate(n=Count("id"))
+    ):
+        local = _local_day(row["month"])
+        if local:
+            month_rows[local.year][local.month] += row["n"]
 
     payload["charts"] = {
         "created_by_hour": {
@@ -694,28 +920,49 @@ def build_assignee_activity(filters, date_from, date_to, start_dt, end_dt):
 
 def build_agent_updates(filters, date_from, date_to, start_dt, end_dt):
     base = live_ticket_queryset(filters)
-    ticket_ids = base.values_list("id", flat=True)
-
+    # Antes se resolvia `ticket_id__in=<toda la tabla de tickets>` y se descartaba
+    # despues en Python quien no era agente. Ahora ambas condiciones van en SQL:
+    # el rango de fechas es el filtro selectivo y la pertenencia a los tickets
+    # vivos se atraviesa por la relacion, sin subconsulta sobre el historico.
+    agent_ids = agent_user_ids()
     comments = list(
-        Comment.objects.filter(ticket_id__in=ticket_ids, created_at__range=(start_dt, end_dt))
-        .select_related("user", "user__role", "ticket")
+        live_ticket_filter(
+            Comment.objects.filter(
+                created_at__range=(start_dt, end_dt), user_id__in=agent_ids,
+            ),
+            filters,
+        )
+        .select_related("user")
+        .only(
+            "id", "ticket_id", "user_id", "created_at", "is_public",
+            "user__id", "user__name", "user__email",
+        )
         .order_by("created_at", "id")
     )
-    comments = [comment for comment in comments if is_agent(comment.user)]
-    events = list(
-        TicketEvent.objects.filter(ticket_id__in=ticket_ids, created_at__range=(start_dt, end_dt))
-        .select_related("actor", "actor__role", "ticket")
+    agent_events = list(
+        live_ticket_filter(
+            TicketEvent.objects.filter(
+                created_at__range=(start_dt, end_dt), actor_id__in=agent_ids,
+            ),
+            filters,
+        )
+        .select_related("actor")
+        .only(
+            # old_value no se usa aqui y las auditorias de descripcion pesan
+            # varios KB por fila: no se trae.
+            "id", "ticket_id", "actor_id", "field_name", "new_value", "created_at",
+            "actor__id", "actor__name", "actor__email",
+        )
         .order_by("created_at", "id")
     )
-    agent_events = [event for event in events if event.actor_id and is_agent(event.actor)]
     solved_events = [
         event for event in agent_events
         if _event_kind(event.field_name) == "status" and _status(event.new_value) in SOLVED_STATUSES
     ]
-    created_tickets = [
-        ticket for ticket in base.filter(created_at__range=(start_dt, end_dt))
-        if ticket.created_by_id and is_agent(ticket.created_by)
-    ]
+    solved_event_ids = {event.id for event in solved_events}
+    created_tickets = list(
+        base.filter(created_at__range=(start_dt, end_dt), created_by_id__in=agent_ids)
+    )
 
     public_comments = [comment for comment in comments if comment.is_public]
     internal_comments = [comment for comment in comments if not comment.is_public]
@@ -752,7 +999,7 @@ def build_agent_updates(filters, date_from, date_to, start_dt, end_dt):
     for event in agent_events:
         agent = event.actor.name or event.actor.email
         by_agent[agent]["events"] += 1
-        if event in solved_events:
+        if event.id in solved_event_ids:
             by_agent[agent]["solved"].add(event.ticket_id)
     for comment in comments:
         agent = comment.user.name or comment.user.email
@@ -809,9 +1056,7 @@ def build_agent_updates(filters, date_from, date_to, start_dt, end_dt):
 
 
 def build_unsolved(filters, date_from, date_to, start_dt, end_dt):
-    candidates = list(live_ticket_queryset(filters).filter(created_at__lte=end_dt))
-    states = _states_at(candidates, end_dt)
-    tickets = [ticket for ticket in candidates if states[ticket.id] in UNSOLVED_STATUSES]
+    tickets, states = _unsolved_at(live_ticket_queryset(filters), end_dt)
     facts = _lifecycle_facts(tickets)
     now = end_dt
     age_hours = [_hours(ticket.created_at, now) for ticket in tickets]
@@ -884,6 +1129,13 @@ def build_unsolved(filters, date_from, date_to, start_dt, end_dt):
 
 
 def _state_at(ticket, events, sample_at):
+    """Estado de un ticket en un instante, reconstruido desde su auditoria.
+
+    Es la definicion de referencia del estado historico. Ya no la usa ninguna
+    vista — los informes leen los tramos de ``TicketStatusInterval`` — pero se
+    conserva a proposito: ``_status_timeline`` se valida comparandose contra ella
+    corte a corte, asi que es la especificacion ejecutable de esa semantica.
+    """
     if not ticket.created_at or ticket.created_at > sample_at:
         return None
     relevant = [event for event in events if event.created_at <= sample_at]
@@ -990,44 +1242,110 @@ def _states_at(tickets, sample_at):
     return states
 
 
-def _states_at_samples(ticket, events, samples):
-    """Devuelve varios cortes de un ticket aplicando cada evento una sola vez."""
-    created_events = [event for event in events if _event_kind(event.field_name) == "created"]
-    status_events = [event for event in events if _event_kind(event.field_name) == "status"]
-    first_created = created_events[0] if created_events else None
-    status_index = 0
-    current_state = ""
-    seen_status = False
+def _intervals_covering(at):
+    """Tramos de estado vigentes en un instante dado."""
+    return TicketStatusInterval.objects.filter(started_at__lte=at).filter(
+        Q(ended_at__isnull=True) | Q(ended_at__gt=at)
+    )
 
-    for sample_at in samples:
-        if not ticket.created_at or ticket.created_at > sample_at:
-            yield None
-            continue
-        created_state = ""
-        if first_created and first_created.created_at <= sample_at:
-            created_state = _status(first_created.new_value)
-        while status_index < len(status_events) and status_events[status_index].created_at <= sample_at:
-            event = status_events[status_index]
-            if not seen_status:
-                current_state = created_state or _status(event.old_value) or "open"
-            current_state = _status(event.new_value) or current_state
-            seen_status = True
-            status_index += 1
 
-        state = current_state if seen_status else (created_state or "open")
-        if not seen_status:
-            solved_at = ticket.resolved_at or ticket.closed_at
-            if solved_at and sample_at >= solved_at:
-                state = ticket.status if ticket.status in SOLVED_STATUSES else "resolved"
-            elif solved_at and sample_at < solved_at:
-                state = "open"
-            elif sample_at.date() >= timezone.localdate():
-                state = ticket.status
-        yield state
+def _facts_available():
+    """¿Cubren ya las tablas de hechos todo el historico?
+
+    Publicar una cola calculada a medias seria un dato falso, no un informe
+    lento, asi que no basta con que existan filas: hace falta la marca explicita
+    que deja una pasada *completa* del refresco. Hasta entonces se reconstruye
+    desde la auditoria. Es una lectura de una tabla de una fila.
+    """
+    return ReportingFactState.objects.filter(backfilled_at__isnull=False).exists()
+
+
+def _unsolved_at(base_qs, at):
+    """Tickets sin resolver en un instante, con su estado normalizado.
+
+    Sustituye al par «materializar todo el historico + reconstruir el estado de
+    cada ticket»: el coste pasa a ser proporcional a la cola viva en ese momento,
+    que es justo lo que el informe ensena.
+    """
+    if not _facts_available():
+        candidates = list(base_qs.filter(created_at__lte=at))
+        states = _states_at(candidates, at)
+        return [t for t in candidates if states[t.id] in UNSOLVED_STATUSES], states
+
+    covering = _intervals_covering(at).filter(status__in=UNSOLVED_STATUSES)
+    tickets = list(base_qs.filter(id__in=covering.values("ticket_id")))
+    if not tickets:
+        return [], {}
+    states = dict(
+        covering.filter(ticket_id__in=[ticket.id for ticket in tickets])
+        .values_list("ticket_id", "status")
+    )
+    return tickets, states
 
 
 def _sample_at(day):
     return timezone.make_aware(datetime.combine(day, time.max), timezone.get_current_timezone())
+
+
+def _backlog_samples(filters, days):
+    """Cola viva en cada corte: ``(dia, estado, etiqueta de producto, n)``.
+
+    Con los tramos ya calculados es un agregado indexado por corte, resuelto
+    entero en la base de datos. Antes habia que materializar todos los tickets
+    que han existido nunca, cargar sus auditorias y replicar la maquina de
+    estados una vez por corte: el coste de esta zona no dependia del rango
+    pedido sino del tamano del historico.
+
+    Mientras no se haya ejecutado el backfill se reconstruyen los tramos al
+    vuelo — con la misma funcion que los persiste, no con una copia de la
+    logica — porque publicar una cola vacia seria un dato falso, no un informe
+    lento.
+    """
+    product_field, product_default = DIMENSION_FIELDS["product"]
+
+    sample_points = [(day, _sample_at(day)) for day in days]
+
+    if _facts_available():
+        # Una sola consulta para los 42 cortes: basta con los tramos que solapan
+        # la ventana del grafico. Lo que vuelve es exactamente la cola que el
+        # grafico dibuja mas la rotacion del periodo, no el historico entero.
+        oldest_at = _sample_at(min(days))
+        newest_at = _sample_at(max(days))
+        rows = live_ticket_filter(
+            TicketStatusInterval.objects.filter(
+                status__in=UNSOLVED_STATUSES, started_at__lte=newest_at,
+            ).filter(Q(ended_at__isnull=True) | Q(ended_at__gt=oldest_at)),
+            filters,
+        ).values("status", "started_at", "ended_at", product_field)
+        for row in rows:
+            state = _status(row["status"])
+            label = row[product_field] or product_default
+            for day, at in sample_points:
+                if row["started_at"] <= at and (row["ended_at"] is None or at < row["ended_at"]):
+                    yield day, state, label, 1
+        return
+
+    tickets = list(
+        live_ticket_queryset(filters).filter(created_at__lte=_sample_at(max(days)))
+    )
+    events = _ticket_events(
+        [ticket.id for ticket in tickets],
+        field_names=STATE_EVENT_NAMES,
+        include_actor=False,
+    )
+    timelines = {
+        ticket.id: _status_timeline(ticket, events.get(ticket.id, []))
+        for ticket in tickets
+    }
+    for day, at in sample_points:
+        for ticket in tickets:
+            state = next(
+                (state for state, started_at, ended_at in timelines[ticket.id]
+                 if started_at <= at and (ended_at is None or at < ended_at)),
+                None,
+            )
+            if state in UNSOLVED_STATUSES:
+                yield day, state, _dimension_value(ticket, "product"), 1
 
 
 def build_backlog(filters, date_from, date_to, start_dt, end_dt):
@@ -1036,43 +1354,20 @@ def build_backlog(filters, date_from, date_to, start_dt, end_dt):
     weekly_days = [anchor - timedelta(days=7 * offset) for offset in reversed(range(12))]
     oldest = min(daily_days + weekly_days)
 
-    tickets = list(live_ticket_queryset(filters).filter(created_at__lte=_sample_at(anchor)))
-    events = _ticket_events(
-        [ticket.id for ticket in tickets],
-        field_names=STATE_EVENT_NAMES,
-        include_actor=False,
-    )
-
-    # Guardamos contadores, no listas completas de tickets por cada uno de los
-    # 42 cortes. En un histórico grande esto evita multiplicar la memoria por
-    # el número de puntos del gráfico.
-    sample_days = sorted(set(daily_days + weekly_days))
-    sample_datetimes = [_sample_at(day) for day in sample_days]
-    daily_counts = {}
-    weekly_counts = {}
-    weekly_dimensions = {}
     daily_day_set = set(daily_days)
     weekly_day_set = set(weekly_days)
-    for day in sample_days:
+    daily_counts = {day: Counter() for day in daily_days}
+    weekly_counts = {day: Counter() for day in weekly_days}
+    weekly_dimensions = {
+        day: {key: Counter() for key in DIMENSION_LABELS} for day in weekly_days
+    }
+
+    for day, state, label, count in _backlog_samples(filters, sorted(daily_day_set | weekly_day_set)):
         if day in daily_day_set:
-            daily_counts[day] = Counter()
+            daily_counts[day][state] += count
         if day in weekly_day_set:
-            weekly_counts[day] = Counter()
-            weekly_dimensions[day] = {key: Counter() for key in DIMENSION_LABELS}
-    for ticket in tickets:
-        ticket_events = events.get(ticket.id, [])
-        for day, state in zip(
-            sample_days,
-            _states_at_samples(ticket, ticket_events, sample_datetimes),
-        ):
-            if state not in UNSOLVED_STATUSES:
-                continue
-            if day in daily_day_set:
-                daily_counts[day][state] += 1
-            if day in weekly_day_set:
-                weekly_counts[day][state] += 1
-                for key in DIMENSION_LABELS:
-                    weekly_dimensions[day][key][_dimension_value(ticket, key)] += 1
+            weekly_counts[day][state] += count
+            weekly_dimensions[day]["product"][label] += count
 
     dimensions = {}
     for key in DIMENSION_LABELS:
@@ -1184,21 +1479,27 @@ def build_satisfaction(filters, date_from, date_to, start_dt, end_dt):
         Q(resolved_at__date__range=(month_start, anchor))
         | Q(closed_at__date__range=(month_start, anchor))
     )
-    history_tickets = list(history_base)
-    history_by_id = {ticket.id: ticket for ticket in history_tickets}
-    history_ratings = list(
-        SatisfactionRating.objects.filter(
-            ticket_id__in=history_by_id.keys(), created_at__gte=history_start, created_at__lte=end_dt
-        )
-        .order_by("created_at", "id")
-    ) if history_by_id else []
+    # history_base solo servia para acotar las valoraciones, asi que se queda en
+    # subconsulta en vez de traerse un ano entero de tickets a memoria, y el
+    # recuento por mes lo hace la base de datos.
     monthly = defaultdict(lambda: {"good": 0, "bad": 0, "surveyed": 0})
-    for rating in history_ratings:
-        month = _month_key(rating.created_at)
-        if rating.score in ("offered", "good", "bad"):
-            monthly[month]["surveyed"] += 1
-        if rating.score in ("good", "bad"):
-            monthly[month][rating.score] += 1
+    history_ratings = SatisfactionRating.objects.filter(
+        ticket_id__in=history_base.values("id"),
+        created_at__gte=history_start,
+        created_at__lte=end_dt,
+        score__in=("offered", "good", "bad"),
+    )
+    for row in (
+        history_ratings.annotate(month=TruncMonth("created_at"))
+        .values("month", "score").annotate(n=Count("id"))
+    ):
+        day = _local_day(row["month"])
+        if not day:
+            continue
+        month = f"{day.year:04d}-{day.month:02d}"
+        monthly[month]["surveyed"] += row["n"]
+        if row["score"] in ("good", "bad"):
+            monthly[month][row["score"]] += row["n"]
 
     payload["charts"] = {
         "good_bad_comments": [
@@ -1241,6 +1542,43 @@ def build_satisfaction(filters, date_from, date_to, start_dt, end_dt):
     return payload
 
 
+# Ventana historica de las series mensuales de SLA. El grafico corta a 12 meses,
+# asi que con algo mas de un ano de margen no se pierde ningun punto visible.
+_SLA_HISTORY_DAYS = 400
+
+
+def _sla_candidates(base_qs, window_start, end_dt):
+    """Tickets que pueden aportar una instancia de SLA a la ventana pedida.
+
+    Antes se cargaban *todos* los tickets con cualquier reloj de SLA puesto, sin
+    filtro de fecha, para descartar despues en Python casi todos. Una instancia
+    solo entra si su ``updated_at`` cae en la ventana, y ese ``updated_at`` sale
+    siempre de una de estas cuatro marcas. Las dos vivas se leen de ``Ticket``
+    (para no depender de la frescura del derivado) y las dos calculadas de
+    ``TicketFact``, que las tiene indexadas.
+
+    La ventana la fija quien llama, porque no todas las zonas necesitan lo mismo:
+    ``build_sla`` dibuja una serie de doce meses y tiene que mirar mas atras,
+    mientras que la portada ejecutiva solo publica el rango seleccionado.
+    """
+    computed = TicketFact.objects.filter(
+        Q(first_reply_at__range=(window_start, end_dt))
+        | Q(full_resolution_at__range=(window_start, end_dt))
+    ).values("ticket_id")
+    return list(
+        base_qs.filter(
+            Q(first_response_met__isnull=False)
+            | Q(first_response_due_at__isnull=False)
+            | Q(resolution_due_at__isnull=False)
+            | Q(sla_breached_at__isnull=False)
+        ).filter(
+            Q(updated_at__range=(window_start, end_dt))
+            | Q(sla_breached_at__range=(window_start, end_dt))
+            | Q(id__in=computed)
+        )
+    )
+
+
 def _sla_instances(tickets, now=None):
     """Crea instancias reportables con los dos relojes SLA nativos actuales."""
     now = now or timezone.now()
@@ -1249,8 +1587,12 @@ def _sla_instances(tickets, now=None):
     for ticket in tickets:
         fact = facts[ticket.id]
         completed_at = fact["full_resolution_at"]
+        # Las instancias de este ticket se acumulan aparte: el respaldo de abajo
+        # solo necesita saber si el ticket ha producido alguna, y recorrer la
+        # lista global para averiguarlo convertia el bucle en cuadratico.
+        ticket_rows = []
         if ticket.first_response_met is not None:
-            rows.append({
+            ticket_rows.append({
                 "ticket": ticket,
                 "metric": "Primera respuesta",
                 "status": "completed",
@@ -1260,7 +1602,7 @@ def _sla_instances(tickets, now=None):
             })
         elif ticket.first_response_due_at:
             breached = ticket.first_response_due_at < now
-            rows.append({
+            ticket_rows.append({
                 "ticket": ticket,
                 "metric": "Primera respuesta",
                 "status": "active",
@@ -1272,7 +1614,7 @@ def _sla_instances(tickets, now=None):
         if ticket.resolution_due_at:
             if completed_at:
                 breached = completed_at > ticket.resolution_due_at
-                rows.append({
+                ticket_rows.append({
                     "ticket": ticket,
                     "metric": "Resolucion total",
                     "status": "completed",
@@ -1282,7 +1624,7 @@ def _sla_instances(tickets, now=None):
                 })
             else:
                 breached = ticket.resolution_due_at < now
-                rows.append({
+                ticket_rows.append({
                     "ticket": ticket,
                     "metric": "Resolucion total",
                     "status": "active",
@@ -1291,8 +1633,8 @@ def _sla_instances(tickets, now=None):
                     "breached_at": ticket.sla_breached_at if breached else None,
                 })
 
-        if ticket.sla_breached_at and not any(row["ticket"].id == ticket.id for row in rows):
-            rows.append({
+        if ticket.sla_breached_at and not ticket_rows:
+            ticket_rows.append({
                 "ticket": ticket,
                 "metric": "SLA general",
                 "status": "completed" if ticket.status in SOLVED_STATUSES else "active",
@@ -1300,16 +1642,15 @@ def _sla_instances(tickets, now=None):
                 "updated_at": ticket.sla_breached_at,
                 "breached_at": ticket.sla_breached_at,
             })
+        rows.extend(ticket_rows)
     return rows
 
 
 def build_sla(filters, date_from, date_to, start_dt, end_dt):
-    tickets = list(live_ticket_queryset(filters).filter(
-        Q(first_response_met__isnull=False)
-        | Q(first_response_due_at__isnull=False)
-        | Q(resolution_due_at__isnull=False)
-        | Q(sla_breached_at__isnull=False)
-    ))
+    # Esta zona publica ``achievement_by_month`` a doce meses, asi que necesita
+    # mirar mas atras que el rango seleccionado.
+    history_start = min(start_dt, end_dt - timedelta(days=_SLA_HISTORY_DAYS))
+    tickets = _sla_candidates(live_ticket_queryset(filters), history_start, end_dt)
     all_instances = _sla_instances(tickets, now=end_dt)
     instances = [
         row for row in all_instances
@@ -1409,24 +1750,16 @@ def build_executive(filters, date_from, date_to, start_dt, end_dt):
     created = list(base.filter(created_at__range=(start_dt, end_dt)))
     solved = _solved_tickets(base, start_dt, end_dt)
 
-    candidates = list(base.filter(created_at__lte=end_dt))
-    states = _states_at(candidates, end_dt)
-    backlog = [
-        ticket for ticket in candidates
-        if states[ticket.id] in UNSOLVED_STATUSES
-    ]
+    backlog, _backlog_states = _unsolved_at(base, end_dt)
 
     solved_ids = [ticket.id for ticket in solved]
     ratings = list(SatisfactionRating.objects.filter(
         ticket_id__in=solved_ids, score__in=("good", "bad")
     ).select_related("ticket", "ticket__product_line")) if solved_ids else []
 
-    sla_tickets = list(base.filter(
-        Q(first_response_met__isnull=False)
-        | Q(first_response_due_at__isnull=False)
-        | Q(resolution_due_at__isnull=False)
-        | Q(sla_breached_at__isnull=False)
-    ))
+    # La portada solo ensena el rango seleccionado: no hay serie mensual que
+    # sostener, asi que la ventana es la del propio informe y no un ano entero.
+    sla_tickets = _sla_candidates(base, start_dt, end_dt)
     sla_instances = [
         row for row in _sla_instances(sla_tickets, now=end_dt)
         if row["updated_at"] and start_dt <= row["updated_at"] <= end_dt
@@ -1580,8 +1913,275 @@ def build_reporting_section(section, filters, date_from, date_to, start_dt, end_
         raise ValueError(f"Zona de reporting desconocida: {section}")
     payload = builder(filters, date_from, date_to, start_dt, end_dt)
     previous_from, previous_to, previous_start, previous_end = _previous_period(date_from, date_to)
-    previous = builder(
-        filters, previous_from, previous_to, previous_start, previous_end
-    )
-    _attach_comparison(payload, previous, previous_from, previous_to)
+    # Una zona sin KPIs ni matriz (backlog) no ensena ninguna comparativa:
+    # construir el periodo anterior solo para descartarlo duplicaba su coste.
+    if payload.get("kpis") or payload.get("matrix"):
+        previous = builder(
+            filters, previous_from, previous_to, previous_start, previous_end
+        )
+        _attach_comparison(payload, previous, previous_from, previous_to)
+    else:
+        payload["comparison"] = {"from": str(previous_from), "to": str(previous_to)}
+        payload["insight"] = "No hay muestra comparable suficiente en el periodo anterior."
     return payload
+
+
+def build_legacy_overview(brand_id, date_from, date_to, start_dt, end_dt):
+    """Payload de /reporting/ sin ?section= (KPIs, series y distribuciones).
+
+    Predecesor de build_reporting_section: no usa las tablas de hechos, relee
+    tickets/eventos/valoraciones directamente. Se mantiene tal cual para no
+    alterar los numeros que ya ve el dashboard legacy.
+    """
+    live = Ticket.objects.filter(is_deleted=False, merged_into__isnull=True)
+    if brand_id:
+        live = live.filter(brand_id=brand_id)
+    created_qs = live.filter(created_at__range=(start_dt, end_dt))
+
+    # KPIs sobre los tickets creados en el rango.
+    # Compliance de primera respuesta solo acumula desde que first_response_met
+    # existe (el due se limpia al responder: no es retro-computable); breached
+    # via sla_breached_at es la fuente de verdad del incumplimiento.
+    kpis = created_qs.aggregate(
+        created=Count('id'),
+        breached=Count(Case(When(sla_breached_at__isnull=False, then=1), output_field=IntegerField())),
+        with_sla=Count(Case(When(
+            Q(resolution_due_at__isnull=False) | Q(first_response_due_at__isnull=False)
+            | Q(sla_breached_at__isnull=False) | Q(first_response_met__isnull=False),
+            then=1), output_field=IntegerField())),
+        fr_met=Count(Case(When(first_response_met=True, then=1), output_field=IntegerField())),
+        fr_measured=Count(Case(When(first_response_met__isnull=False, then=1), output_field=IntegerField())),
+    )
+    sla_compliance = (
+        round((kpis['with_sla'] - kpis['breached']) / kpis['with_sla'] * 100)
+        if kpis['with_sla'] else None
+    )
+
+    # Snapshot actual del backlog (no depende del rango): mide la cola viva.
+    snapshot = live.aggregate(
+        backlog=Count(Case(When(status__in=('open', 'pending'), then=1), output_field=IntegerField())),
+        open_now=Count(Case(When(status='open', then=1), output_field=IntegerField())),
+        pending_now=Count(Case(When(status='pending', then=1), output_field=IntegerField())),
+        unassigned=Count(Case(When(
+            Q(status__in=('open', 'pending')) & Q(assignee__isnull=True), then=1),
+            output_field=IntegerField())),
+    )
+    backlog = snapshot['backlog']
+
+    def _resolved_qs(s, e):
+        qs = TicketEvent.objects.filter(
+            field_name='status',
+            new_value__in=('resolved', 'closed'),
+            created_at__range=(s, e),
+            ticket__is_deleted=False,
+            ticket__merged_into__isnull=True,
+        )
+        if brand_id:
+            qs = qs.filter(ticket__brand_id=brand_id)
+        return qs
+
+    resolved_events = _resolved_qs(start_dt, end_dt)
+    resolved = resolved_events.values('ticket_id').distinct().count()
+
+    # Reaperturas: tickets que volvieron de resuelto/cerrado a open/pending en el rango.
+    reopened_qs = TicketEvent.objects.filter(
+        field_name='status',
+        old_value__in=('resolved', 'closed'),
+        new_value__in=('open', 'pending'),
+        created_at__range=(start_dt, end_dt),
+        ticket__is_deleted=False,
+        ticket__merged_into__isnull=True,
+    )
+    if brand_id:
+        reopened_qs = reopened_qs.filter(ticket__brand_id=brand_id)
+    reopened = reopened_qs.values('ticket_id').distinct().count()
+
+    # Tiempo medio de resolución (horas): desde la creación del ticket hasta su
+    # primer evento de resolución dentro del rango.
+    res_rows = list(
+        resolved_events.values('ticket_id').annotate(
+            resolved_at=Min('created_at'),
+            opened_at=Min('ticket__created_at'),
+        )
+    )
+    durations = [
+        (r['resolved_at'] - r['opened_at']).total_seconds() / 3600.0
+        for r in res_rows
+        if r['resolved_at'] and r['opened_at'] and r['resolved_at'] >= r['opened_at']
+    ]
+    avg_resolution_hours = round(sum(durations) / len(durations), 1) if durations else None
+
+    # Deltas vs periodo equivalente inmediatamente anterior (▲/▼ estilo dashboard).
+    period_len = end_dt - start_dt
+    prev_start, prev_end = start_dt - period_len, start_dt
+    created_prev = live.filter(created_at__range=(prev_start, prev_end)).count()
+    resolved_prev = _resolved_qs(prev_start, prev_end).values('ticket_id').distinct().count()
+
+    ratings = SatisfactionRating.objects.filter(
+        created_at__range=(start_dt, end_dt), score__in=('good', 'bad'),
+        ticket__is_deleted=False,
+    )
+    if brand_id:
+        ratings = ratings.filter(ticket__brand_id=brand_id)
+    good = ratings.filter(score='good').count()
+    bad = ratings.filter(score='bad').count()
+    satisfaction = round(good / (good + bad) * 100) if (good + bad) else None
+
+    # Tasa de respuesta: solo medible en las valoraciones nativas, que son las que
+    # registran la oferta (score='offered'). Lo importado de Zendesk no la trae.
+    offered_qs = SatisfactionRating.objects.filter(
+        offered_at__range=(start_dt, end_dt),
+        source=SatisfactionRating.SOURCE_NATIVE,
+        ticket__is_deleted=False,
+    )
+    if brand_id:
+        offered_qs = offered_qs.filter(ticket__brand_id=brand_id)
+    offered = offered_qs.count()
+    answered = offered_qs.filter(score__in=('good', 'bad')).count()
+    response_rate = round(answered / offered * 100) if offered else None
+
+    # CSAT por agente. Con muestras minúsculas el porcentaje es ruido puro, así que
+    # por debajo del mínimo no se publica.
+    agent_rows = []
+    for row in ratings.values('assignee__name').annotate(
+        n_good=Count(Case(When(score='good', then=1), output_field=IntegerField())),
+        n_bad=Count(Case(When(score='bad', then=1), output_field=IntegerField())),
+    ):
+        total = row['n_good'] + row['n_bad']
+        if total < _LEGACY_SATISFACTION_MIN_SAMPLE:
+            continue
+        agent_rows.append({
+            'agent': row['assignee__name'] or '— Sin asignar —',
+            'good': row['n_good'],
+            'bad': row['n_bad'],
+            'total': total,
+            'pct': round(row['n_good'] / total * 100),
+        })
+    agent_rows.sort(key=lambda r: (-r['pct'], -r['total']))
+    agent_rows = agent_rows[:15]
+
+    # Motivos de los votos negativos. Une el catálogo nativo (reason_choice) con el
+    # texto libre que trae el histórico de Zendesk (reason).
+    reason_counts = {}
+    for row in (ratings.filter(score='bad')
+                .values('reason_choice__label', 'reason').annotate(n=Count('id'))):
+        label = (row['reason_choice__label'] or (row['reason'] or '').strip()
+                 or '— Sin motivo indicado —')
+        reason_counts[label] = reason_counts.get(label, 0) + row['n']
+    reason_rows = sorted(
+        ({'label': label, 'n': n} for label, n in reason_counts.items()),
+        key=lambda r: -r['n'],
+    )[:10]
+
+    # Series diarias: creados y cerrados
+    created_series = list(
+        created_qs.annotate(day=TruncDate('created_at')).values('day')
+        .annotate(n=Count('id')).order_by('day')
+    )
+    closed_series = list(
+        live.filter(closed_at__range=(start_dt, end_dt))
+        .annotate(day=TruncDate('closed_at')).values('day')
+        .annotate(n=Count('id')).order_by('day')
+    )
+
+    # Distribución de carga: creados por hora del día (0-23) y por día de la
+    # semana — clave para dimensionar turnos del equipo de soporte.
+    hour_map = {
+        row['h']: row['n']
+        for row in created_qs.annotate(h=ExtractHour('created_at')).values('h')
+        .annotate(n=Count('id')) if row['h'] is not None
+    }
+    by_hour = [hour_map.get(h, 0) for h in range(24)]
+    # ExtractWeekDay: 1=domingo … 7=sábado (convención Django). Reordenamos a L-D.
+    wd_map = {
+        row['wd']: row['n']
+        for row in created_qs.annotate(wd=ExtractWeekDay('created_at')).values('wd')
+        .annotate(n=Count('id')) if row['wd'] is not None
+    }
+    _wd_order = [2, 3, 4, 5, 6, 7, 1]  # lunes…domingo
+    by_weekday = [wd_map.get(d, 0) for d in _wd_order]
+
+    # Tickets abiertos más antiguos: lista accionable para atacar el backlog.
+    oldest_rows = [
+        {
+            'id': t.id,
+            'subject': t.subject,
+            'status': t.status,
+            'assignee': t.assignee.name if t.assignee else None,
+            'created': t.created_at.strftime('%Y-%m-%d') if t.created_at else None,
+            'age_days': (timezone.now() - t.created_at).days if t.created_at else None,
+        }
+        for t in live.filter(status__in=('open', 'pending'))
+        .select_related('assignee').order_by('created_at')[:10]
+    ]
+
+    def _dist(field):
+        return [
+            {'label': row[field] or '—', 'n': row['n']}
+            for row in created_qs.values(field).annotate(n=Count('id')).order_by('-n')
+        ]
+
+    # Desglose por marca (siempre sobre el rango; muestra el bucket sin marca
+    # para medir cobertura de entidad)
+    brand_rows = [
+        {
+            'brand': row['brand__name'] or '— Sin marca —',
+            'created': row['n'],
+            'open': row['n_open'],
+            'breached': row['n_breached'],
+        }
+        for row in Ticket.objects.filter(
+            is_deleted=False, merged_into__isnull=True,
+            created_at__range=(start_dt, end_dt),
+        ).values('brand__name').annotate(
+            n=Count('id'),
+            n_open=Count(Case(When(status__in=('open', 'pending'), then=1), output_field=IntegerField())),
+            n_breached=Count(Case(When(sla_breached_at__isnull=False, then=1), output_field=IntegerField())),
+        ).order_by('-n')
+    ]
+
+    return {
+        'ok': True,
+        'range': {'from': str(date_from), 'to': str(date_to), 'brand_id': brand_id},
+        'kpis': {
+            'created': kpis['created'],
+            'created_prev': created_prev,
+            'resolved': resolved,
+            'resolved_prev': resolved_prev,
+            'backlog': backlog,
+            'open_now': snapshot['open_now'],
+            'pending_now': snapshot['pending_now'],
+            'unassigned': snapshot['unassigned'],
+            'sla_compliance_pct': sla_compliance,
+            'sla_breached': kpis['breached'],
+            'first_response_met': kpis['fr_met'],
+            'first_response_measured': kpis['fr_measured'],
+            'avg_resolution_hours': avg_resolution_hours,
+            'reopened': reopened,
+            'satisfaction_pct': satisfaction,
+            'satisfaction_good': good,
+            'satisfaction_bad': bad,
+            'satisfaction_offered': offered,
+            'satisfaction_answered': answered,
+            'satisfaction_response_rate_pct': response_rate,
+        },
+        'satisfaction': {
+            'by_agent': agent_rows,
+            'reasons': reason_rows,
+            'min_sample': _LEGACY_SATISFACTION_MIN_SAMPLE,
+        },
+        'series': {
+            'created': [{'day': str(r['day']), 'n': r['n']} for r in created_series],
+            'closed': [{'day': str(r['day']), 'n': r['n']} for r in closed_series],
+            'by_hour': by_hour,
+            'by_weekday': by_weekday,
+        },
+        'oldest_open': oldest_rows,
+        'distributions': {
+            'status': _dist('status'),
+            'priority': _dist('priority'),
+            'type': _dist('type'),
+            'channel': _dist('channel'),
+        },
+        'by_brand': brand_rows,
+    }

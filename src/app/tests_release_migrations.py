@@ -44,7 +44,13 @@ class ReleaseMigrationTests(TransactionTestCase):
 
         executor = MigrationExecutor(connection)
         executor.loader.check_consistent_history(connection)
-        self.assertEqual(executor.loader.graph.leaf_nodes("app"), [self.merged])
+        # Lo que importa es que el historial vuelva a tener una sola hoja: es la
+        # prueba de que las dos ramas han convergido. No se fija en cual, porque
+        # cada migracion posterior a la merge la desplaza; se comprueba en su
+        # lugar que esa hoja desciende de la merge.
+        leaves = executor.loader.graph.leaf_nodes("app")
+        self.assertEqual(len(leaves), 1, f"historial bifurcado: {leaves}")
+        self.assertIn(self.merged, executor.loader.graph.forwards_plan(leaves[0]))
         self.assertFalse(executor.migration_plan([self.merged]))
         Template = executor.loader.project_state([self.merged]).apps.get_model("app", "ResponseTemplate")
         after = list(Template.objects.filter(key="agent_reply", brand__isnull=True).order_by("id").values())

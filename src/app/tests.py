@@ -1644,9 +1644,15 @@ class ReportingTests(_BaseFixture):
 
         self.assertEqual([event.id for event in grouped[self.t_a1.id]], [status_event.id])
 
-    def test_multi_snapshot_backlog_replay_matches_single_snapshot_logic(self):
+    def test_status_timeline_matches_single_snapshot_logic(self):
+        """Los tramos persistidos tienen que decir lo mismo que _state_at.
+
+        _state_at sigue siendo la definicion de referencia del estado historico;
+        _status_timeline la recorre una sola vez para poder guardarla en
+        TicketStatusInterval. Si divergen, el backlog miente.
+        """
         from app.services.reporting_metrics import (
-            STATE_EVENT_NAMES, _state_at, _states_at_samples, _ticket_events,
+            STATE_EVENT_NAMES, _state_at, _status_timeline, _ticket_events,
         )
 
         now = timezone.now()
@@ -1665,10 +1671,19 @@ class ReportingTests(_BaseFixture):
         )[self.t_a1.id]
         samples = [now - timedelta(days=15), now - timedelta(days=5), now + timedelta(days=1)]
 
+        intervals = _status_timeline(self.t_a1, events)
         expected = [_state_at(self.t_a1, events, sample) for sample in samples]
-        actual = list(_states_at_samples(self.t_a1, events, samples))
+        actual = [
+            next(
+                (state for state, start, end in intervals
+                 if start <= sample and (end is None or sample < end)),
+                None,
+            )
+            for sample in samples
+        ]
 
         self.assertEqual(actual, expected)
+        self.assertEqual(expected, ["open", "pending", "closed"])
 
     def test_reporting_cache_outage_is_non_blocking(self):
         from app import views

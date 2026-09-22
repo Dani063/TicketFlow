@@ -1,0 +1,16 @@
+Fuentes autoalojadas de las páginas públicas de ayuda.
+
+Se sirven desde aquí en vez de usar Google Fonts para no introducir una CDN externa
+en una web pública ni transferir las IP de los visitantes a un tercero.
+
+- Poppins (pesos 600 y 700) — SIL Open Font License 1.1
+  https://fonts.google.com/specimen/Poppins
+- Roboto (fuente variable, cubre todo el rango de pesos) — SIL Open Font License 1.1
+  https://fonts.google.com/specimen/Roboto
+
+Solo se incluyen los subconjuntos `latin` y `latin-ext`, que son los que necesitan el
+castellano y el inglés. Los ficheros son los que sirve fonts.gstatic.com; para
+regenerarlos, pedir la hoja de fonts.googleapis.com con un user agent de navegador
+moderno y descargar los woff2 de esos dos subconjuntos.
+
+Las declaraciones @font-face están en ../brand.css.

@@ -8,6 +8,13 @@
     const data = window.__ticketsData || {};
     const CREATE_TICKET_URL = data.createTicketUrl || '/tickets/create/';
 
+    // Asunto acotado en la tabla; el texto completo sigue disponible en el
+    // dataset para la tarjeta de vista previa (`show`).
+    function _truncateSubject(subject) {
+        const s = subject || '';
+        return s.length > 100 ? s.slice(0, 100) + '…' : s;
+    }
+
     let _currentView = null;
     let _currentPage = 1;
     let _totalPages  = 1;
@@ -398,7 +405,8 @@
 
                     const subjectSpan = document.createElement("span");
                     subjectSpan.className = "subject-text";
-                    subjectSpan.textContent = t.subject;
+                    subjectSpan.textContent = _truncateSubject(t.subject);
+                    subjectSpan.title = t.subject || "";
                     subjectSpan.dataset.ticketId = t.id;
                     subjectSpan.dataset.status = t.status;
                     subjectSpan.dataset.priority = t.priority || "";
@@ -407,6 +415,7 @@
                     subjectSpan.dataset.lcAuthor = t.last_comment ? t.last_comment.author : "";
                     subjectSpan.dataset.lcDate = t.last_comment ? t.last_comment.date : "";
                     subjectSpan.dataset.lcBody = t.last_comment ? t.last_comment.body : "";
+                    subjectSpan.dataset.lcInternal = (t.last_comment && t.last_comment.is_internal) ? "1" : "";
 
                     row.innerHTML = `
                       <td>${t.id}</td>
@@ -965,7 +974,9 @@
         if (hasComment) {
             _card.querySelector(".tpc-comment-author").textContent = s.lcAuthor;
             _card.querySelector(".tpc-comment-date").textContent = s.lcDate;
-            _card.querySelector(".tpc-comment-body").textContent = s.lcBody;
+            const body = _card.querySelector(".tpc-comment-body");
+            body.textContent = s.lcBody;
+            body.classList.toggle("is-internal", !!s.lcInternal);
         }
 
         _card.style.display = "block";

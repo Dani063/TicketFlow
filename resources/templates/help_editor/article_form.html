@@ -58,13 +58,13 @@
 
             <aside class="hce-publish-rail" aria-label="Publicación">
                 <div class="hce-rail-card hce-rail-card--accent">
-                    <span class="hce-rail-index">01</span>
+                    <span class="hce-rail-index">PUBLICACIÓN</span>
                     <h2>Estado editorial</h2>
                     {% if article %}<dl><div><dt>Versión de control</dt><dd>{{ article.version }}</dd></div><div><dt>Revisión abierta</dt><dd>{% if revision %}{{ revision.number }}{% else %}Nueva{% endif %}</dd></div><div><dt>Visible al cliente</dt><dd>{% if article.published %}Sí{% else %}No{% endif %}</dd></div></dl>{% else %}<p>Se creará como borrador. Nada será visible hasta pulsar «Publicar».</p>{% endif %}
                 </div>
 
                 <div class="hce-rail-card">
-                    <span class="hce-rail-index">02</span>
+                    <span class="hce-rail-index">AJUSTES</span>
                     <h2>Presentación</h2>
                     <label class="hce-check">{{ form.promoted }}<span>Destacar en la portada</span></label>{{ form.promoted.errors }}
                     <label class="hce-field"><span>{{ form.position.label }}</span>{{ form.position }}{{ form.position.errors }}</label>
@@ -73,7 +73,7 @@
 
                 {% if article %}
                 <div class="hce-rail-card">
-                    <span class="hce-rail-index">03</span>
+                    <span class="hce-rail-index">ADJUNTOS</span>
                     <h2>Recursos</h2>
                     <p>Sube imágenes o documentos y añádelos en el punto actual del texto.</p>
                     <label class="hce-upload"><input type="file" data-asset-input><span>Seleccionar archivo</span><small>Máx. 20 MB</small></label>
@@ -96,5 +96,5 @@
         </div>
     </form>
 </div>
-<script src="{% static 'help_centers/help_editor.js' %}?v=1.1" defer></script>
+<script src="{% static 'help_centers/help_editor.js' %}?v=2.0" defer></script>
 {% endblock %}

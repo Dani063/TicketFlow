@@ -5,12 +5,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="{{ robots|default:'index, follow' }}">
-    <meta name="theme-color" content="{{ center.primary_color }}">
+    <meta name="theme-color" content="{{ center.theme_color }}">
     <link rel="canonical" href="{{ canonical_url }}">
     <link rel="alternate" hreflang="{{ other_locale }}" href="{{ locale_switch_url }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static center.icon_small_static_path %}">
+    <link rel="apple-touch-icon" href="{% static center.icon_static_path %}">
     <title>{% block title %}{{ ui.help_center }} · {{ center.name }}{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'help_centers/public_help.css' %}?v=1.0">
-    {% if can_manage_help %}<link rel="stylesheet" href="{% static 'help_centers/help_editor.css' %}?v=1.0">{% endif %}
+    <link rel="stylesheet" href="{% static 'help_centers/brand.css' %}?v=2.1">
+    <link rel="stylesheet" href="{% static 'help_centers/public_help.css' %}?v=2.1">
+    {% if can_manage_help %}<link rel="stylesheet" href="{% static 'help_centers/help_editor.css' %}?v=2.0">{% endif %}
 </head>
 <body class="hc-body hc-brand--{{ center.slug }}" style="{{ brand_style }}">
 <a class="hc-skip" href="#main">{% if locale == 'es' %}Saltar al contenido{% else %}Skip to content{% endif %}</a>
@@ -29,8 +32,8 @@
 <header class="hc-header">
     <div class="hc-wrap hc-header__inner">
         <a class="hc-brand" href="{% url 'help_home' center.slug locale %}" aria-label="{{ center.name }} · {{ ui.help_center }}">
-            <span class="hc-brand__mark" aria-hidden="true">{{ center.name|slice:':1' }}</span>
-            <span><strong>{{ center.name }}</strong><small>{{ ui.help_center }}</small></span>
+            <img class="hc-brand__logo" src="{% static center.logo_static_path %}" alt="{{ center.name }}">
+            <span class="hc-brand__sub">{{ ui.help_center }}</span>
         </a>
         <nav class="hc-nav" aria-label="{% if locale == 'es' %}Navegación principal{% else %}Main navigation{% endif %}">
             <a href="{% url 'help_request' center.slug locale %}" class="hc-nav__request">{{ ui.submit_request }}</a>
@@ -52,16 +55,40 @@
 </section>
 {% endblock %}
 
-<main id="main" class="hc-main">
+<main id="main" class="hc-main hc-main--{% block decor %}a{% endblock %}">
     {% block content %}{% endblock %}
 </main>
 
 <footer class="hc-footer">
-    <div class="hc-wrap hc-footer__inner">
-        <span>{{ center.name }} · {{ ui.help_center }}</span>
-        <a href="{% url 'help_request' center.slug locale %}">{{ ui.submit_request }}</a>
+    <div class="hc-wrap hc-footer__grid">
+        <div class="hc-footer__brand">
+            <p class="hc-footer__brand-name">{{ center.name }}</p>
+            <p>{% if locale == 'es' %}{{ center.tagline_es }}{% else %}{{ center.tagline_en }}{% endif %}</p>
+        </div>
+        <nav class="hc-footer__col" aria-label="{{ ui.footer_help }}">
+            <h2>{{ ui.footer_help }}</h2>
+            <ul>
+                <li><a href="{% url 'help_home' center.slug locale %}">{{ ui.home }}</a></li>
+                <li><a href="{% url 'help_request' center.slug locale %}">{{ ui.submit_request }}</a></li>
+                <li><a href="{{ locale_switch_url }}" lang="{{ other_locale }}" hreflang="{{ other_locale }}">{{ ui.switch_language }}</a></li>
+            </ul>
+        </nav>
+        {% if legal_documents %}
+        <nav class="hc-footer__col" aria-label="{{ ui.footer_legal }}">
+            <h2>{{ ui.footer_legal }}</h2>
+            <ul>{% for doc in legal_documents %}<li><a href="{% static doc.path %}">{{ doc.label }}</a></li>{% endfor %}</ul>
+        </nav>
+        {% endif %}
+        <div class="hc-footer__col">
+            <h2>{{ ui.footer_contact }}</h2>
+            {% if center.brand.support_email %}<ul><li><a class="hc-email" data-hc-mail="{{ center.brand.support_email|slice:'::-1' }}">{{ ui.footer_email_label }}</a></li></ul>{% endif %}
+            <p>{{ ui.footer_contact_note }}</p>
+        </div>
+    </div>
+    <div class="hc-wrap hc-footer__legal">
+        <span>© {% now "Y" %} {{ center.name }}. {{ ui.footer_rights }}</span>
     </div>
 </footer>
-<script src="{% static 'help_centers/public_help.js' %}?v=1.0" defer></script>
+<script src="{% static 'help_centers/public_help.js' %}?v=2.1" defer></script>
 </body>
 </html>

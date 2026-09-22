@@ -119,7 +119,9 @@
             if (hasComment) {
                 card.querySelector(".tpc-comment-author").textContent = s.lcAuthor || '';
                 card.querySelector(".tpc-comment-date").textContent = s.lcDate || '';
-                card.querySelector(".tpc-comment-body").textContent = s.lcBody || '';
+                const body = card.querySelector(".tpc-comment-body");
+                body.textContent = s.lcBody || '';
+                body.classList.toggle("is-internal", !!s.lcInternal);
             }
             card.style.display = "block";
             _positionCard();

@@ -88,6 +88,11 @@
                 if (html == null) { quill.setText(''); return; }
                 const delta = quill.clipboard.convert({ html: String(html) });
                 quill.setContents(delta, 'silent');
+                // `silent` no emite text-change, asi que el unico sincronizador del
+                // textarea oculto no corre y `value` se queda vacio. Las validaciones
+                // de envio leen ese `value`, de modo que un borrador de IA insertado
+                // se rechazaba como «mensaje vacio» aun estando visible en el editor.
+                syncPlainTextToTextarea();
             },
             clear() { quill.setText(''); nativeSetValue(textarea, ''); },
             focus() { quill.focus(); },

@@ -223,6 +223,39 @@ que importa el SDK y mapea errores a `AIRetryableError`/`AIPermanentError`).
 - Histórico completo en `TicketAIAnalysis` (confianza por campo, razonamiento, versión de
   prompt/modelo, tokens, latencia) — base del feedback loop del Q3.
 
+### Cursor de sincronización de buzones — `MailboxSyncCursor`
+
+El puntero de «qué me queda por leer» vive en la BBDD de **cada entorno**, no en el
+buzón. Antes era el flag `isRead` de Exchange, que es estado compartido: con DEV y
+STA leyendo el mismo buzón físico, el primero que pasaba marcaba el mensaje como
+leído y el otro ya no lo veía (no cumplía `$filter=isRead eq false`). El correo se
+perdía para el entorno perdedor sin dejar rastro.
+
+`poll_m365_mailboxes` usa ahora **delta query** de Graph
+(`/users/{buzón}/mailFolders/{id}/messages/delta`). El `@odata.deltaLink` es un token
+de estado opaco por consumidor: cada entorno guarda el suyo en `MailboxSyncCursor` y
+avanza su propia secuencia sobre la misma carpeta, sin mutar nada.
+
+Reglas al tocar esta zona:
+
+- **`ENVIRONMENT_NAME` es el espacio de nombres del cursor y dos entornos no pueden
+  compartirlo.** Por defecto se deriva de `AWS_SSM_PREFIX` (`/Recordia/Staging/…` →
+  `Staging`), que ya difiere entre DEV y STA.
+- La fila se identifica por la **carpeta física**, no por la dirección: las cuatro
+  direcciones de soporte son alias del mismo buzón y resuelven al mismo `folder_id`.
+  `_mailbox_targets` las agrupa para consultar la carpeta una sola vez — sin eso,
+  cada marca ingeriría el mismo mensaje y saldrían tantos tickets como marcas. Lo
+  tapaba `isRead`; ahora lo sostiene la agrupación.
+- **El primer delta se acota por fecha** (`INBOUND_DELTA_LOOKBACK_MINUTES`). Sin cota,
+  Graph devuelve la carpeta entera y se ingiere todo el histórico del buzón.
+- Si una vuelta falla, **el cursor no avanza**: se reintenta desde el último enlace
+  bueno. La reentrega es inocua porque `InboundEmailLog` con `unique(brand, message_id)`
+  ya la absorbe (contrato at-least-once, como SQS).
+- Marcar como leído (`INBOUND_MARK_READ_ENABLED`) ya **no es el cursor**, solo cortesía
+  para quien mire el buzón. Debe quedar encendido en un único entorno.
+- Borrar la fila del cursor en el admin reinicia la sincronización: la siguiente
+  vuelta arranca de nuevo desde la ventana de *lookback*.
+
 ### `EmailIngestionService` — `email_ingestion.py`
 
 Convierte un mensaje de Graph API en ticket/comentario. Llamado por `tasks._process_message`.
@@ -251,6 +284,27 @@ completo. `unread_for_user(user)` para el badge.
 
 `record_metric(name, value=1, labels={})` inserta un `OperationalMetric`. Nunca rompe el
 flujo de negocio: si falla, lo registra en el log y devuelve `None`.
+
+### Otros servicios
+
+Servicios existentes en `app/services/` con responsabilidad acotada, sin sección propia
+hasta ahora:
+
+| Servicio | Fichero | Responsabilidad |
+|---|---|---|
+| `AttachmentService` | `attachments.py` | Almacenamiento y descarga segura de adjuntos de tickets (hash, `storage_key`, nombre seguro). |
+| — (funciones de presentación) | `conversation.py` | Presentación reversible del correo en el hilo de conversación; nunca crea ni modifica comentarios. |
+| — | `help_centers.py` | Reglas compartidas por los portales públicos de Help Center (eComFax, Recordia): envío de solicitudes públicas, rate limiting. |
+| — | `help_content.py` | Saneado de HTML y extracción de texto compartidos por la importación y el editor del Help Center. |
+| `HelpAssetService` y afines | `help_editor.py` | Edición transaccional del Help Center: revisiones y almacenamiento de assets. |
+| — | `satisfaction.py` | Encuesta de satisfacción (CSAT) nativa: oferta, voto y catálogo de motivos (replica la mecánica de Zendesk). |
+| `SimilarTicketIndex` | `similar.py` | Búsqueda de tickets similares por embeddings (coseno en memoria; migrable a OpenSearch k-NN sin tocar llamadores). |
+| — | `ticket_exports.py` | Renderizado del informe PDF de tickets filtrados (reportlab). |
+| — | `ticket_reply.py` | Asistencia de respuesta IA: borradores a partir del ticket, comentarios públicos y casos similares. No persiste nada. |
+| `UserAdminService` | `user_admin.py` | CRUD y reglas de negocio del panel de administración de usuarios (validaciones, último admin, auto-desactivación/eliminación). Extraído de `views.admin_users_api`. |
+
+> `HelpAssetService.safe_name` delega en `AttachmentService.safe_name` (antes eran dos
+> implementaciones idénticas copiadas).
 
 ---
 
@@ -320,12 +374,47 @@ Soportan `GET` (listar), `POST` (crear), `PUT` (actualizar) y `DELETE` (desactiv
 
 | Endpoint | Contenido |
 |---|---|
-| `/reporting/data/` | KPIs (creados, resueltos vía `TicketEvent`, backlog, % SLA, breaches, satisfacción), series diarias creados/cerrados, distribuciones (estado/prioridad/tipo/canal) y desglose por marca (incluye bucket «Sin marca»). Filtros `brand`, `from`, `to` (≤366 días); cache 60 s. |
+| `/reporting/data/` | Sin `?section=`: payload legacy (`reporting_metrics.build_legacy_overview`) — KPIs (creados, resueltos vía `TicketEvent`, backlog, % SLA, breaches, satisfacción), series diarias creados/cerrados, distribuciones (estado/prioridad/tipo/canal) y desglose por marca (incluye bucket «Sin marca»). Con `?section=…`, delega en `build_reporting_section` (ver tablas de hechos abajo). Filtros `brand`, `from`, `to` (≤366 días); cache 60 s. |
 | `/reporting/export.csv` | Export CSV en streaming (BOM UTF-8 para Excel, `;` como separador) del conjunto filtrado. |
 
 > Limitación documentada: el cumplimiento de primera respuesta (`first_response_met`)
 > solo acumula desde su introducción — el due se limpia al responder y no es
 > retro-computable. `sla_breached_at` es la fuente de verdad del incumplimiento.
+
+#### Tablas de hechos (pre-agregación)
+
+Las nueve zonas de `/reporting/` (`?section=…`, en `app/services/reporting_metrics.py`)
+**no reconstruyen el ciclo de vida de los tickets en cada petición**. Leen dos tablas
+derivadas que mantiene Celery:
+
+| Tabla | Contenido | Sustituye a |
+|---|---|---|
+| `TicketFact` | Un registro por ticket: respuestas de agente, relojes de primera respuesta / asignación / resolución, estaciones, reaperturas y espera del solicitante | Releer `TicketEvent` + `Comment` de cada ticket en cada petición |
+| `TicketStatusInterval` | Tramos continuos por estado (`ended_at` NULL = vigente) | Replicar la máquina de estados una vez por cada corte del gráfico de backlog |
+| `ReportingFactState` | Marca de que el backfill cubre todo el histórico | — |
+
+Ambas son **derivados puros**: se pueden vaciar y regenerar sin perder información de
+negocio (`python main.py rebuild_reporting_facts`).
+
+Consecuencia de diseño: el coste de un informe pasa a ser proporcional al **rango
+pedido y a la cola viva**, no al tamaño del histórico. Antes varias zonas cargaban
+todos los tickets que habían existido nunca con independencia del rango.
+
+Piezas que conviene conocer antes de tocar nada:
+
+- `_lifecycle_facts(tickets)` lee `TicketFact`; `_lifecycle_facts_from_source(tickets)`
+  es el cálculo caro desde la auditoría. Solo lo invocan el constructor de hechos y,
+  como respaldo, los tickets que aún no lo tienen calculado (deja un `WARNING`
+  `reporting_facts_missing`).
+- `_state_at()` sigue siendo la **definición de referencia** del estado histórico.
+  `_status_timeline()` la recorre una sola vez para persistirla, y un test compara
+  ambas corte a corte: si divergen, el backlog miente.
+- Mientras `ReportingFactState` no tenga marca, el reporting vuelve al camino antiguo.
+  Es lento pero correcto; publicar una cola calculada a medias sería un dato falso.
+- Los `.only()` de `_ticket_events` y `_agent_comments` **tienen que incluir
+  `is_superuser`**: es lo que lee `is_agent()`, y omitirlo convierte cada fila en una
+  consulta diferida. `app/tests_reporting_facts.py` vigila eso y el resto de
+  presupuestos de consultas por zona.
 
 ---
 
@@ -333,7 +422,7 @@ Soportan `GET` (listar), `POST` (crear), `PUT` (actualizar) y `DELETE` (desactiv
 
 | Tarea | Frecuencia | Servicio |
 |---|---|---|
-| `poll_m365_mailboxes` | 120 s | `EmailIngestionService` |
+| `poll_m365_mailboxes` | 120 s | `EmailIngestionService` (cursor por entorno en `MailboxSyncCursor`) |
 | `auto_assign_unassigned_tickets` | 300 s | `AssignmentService.auto_assign_unassigned` |
 | `mark_sla_breaches` | 300 s | `SLAService.mark_breaches` |
 | `notify_sla_at_risk` | 300 s | `SLAService.notify_at_risk` (aviso 60 min antes del vencimiento) |
@@ -369,3 +458,23 @@ Para ejecutar la suite de tests sin infraestructura:
 ```bash
 USE_SQLITE=1 DISABLE_AWS_SSM=1 python src/main.py test app
 ```
+
+---
+
+## Deuda técnica conocida (no ejecutar sin plan dedicado)
+
+- `app/views.py` (`filter_tickets`, motor de la tabla de tickets, ~420 líneas) sigue
+  concentrando la lógica de paginación/orden/contadores de `/tickets/filter/` directamente
+  en la vista. **No es un candidato de limpieza rápida**: el propio `CLAUDE.md` lo señala
+  como el código más delicado del repo (claves de caché y consolidación de queries
+  afinadas a mano); tocarlo exige un plan propio con verificación exhaustiva.
+- `create_ticket` (~130 líneas) se revisó y **no es un caso real de lógica de negocio en
+  la vista**: el POST ya delega en `TicketService.create_or_update_from_post`; las líneas
+  restantes son construcción de contexto de página (historial, feed, adjuntos) para el GET,
+  razonable en una vista Django.
+- `admin_users_api` y la rama legacy de `reporting_data` (sin `?section=`) **ya se
+  extrajeron** a `services/user_admin.py` (`UserAdminService`) y
+  `services/reporting_metrics.py` (`build_legacy_overview`) respectivamente.
+- `app/tests.py` (~2150 líneas) y `app/test_ticket_exports.py` rompen la convención
+  `tests_<feature>.py` que sigue el resto de la suite. Dividir/renombrar es otro cambio
+  grande, pendiente de planificarse aparte.

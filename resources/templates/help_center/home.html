@@ -10,10 +10,10 @@
 </div></section>
 {% endblock %}
 {% block content %}<div class="hc-wrap hc-layout">
-<section><div class="hc-section-heading"><div><span class="hc-eyebrow">01</span><h2>{{ ui.categories }}</h2></div></div>
+<section><div class="hc-section-heading"><h2>{{ ui.categories }}</h2></div>
 <div class="hc-category-grid">{% for category in categories %}<a class="hc-category-card" href="{% url 'help_category' center.slug locale category.slug %}">
-<span class="hc-category-card__index">0{{ forloop.counter }}</span><div><h3>{{ category.name }}</h3>{% if category.description %}<p>{{ category.description }}</p>{% endif %}<small>{{ category.article_count }} {% if locale == 'es' %}{% if category.article_count == 1 %}artículo{% else %}artículos{% endif %}{% else %}{% if category.article_count == 1 %}article{% else %}articles{% endif %}{% endif %}</small></div><span class="hc-arrow">→</span></a>{% endfor %}</div></section>
-{% if promoted %}<section class="hc-promoted"><div class="hc-section-heading"><div><span class="hc-eyebrow">02</span><h2>{{ ui.promoted }}</h2></div></div>
+<div><h3>{{ category.name }}</h3>{% if category.description %}<p>{{ category.description }}</p>{% endif %}<small>{{ category.article_count }} {% if locale == 'es' %}{% if category.article_count == 1 %}artículo{% else %}artículos{% endif %}{% else %}{% if category.article_count == 1 %}article{% else %}articles{% endif %}{% endif %}</small></div><span class="hc-arrow" aria-hidden="true">→</span></a>{% endfor %}</div></section>
+{% if promoted %}<section class="hc-promoted"><div class="hc-section-heading"><h2>{{ ui.promoted }}</h2></div>
 <ol class="hc-article-list">{% for article in promoted %}<li><a href="{% url 'help_article' center.slug locale article.slug %}"><span>{{ article.title }}</span><small>{{ article.section.name }}</small></a></li>{% endfor %}</ol></section>{% endif %}
-<aside class="hc-contact-card"><span class="hc-contact-card__mark">?</span><div><h2>{% if locale == 'es' %}¿Sigues necesitando ayuda?{% else %}Still need help?{% endif %}</h2><p>{{ ui.try_request }}</p></div><a class="hc-button" href="{% url 'help_request' center.slug locale %}">{{ ui.submit_request }} →</a></aside>
+<aside class="hc-contact-card"><span class="hc-contact-card__mark" aria-hidden="true">?</span><div><h2>{% if locale == 'es' %}¿Sigues necesitando ayuda?{% else %}Still need help?{% endif %}</h2><p>{{ ui.try_request }}</p></div><a class="hc-button hc-button--strong" href="{% url 'help_request' center.slug locale %}">{{ ui.submit_request }} →</a></aside>
 </div>{% endblock %}

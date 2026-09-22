@@ -6,14 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex, nofollow">
     <title>{% if language == 'en' %}Rate the support you received{% else %}Valora la atención recibida{% endif %}{% if ticket %} – Ticket #{{ ticket.id }}{% endif %}</title>
-    <link rel="stylesheet" href="{% static 'tickets/satisfaction.css' %}?v=s5.8">
+    {% if center.has_brand_assets %}<link rel="icon" type="image/png" sizes="32x32" href="{% static center.icon_small_static_path %}">{% endif %}
+    <link rel="stylesheet" href="{% static 'help_centers/brand.css' %}?v=2.0">
+    <link rel="stylesheet" href="{% static 'tickets/satisfaction.css' %}?v=s6.0">
 </head>
 <body class="sv-brand--{{ center.slug|default:'ticketflow' }}" style="{{ brand_style }}">
 <div class="sv-signal" aria-hidden="true"></div>
 <div class="sv-shell">
 <aside class="sv-aside">
     <div class="sv-aside-inner">
-        {% if brand_name %}<span class="sv-logo">{{ brand_name }}</span>{% endif %}
+        {% if center.has_brand_assets %}<img class="sv-logo" src="{% static center.logo_static_path %}" alt="{{ center.name }}">{% elif brand_name %}<span class="sv-logo sv-logo--text">{{ brand_name }}</span>{% endif %}
         <p class="sv-claim">{% if language == 'en' %}Your feedback helps us improve the support we provide.{% else %}Tu opinión nos ayuda a mejorar la atención que te damos.{% endif %}</p>
     </div>
 </aside>
@@ -37,13 +39,13 @@
                 <label class="sv-option sv-option--good">
                     <input type="radio" name="score" value="good"
                            {% if selected_score == 'good' %}checked{% endif %}>
-                    <span class="sv-face" aria-hidden="true">☺</span>
+                    <svg class="sv-face" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9.7h.01M15 9.7h.01"/><path d="M8.4 14.4a4.6 4.6 0 0 0 7.2 0"/></svg>
                     <span>{% if language == 'en' %}Good, I'm satisfied{% else %}Bien, estoy satisfecho{% endif %}</span>
                 </label>
                 <label class="sv-option sv-option--bad">
                     <input type="radio" name="score" value="bad"
                            {% if selected_score == 'bad' %}checked{% endif %}>
-                    <span class="sv-face" aria-hidden="true">☹</span>
+                    <svg class="sv-face" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9.7h.01M15 9.7h.01"/><path d="M8.4 15.6a4.6 4.6 0 0 1 7.2 0"/></svg>
                     <span>{% if language == 'en' %}Bad, I'm unsatisfied{% else %}Mal, no estoy satisfecho{% endif %}</span>
                 </label>
             </div>
@@ -73,9 +75,9 @@
     {% elif state == 'done' %}
         <div class="sv-result">
             {% if rating.score == 'good' %}
-                <span class="sv-result-ico sv-result-ico--good">☺</span>
+                <svg class="sv-result-ico sv-result-ico--good" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9.7h.01M15 9.7h.01"/><path d="M8.4 14.4a4.6 4.6 0 0 0 7.2 0"/></svg>
             {% else %}
-                <span class="sv-result-ico sv-result-ico--bad">☹</span>
+                <svg class="sv-result-ico sv-result-ico--bad" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9.7h.01M15 9.7h.01"/><path d="M8.4 15.6a4.6 4.6 0 0 1 7.2 0"/></svg>
             {% endif %}
             <h1 class="sv-title">{% if language == 'en' %}Thank you for your feedback!{% else %}¡Gracias por tu valoración!{% endif %}</h1>
             <p class="sv-note">

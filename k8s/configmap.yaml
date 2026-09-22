@@ -16,9 +16,17 @@ data:
   # sin que el kernel termine workers por presión de memoria.
   WEB_CONCURRENCY: "2"
   GUNICORN_TIMEOUT: "60"
-  # STA: únicamente las respuestas públicas escritas por agentes salen por email.
-  # Acuse de creación y encuesta permanecen explícitamente desactivados.
-  OUTBOUND_EMAIL_ENABLED: "true"
+  # Entrante: el cursor de lectura es por entorno (MailboxSyncCursor), así que
+  # DEV y STA pueden leer el mismo buzón físico sin quitarse el correo. Lo que
+  # NO puede repetirse entre entornos es ENVIRONMENT_NAME; si se omite se deriva
+  # de AWS_SSM_PREFIX, que ya difiere (Development / Staging).
+  # El marcado como leído debe quedar encendido en un solo entorno: ensucia el
+  # estado de lectura de un buzón que es compartido y que la gente también mira.
+  INBOUND_MARK_READ_ENABLED: "false"
+  INBOUND_DELTA_LOOKBACK_MINUTES: "60"
+  INBOUND_DELTA_MAX_PAGES: "20"
+  # DEV comparte buzón con STA: no debe enviar correo a clientes reales.
+  OUTBOUND_EMAIL_ENABLED: "false"
   OUTBOUND_TICKET_CREATED_ENABLED: "false"
   OUTBOUND_AGENT_REPLY_ENABLED: "true"
   SATISFACTION_SURVEY_ENABLED: "false"

@@ -47,7 +47,8 @@ Optional: extra_param + extra_value (carried in every link, e.g. customer id).
                         data-priority="{{ ticket.priority|default:'' }}"
                         data-lc-author="{{ ticket.lc_author|default:'' }}"
                         data-lc-date="{{ ticket.lc_date|default:'' }}"
-                        data-lc-body="{{ ticket.lc_body|default:'' }}">{{ ticket.subject }}</span>
+                        data-lc-body="{{ ticket.lc_body|default:'' }}"
+                        data-lc-internal="{{ ticket.lc_internal|yesno:'1,' }}">{{ ticket.subject|truncatechars:100 }}</span>
                 </td>
                 <td>{{ ticket.status }}</td>
                 <td>{{ ticket.priority|default:"—" }}</td>

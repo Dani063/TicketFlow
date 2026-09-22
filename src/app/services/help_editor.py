@@ -4,7 +4,6 @@ import hashlib
 import logging
 import mimetypes
 import os
-import re
 import uuid
 
 import boto3
@@ -16,11 +15,11 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from app.models import HelpArticle, HelpArticleAsset, HelpArticleRevision
+from app.services.attachments import AttachmentService
 from app.services.help_content import help_plain_text, sanitize_help_html
 
 
 logger = logging.getLogger(__name__)
-_SAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 class HelpEditorConflict(Exception):
@@ -226,11 +225,7 @@ def unpublish_article(*, article, user, expected_version):
 class HelpAssetService:
     @staticmethod
     def safe_name(name):
-        basename = os.path.basename((name or "archivo").replace("\\", "/"))
-        stem, ext = os.path.splitext(basename)
-        safe_stem = _SAFE_CHARS.sub("-", stem).strip(".-_")[:120] or "archivo"
-        safe_ext = _SAFE_CHARS.sub("", ext.lower())[:12]
-        return f"{safe_stem}{safe_ext}"
+        return AttachmentService.safe_name(name)
 
     @staticmethod
     def validate(uploaded):

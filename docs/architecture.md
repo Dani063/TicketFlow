@@ -154,5 +154,14 @@ Estos permisos se configuran en el **App Registration** de Azure AD, no en AWS.
 |---|---|---|
 | `Mail.Read` | Application | Graph API — leer mensajes del buzón de soporte |
 | `Mail.ReadWrite` | Application | Graph API — marcar mensajes como leídos tras procesarlos |
+| `Mail.Send` | Application | Graph API — envío saliente (`sendMail`) para marcas con `mailbox_type=m365`. Concedido desde el 27/07/2026 y verificado (HTTP 202 + copia en Enviados) — ver [`email-integration-setup.md`](email-integration-setup.md). |
 
-> Requieren **consentimiento de administrador** en el tenant de Azure AD.
+> Requieren **consentimiento de administrador** en el tenant de Azure AD. Al ser permisos
+> de aplicación, son **de tenant, no por buzón**: el acotamiento real a los buzones de
+> helpdesk lo hace una Application Access Policy de Exchange Online con
+> `AccessRight RestrictAccess`, no Azure AD.
+
+> Las cuatro direcciones de helpdesk M365 (`helpdesk@cloudwws.com`,
+> `helpdesk@comunycarse.com`, `soporte2@comunycarse.com`, `helpdesk@ecomfax.com`) son
+> **alias de un único buzón físico**, no cuatro buzones separados — ver la nota en
+> [`email-integration-setup.md`](email-integration-setup.md#infraestructura-de-email-por-marca).

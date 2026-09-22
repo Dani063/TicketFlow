@@ -15,6 +15,13 @@
     const $ = (id) => document.getElementById(id);
     if (!$('homeTicketsTableBody')) return; // no estamos en la home
 
+    // Asunto acotado en la tabla; el texto completo sigue disponible en el
+    // dataset para la tarjeta de vista previa (`_showCard`/`show`).
+    function _truncateSubject(subject) {
+        const s = subject || '';
+        return s.length > 100 ? s.slice(0, 100) + '…' : s;
+    }
+
     const data = window.__homeData || {};
     const CREATE_TICKET_URL = data.createTicketUrl || '/tickets/create/';
     const BULK_DELETE_URL = data.bulkDeleteUrl || '/tickets/bulk_delete/';
@@ -243,7 +250,8 @@
         dot.className = 'status-dot status-' + (t.status || '').toLowerCase();
         const span = document.createElement('span');
         span.className = 'subject-text';
-        span.textContent = t.subject || '';
+        span.textContent = _truncateSubject(t.subject);
+        span.title = t.subject || '';
         span.dataset.status = t.status || '';
         span.dataset.subject = t.subject || '';
         span.dataset.priority = t.priority || '';
@@ -251,6 +259,7 @@
         span.dataset.lcAuthor = t.last_comment ? t.last_comment.author : '';
         span.dataset.lcDate = t.last_comment ? t.last_comment.date : '';
         span.dataset.lcBody = t.last_comment ? t.last_comment.body : '';
+        span.dataset.lcInternal = (t.last_comment && t.last_comment.is_internal) ? '1' : '';
         subjectCell.appendChild(dot);
         subjectCell.appendChild(span);
 
@@ -446,7 +455,9 @@
             if (hasComment) {
                 card.querySelector('.tpc-comment-author').textContent = s.lcAuthor || '';
                 card.querySelector('.tpc-comment-date').textContent = s.lcDate || '';
-                card.querySelector('.tpc-comment-body').textContent = s.lcBody || '';
+                const body = card.querySelector('.tpc-comment-body');
+                body.textContent = s.lcBody || '';
+                body.classList.toggle('is-internal', !!s.lcInternal);
             }
             card.style.display = 'block';
             position();

@@ -42,6 +42,7 @@ from .services.notifications import NotificationService
 from .services.satisfaction import SatisfactionService
 from .services.sla import SLAService
 from .services.tickets import TicketService
+from .services.user_admin import UserAdminService
 
 logger = logging.getLogger('app.views')
 
@@ -69,10 +70,6 @@ def _cached_all_users():
 _DEFAULT_PAGE_SIZE = 50
 _ALLOWED_PAGE_SIZES = {10, 20, 50, 100, 150}
 _TICKET_FILTER_COUNTS_TTL = 15
-
-# Valoraciones mínimas para publicar el CSAT de un agente en /reporting/: con dos
-# votos el porcentaje solo puede ser 0, 50 o 100 y no informa de nada.
-_SATISFACTION_MIN_SAMPLE = 3
 
 _TICKET_SORT_FIELDS = {
     'id':         'id',
@@ -292,9 +289,10 @@ def _attach_last_comments(ticket_list):
         lc_map[c.ticket_id] = c
     for t in ticket_list:
         lc = lc_map.get(t.id)
-        t.lc_author = lc.user.name if lc and lc.user else ''
-        t.lc_date   = lc.created_at.strftime('%d/%m/%Y %H:%M') if lc else ''
-        t.lc_body   = (lc.content or '')[:300] if lc else ''
+        t.lc_author   = lc.user.name if lc and lc.user else ''
+        t.lc_date     = lc.created_at.strftime('%d/%m/%Y %H:%M') if lc else ''
+        t.lc_body     = (lc.content or '')[:300] if lc else ''
+        t.lc_internal = bool(lc and not lc.is_public)
 
 
 def _parse_page_size(raw):
@@ -1030,6 +1028,7 @@ def filter_tickets(request):
                 "author": lc.user.name if lc and lc.user else "",
                 "date": lc.created_at.strftime("%d/%m/%Y %H:%M") if lc else "",
                 "body": (lc.content or "")[:300] if lc else "",
+                "is_internal": bool(lc and not lc.is_public),
             } if lc else None,
         })
     return JsonResponse({
@@ -1348,9 +1347,6 @@ def _reporting_cache_set(key, payload, timeout=60):
 @api_login_required
 def reporting_data(request):
     """KPIs, series y distribuciones por entidad para /reporting/."""
-    from django.db.models import Avg, Min
-    from django.db.models.functions import ExtractHour, ExtractWeekDay, TruncDate
-
     if not _is_agent(request.user) and not _is_admin(request.user):
         return json_error('forbidden', 'No tienes permisos para ver los reportes.', status=403)
 
@@ -1389,258 +1385,9 @@ def reporting_data(request):
     if cached is not None:
         return JsonResponse(cached)
 
-    live = Ticket.objects.filter(is_deleted=False, merged_into__isnull=True)
-    if brand_id:
-        live = live.filter(brand_id=brand_id)
-    created_qs = live.filter(created_at__range=(start_dt, end_dt))
+    from .services.reporting_metrics import build_legacy_overview
 
-    # KPIs sobre los tickets creados en el rango.
-    # Compliance de primera respuesta solo acumula desde que first_response_met
-    # existe (el due se limpia al responder: no es retro-computable); breached
-    # via sla_breached_at es la fuente de verdad del incumplimiento.
-    kpis = created_qs.aggregate(
-        created=Count('id'),
-        breached=Count(Case(When(sla_breached_at__isnull=False, then=1), output_field=IntegerField())),
-        with_sla=Count(Case(When(
-            Q(resolution_due_at__isnull=False) | Q(first_response_due_at__isnull=False)
-            | Q(sla_breached_at__isnull=False) | Q(first_response_met__isnull=False),
-            then=1), output_field=IntegerField())),
-        fr_met=Count(Case(When(first_response_met=True, then=1), output_field=IntegerField())),
-        fr_measured=Count(Case(When(first_response_met__isnull=False, then=1), output_field=IntegerField())),
-    )
-    sla_compliance = (
-        round((kpis['with_sla'] - kpis['breached']) / kpis['with_sla'] * 100)
-        if kpis['with_sla'] else None
-    )
-
-    # Snapshot actual del backlog (no depende del rango): mide la cola viva.
-    snapshot = live.aggregate(
-        backlog=Count(Case(When(status__in=('open', 'pending'), then=1), output_field=IntegerField())),
-        open_now=Count(Case(When(status='open', then=1), output_field=IntegerField())),
-        pending_now=Count(Case(When(status='pending', then=1), output_field=IntegerField())),
-        unassigned=Count(Case(When(
-            Q(status__in=('open', 'pending')) & Q(assignee__isnull=True), then=1),
-            output_field=IntegerField())),
-    )
-    backlog = snapshot['backlog']
-
-    def _resolved_qs(s, e):
-        qs = TicketEvent.objects.filter(
-            field_name='status',
-            new_value__in=('resolved', 'closed'),
-            created_at__range=(s, e),
-            ticket__is_deleted=False,
-            ticket__merged_into__isnull=True,
-        )
-        if brand_id:
-            qs = qs.filter(ticket__brand_id=brand_id)
-        return qs
-
-    resolved_events = _resolved_qs(start_dt, end_dt)
-    resolved = resolved_events.values('ticket_id').distinct().count()
-
-    # Reaperturas: tickets que volvieron de resuelto/cerrado a open/pending en el rango.
-    reopened_qs = TicketEvent.objects.filter(
-        field_name='status',
-        old_value__in=('resolved', 'closed'),
-        new_value__in=('open', 'pending'),
-        created_at__range=(start_dt, end_dt),
-        ticket__is_deleted=False,
-        ticket__merged_into__isnull=True,
-    )
-    if brand_id:
-        reopened_qs = reopened_qs.filter(ticket__brand_id=brand_id)
-    reopened = reopened_qs.values('ticket_id').distinct().count()
-
-    # Tiempo medio de resolución (horas): desde la creación del ticket hasta su
-    # primer evento de resolución dentro del rango.
-    res_rows = list(
-        resolved_events.values('ticket_id').annotate(
-            resolved_at=Min('created_at'),
-            opened_at=Min('ticket__created_at'),
-        )
-    )
-    durations = [
-        (r['resolved_at'] - r['opened_at']).total_seconds() / 3600.0
-        for r in res_rows
-        if r['resolved_at'] and r['opened_at'] and r['resolved_at'] >= r['opened_at']
-    ]
-    avg_resolution_hours = round(sum(durations) / len(durations), 1) if durations else None
-
-    # Deltas vs periodo equivalente inmediatamente anterior (▲/▼ estilo dashboard).
-    period_len = end_dt - start_dt
-    prev_start, prev_end = start_dt - period_len, start_dt
-    created_prev = live.filter(created_at__range=(prev_start, prev_end)).count()
-    resolved_prev = _resolved_qs(prev_start, prev_end).values('ticket_id').distinct().count()
-
-    ratings = SatisfactionRating.objects.filter(
-        created_at__range=(start_dt, end_dt), score__in=('good', 'bad'),
-        ticket__is_deleted=False,
-    )
-    if brand_id:
-        ratings = ratings.filter(ticket__brand_id=brand_id)
-    good = ratings.filter(score='good').count()
-    bad = ratings.filter(score='bad').count()
-    satisfaction = round(good / (good + bad) * 100) if (good + bad) else None
-
-    # Tasa de respuesta: solo medible en las valoraciones nativas, que son las que
-    # registran la oferta (score='offered'). Lo importado de Zendesk no la trae.
-    offered_qs = SatisfactionRating.objects.filter(
-        offered_at__range=(start_dt, end_dt),
-        source=SatisfactionRating.SOURCE_NATIVE,
-        ticket__is_deleted=False,
-    )
-    if brand_id:
-        offered_qs = offered_qs.filter(ticket__brand_id=brand_id)
-    offered = offered_qs.count()
-    answered = offered_qs.filter(score__in=('good', 'bad')).count()
-    response_rate = round(answered / offered * 100) if offered else None
-
-    # CSAT por agente. Con muestras minúsculas el porcentaje es ruido puro, así que
-    # por debajo del mínimo no se publica.
-    agent_rows = []
-    for row in ratings.values('assignee__name').annotate(
-        n_good=Count(Case(When(score='good', then=1), output_field=IntegerField())),
-        n_bad=Count(Case(When(score='bad', then=1), output_field=IntegerField())),
-    ):
-        total = row['n_good'] + row['n_bad']
-        if total < _SATISFACTION_MIN_SAMPLE:
-            continue
-        agent_rows.append({
-            'agent': row['assignee__name'] or '— Sin asignar —',
-            'good': row['n_good'],
-            'bad': row['n_bad'],
-            'total': total,
-            'pct': round(row['n_good'] / total * 100),
-        })
-    agent_rows.sort(key=lambda r: (-r['pct'], -r['total']))
-    agent_rows = agent_rows[:15]
-
-    # Motivos de los votos negativos. Une el catálogo nativo (reason_choice) con el
-    # texto libre que trae el histórico de Zendesk (reason).
-    reason_counts = {}
-    for row in (ratings.filter(score='bad')
-                .values('reason_choice__label', 'reason').annotate(n=Count('id'))):
-        label = (row['reason_choice__label'] or (row['reason'] or '').strip()
-                 or '— Sin motivo indicado —')
-        reason_counts[label] = reason_counts.get(label, 0) + row['n']
-    reason_rows = sorted(
-        ({'label': label, 'n': n} for label, n in reason_counts.items()),
-        key=lambda r: -r['n'],
-    )[:10]
-
-    # Series diarias: creados y cerrados
-    created_series = list(
-        created_qs.annotate(day=TruncDate('created_at')).values('day')
-        .annotate(n=Count('id')).order_by('day')
-    )
-    closed_series = list(
-        live.filter(closed_at__range=(start_dt, end_dt))
-        .annotate(day=TruncDate('closed_at')).values('day')
-        .annotate(n=Count('id')).order_by('day')
-    )
-
-    # Distribución de carga: creados por hora del día (0-23) y por día de la
-    # semana — clave para dimensionar turnos del equipo de soporte.
-    hour_map = {
-        row['h']: row['n']
-        for row in created_qs.annotate(h=ExtractHour('created_at')).values('h')
-        .annotate(n=Count('id')) if row['h'] is not None
-    }
-    by_hour = [hour_map.get(h, 0) for h in range(24)]
-    # ExtractWeekDay: 1=domingo … 7=sábado (convención Django). Reordenamos a L-D.
-    wd_map = {
-        row['wd']: row['n']
-        for row in created_qs.annotate(wd=ExtractWeekDay('created_at')).values('wd')
-        .annotate(n=Count('id')) if row['wd'] is not None
-    }
-    _wd_order = [2, 3, 4, 5, 6, 7, 1]  # lunes…domingo
-    by_weekday = [wd_map.get(d, 0) for d in _wd_order]
-
-    # Tickets abiertos más antiguos: lista accionable para atacar el backlog.
-    oldest_rows = [
-        {
-            'id': t.id,
-            'subject': t.subject,
-            'status': t.status,
-            'assignee': t.assignee.name if t.assignee else None,
-            'created': t.created_at.strftime('%Y-%m-%d') if t.created_at else None,
-            'age_days': (timezone.now() - t.created_at).days if t.created_at else None,
-        }
-        for t in live.filter(status__in=('open', 'pending'))
-        .select_related('assignee').order_by('created_at')[:10]
-    ]
-
-    def _dist(field):
-        return [
-            {'label': row[field] or '—', 'n': row['n']}
-            for row in created_qs.values(field).annotate(n=Count('id')).order_by('-n')
-        ]
-
-    # Desglose por marca (siempre sobre el rango; muestra el bucket sin marca
-    # para medir cobertura de entidad)
-    brand_rows = [
-        {
-            'brand': row['brand__name'] or '— Sin marca —',
-            'created': row['n'],
-            'open': row['n_open'],
-            'breached': row['n_breached'],
-        }
-        for row in Ticket.objects.filter(
-            is_deleted=False, merged_into__isnull=True,
-            created_at__range=(start_dt, end_dt),
-        ).values('brand__name').annotate(
-            n=Count('id'),
-            n_open=Count(Case(When(status__in=('open', 'pending'), then=1), output_field=IntegerField())),
-            n_breached=Count(Case(When(sla_breached_at__isnull=False, then=1), output_field=IntegerField())),
-        ).order_by('-n')
-    ]
-
-    payload = {
-        'ok': True,
-        'range': {'from': str(date_from), 'to': str(date_to), 'brand_id': brand_id},
-        'kpis': {
-            'created': kpis['created'],
-            'created_prev': created_prev,
-            'resolved': resolved,
-            'resolved_prev': resolved_prev,
-            'backlog': backlog,
-            'open_now': snapshot['open_now'],
-            'pending_now': snapshot['pending_now'],
-            'unassigned': snapshot['unassigned'],
-            'sla_compliance_pct': sla_compliance,
-            'sla_breached': kpis['breached'],
-            'first_response_met': kpis['fr_met'],
-            'first_response_measured': kpis['fr_measured'],
-            'avg_resolution_hours': avg_resolution_hours,
-            'reopened': reopened,
-            'satisfaction_pct': satisfaction,
-            'satisfaction_good': good,
-            'satisfaction_bad': bad,
-            'satisfaction_offered': offered,
-            'satisfaction_answered': answered,
-            'satisfaction_response_rate_pct': response_rate,
-        },
-        'satisfaction': {
-            'by_agent': agent_rows,
-            'reasons': reason_rows,
-            'min_sample': _SATISFACTION_MIN_SAMPLE,
-        },
-        'series': {
-            'created': [{'day': str(r['day']), 'n': r['n']} for r in created_series],
-            'closed': [{'day': str(r['day']), 'n': r['n']} for r in closed_series],
-            'by_hour': by_hour,
-            'by_weekday': by_weekday,
-        },
-        'oldest_open': oldest_rows,
-        'distributions': {
-            'status': _dist('status'),
-            'priority': _dist('priority'),
-            'type': _dist('type'),
-            'channel': _dist('channel'),
-        },
-        'by_brand': brand_rows,
-    }
+    payload = build_legacy_overview(brand_id, date_from, date_to, start_dt, end_dt)
     _reporting_cache_set(cache_key, payload, 60)
     return JsonResponse(payload)
 
@@ -1778,7 +1525,6 @@ def sso_complete(request):
         data = parse_json_body(request)
         email = data.get('email')
         name = data.get('name', 'Usuario SSO')
-        # claims = data.get('claims', []) # Aquí puedes leer claims si los envías
 
         if not email:
             return json_error('email_required', 'Email es requerido para completar el SSO', status=400)
@@ -2151,6 +1897,39 @@ def take_ticket(request, ticket_id):
 
 # Funcionalidades de Comentarios
 
+def _comment_payload(comment, ticket):
+    """Forma canonica de un comentario para el frontend.
+
+    La consumen add_comment (publicacion propia) y ticket_live (refresco por
+    sondeo), de modo que ambas rutas pintan el mismo DOM y no pueden divergir.
+    `comment` tiene que venir de prepare_comments: de ahi salen `conversation`
+    y `speaker_kind`. El autor se lee del propio comentario y no del usuario de
+    la peticion, porque en el sondeo casi nunca son el mismo.
+    """
+    from django.template.loader import render_to_string
+
+    author = comment.user
+    return {
+        'id': comment.id,
+        'content': comment.content,
+        'html_body': comment.html_body or '',
+        'conversation_html': render_to_string(
+            'tickets/_conversation_body.html', {'conversation': comment.conversation},
+        ),
+        'speaker_kind': comment.speaker_kind,
+        'created_at': comment.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'created_at_iso': comment.created_at.isoformat(),
+        'ticket_id': ticket.id,
+        'user_id': author.id if author else None,
+        'username': author.name if author else '',
+        'user_role': author.role.role_name if author and author.role else None,
+        'is_public': comment.is_public,
+        'attachments': [
+            AttachmentService.metadata(a) for a in comment.attachment_set.order_by('id')
+        ],
+    }
+
+
 @api_login_required
 @require_POST
 def add_comment(request, ticket_id):
@@ -2172,30 +1951,65 @@ def add_comment(request, ticket_id):
     except APIValidationError as exc:
         return json_error(exc.code, exc.message, status=exc.status)
 
-    # adjuntos del comentario para el frontend
-    atts = [AttachmentService.metadata(a) for a in comment.attachment_set.order_by('id')]
     visible_comments = ticket.comment_set.select_related('user', 'user__role').order_by('created_at', 'id')
     if not _is_agent(request.user):
         visible_comments = visible_comments.filter(is_public=True)
     presented = prepare_comments(list(visible_comments))
     published = next(c for c in presented if c.pk == comment.pk)
-    from django.template.loader import render_to_string
-    conversation_html = render_to_string('tickets/_conversation_body.html', {'conversation': published.conversation})
+    payload = _comment_payload(published, ticket)
+    payload['new_status'] = applied_status
+    return JsonResponse(payload)
+
+
+@api_login_required
+@require_GET
+def ticket_live(request, ticket_id):
+    """Novedades de un ticket desde el ultimo comentario que vio el cliente.
+
+    La llama el refresco automatico del pane cada pocos segundos, asi que el
+    caso normal —nada nuevo— tiene que ser barato: son dos consultas, la del
+    ticket y la de los ids posteriores a `after`, y devuelve `comments: []`.
+    Solo cuando hay algo nuevo se paga prepare_comments, que necesita la
+    conversacion entera para deduplicar las citas de los correos.
+
+    La visibilidad es la misma que en add_comment: quien no es agente no ve los
+    comentarios internos, ni aqui ni al publicar.
+    """
+    ticket = get_object_or_404(Ticket.objects.select_related('assignee'), id=ticket_id)
+    if not can_view_ticket(request.user, ticket):
+        return json_error("forbidden", "No tienes acceso a este ticket.", status=403)
+
+    try:
+        after = int(request.GET.get('after') or 0)
+    except (TypeError, ValueError):
+        after = 0
+
+    visible = ticket.comment_set.all()
+    if not _is_agent(request.user):
+        visible = visible.filter(is_public=True)
+
+    new_ids = set(visible.filter(id__gt=after).values_list('id', flat=True))
+    comments = []
+    if new_ids:
+        presented = prepare_comments(list(
+            visible.select_related('user', 'user__role').order_by('created_at', 'id')
+        ))
+        comments = [_comment_payload(c, ticket) for c in presented if c.pk in new_ids]
+
     return JsonResponse({
-        'id': comment.id,
-        'content': comment.content,
-        'html_body': comment.html_body or '',
-        'conversation_html': conversation_html,
-        'speaker_kind': published.speaker_kind,
-        'created_at': comment.created_at.strftime('%Y-%m-%d %H:%M:%S'),
-        'created_at_iso': comment.created_at.isoformat(),
-        'ticket_id': ticket.id,
-        'user_id': request.user.id,
-        'username': request.user.name,
-        'user_role': request.user.role.role_name if request.user.role else None,
-        'is_public': comment.is_public,
-        'attachments': list(atts),
-        'new_status': applied_status,
+        'ticket': {
+            'status': ticket.status,
+            'status_display': ticket.get_status_display(),
+            'assignee_id': ticket.assignee_id,
+            'assignee_name': ticket.assignee.name if ticket.assignee else '',
+            'priority': ticket.priority or '',
+            'updated_at': (
+                timezone.localtime(ticket.updated_at).strftime('%d/%m/%Y %H:%M')
+                if ticket.updated_at else ''
+            ),
+        },
+        'comments': comments,
+        'last_comment_id': max(new_ids) if new_ids else after,
     })
 
 
@@ -2609,10 +2423,6 @@ def documentation(request):
 # Panel de administración (solo rol admin)
 # ---------------------------------------------------------------------------
 
-import re as _re_admin
-_EMAIL_RE = _re_admin.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
-
-
 def _admin_required(view_func):
     """Decorator: 401/403 JSON para APIs; HTML conserva redirect/403."""
     from functools import wraps
@@ -2682,20 +2492,6 @@ def admin_panel(request):
     })
 
 
-def _admin_serialize_user(u):
-    return {
-        'id': u.id,
-        'name': u.name,
-        'email': u.email,
-        'role_id': u.role_id,
-        'role_name': u.role.role_name if u.role else None,
-        'group_id': u.group_id,
-        'group_name': u.group.group_name if u.group else None,
-        'is_active': bool(u.is_active),
-        'created_at': u.created_at.strftime('%d/%m/%Y') if u.created_at else '',
-    }
-
-
 @_admin_required
 def admin_users_api(request):
     """CRUD de usuarios para administradores.
@@ -2704,161 +2500,39 @@ def admin_users_api(request):
     POST /api/admin/users/            → crea {name, email, role_id, group_id, password?}
     PUT  /api/admin/users/            → actualiza {id, name?, email?, role_id?, group_id?, is_active?}
     DELETE /api/admin/users/?id=N     → desactiva (soft-delete) o borra si no tiene tickets
+
+    Lógica de negocio (validaciones y mutaciones) en `services.user_admin.UserAdminService`.
     """
     if request.method == 'GET':
-        qs = User.objects.select_related('role', 'group').order_by('name')
-        q = (request.GET.get('q') or '').strip()
-        if q:
-            qs = qs.filter(Q(name__icontains=q) | Q(email__icontains=q))
-        role_id = request.GET.get('role_id')
-        group_id = request.GET.get('group_id')
-        if role_id and role_id.isdigit():
-            qs = qs.filter(role_id=int(role_id))
-        if group_id and group_id.isdigit():
-            qs = qs.filter(group_id=int(group_id))
-        # Paginación server-side
-        try:
-            page = max(1, int(request.GET.get('page') or 1))
-        except (ValueError, TypeError):
-            page = 1
-        try:
-            page_size = int(request.GET.get('page_size') or 50)
-            if page_size not in (25, 50, 100, 200):
-                page_size = 50
-        except (ValueError, TypeError):
-            page_size = 50
-        total = qs.count()
-        total_pages = max(1, (total + page_size - 1) // page_size)
-        page = min(page, total_pages)
-        offset = (page - 1) * page_size
-        users = list(qs[offset:offset + page_size])
-        return JsonResponse({
-            'users': [_admin_serialize_user(u) for u in users],
-            'pagination': {
-                'total': total, 'page': page,
-                'total_pages': total_pages, 'page_size': page_size,
-            },
-        })
+        return JsonResponse(UserAdminService.list_users(request.GET))
 
     try:
         data = json.loads(request.body or '{}')
     except ValueError:
         return JsonResponse({'error': 'JSON inválido'}, status=400)
 
-    if request.method == 'POST':
-        name = (data.get('name') or '').strip()
-        email = (data.get('email') or '').strip().lower()
-        if not name:
-            return JsonResponse({'error': 'El nombre es obligatorio'}, status=400)
-        if not _EMAIL_RE.match(email):
-            return JsonResponse({'error': 'Email no válido'}, status=400)
-        if User.objects.filter(email__iexact=email).exists():
-            return JsonResponse({'error': 'Ya existe un usuario con ese email'}, status=400)
+    try:
+        if request.method == 'POST':
+            user = UserAdminService.create_user(data)
+            return JsonResponse({'ok': True, 'user': UserAdminService.serialize(user)})
 
-        role = None
-        if data.get('role_id'):
-            role = Role.objects.filter(id=data['role_id']).first()
-            if not role:
-                return JsonResponse({'error': 'Rol no encontrado'}, status=400)
-        group = None
-        if data.get('group_id'):
-            group = Group.objects.filter(id=data['group_id']).first()
-            if not group:
-                return JsonResponse({'error': 'Grupo no encontrado'}, status=400)
+        if request.method == 'PUT':
+            try:
+                user_id = int(data.get('id') or 0)
+            except (TypeError, ValueError):
+                return JsonResponse({'error': 'id requerido'}, status=400)
+            user = UserAdminService.update_user(request.user, user_id, data)
+            return JsonResponse({'ok': True, 'user': UserAdminService.serialize(user)})
 
-        user = User(email=email, name=name, role=role, group=group, is_active=True)
-        password = (data.get('password') or '').strip()
-        if password:
-            user.set_password(password)
-        else:
-            user.set_unusable_password()
-        user.save()
-        return JsonResponse({'ok': True, 'user': _admin_serialize_user(user)})
-
-    if request.method == 'PUT':
-        try:
-            user_id = int(data.get('id') or 0)
-        except (TypeError, ValueError):
-            return JsonResponse({'error': 'id requerido'}, status=400)
-        if not user_id:
-            return JsonResponse({'error': 'id requerido'}, status=400)
-        user = User.objects.filter(id=user_id).first()
-        if not user:
-            return JsonResponse({'error': 'Usuario no encontrado'}, status=404)
-
-        # No permitir que un admin se desactive a sí mismo (riesgo lockout)
-        if user.id == request.user.id and data.get('is_active') is False:
-            return JsonResponse({'error': 'No puedes desactivar tu propia cuenta'}, status=400)
-
-        if 'name' in data:
-            name = (data.get('name') or '').strip()
-            if not name:
-                return JsonResponse({'error': 'El nombre no puede estar vacío'}, status=400)
-            user.name = name
-
-        if 'email' in data:
-            new_email = (data.get('email') or '').strip().lower()
-            if not _EMAIL_RE.match(new_email):
-                return JsonResponse({'error': 'Email no válido'}, status=400)
-            if User.objects.filter(email__iexact=new_email).exclude(id=user.id).exists():
-                return JsonResponse({'error': 'Ya existe otro usuario con ese email'}, status=400)
-            user.email = new_email
-
-        if 'role_id' in data:
-            rid = data.get('role_id')
-            if rid in (None, '', 0):
-                user.role = None
-            else:
-                role = Role.objects.filter(id=rid).first()
-                if not role:
-                    return JsonResponse({'error': 'Rol no encontrado'}, status=400)
-                # Si quitamos el rol admin a un admin, asegurarnos de no dejar el sistema sin admins
-                if (user.role and _is_admin(user) and role.role_name.lower()
-                        not in ('admin', 'administrator', 'administrador')):
-                    if not User.objects.filter(role__role_name__iexact='admin', is_active=True).exclude(id=user.id).exists():
-                        return JsonResponse({'error': 'Debe quedar al menos un administrador activo'}, status=400)
-                user.role = role
-
-        if 'group_id' in data:
-            gid = data.get('group_id')
-            if gid in (None, '', 0):
-                user.group = None
-            else:
-                group = Group.objects.filter(id=gid).first()
-                if not group:
-                    return JsonResponse({'error': 'Grupo no encontrado'}, status=400)
-                user.group = group
-
-        if 'is_active' in data:
-            user.is_active = bool(data['is_active'])
-
-        user.save()
-        return JsonResponse({'ok': True, 'user': _admin_serialize_user(user)})
-
-    if request.method == 'DELETE':
-        try:
-            user_id = int(request.GET.get('id') or 0)
-        except (TypeError, ValueError):
-            return JsonResponse({'error': 'id requerido'}, status=400)
-        if not user_id:
-            return JsonResponse({'error': 'id requerido'}, status=400)
-        if user_id == request.user.id:
-            return JsonResponse({'error': 'No puedes eliminar tu propia cuenta'}, status=400)
-        user = User.objects.filter(id=user_id).first()
-        if not user:
-            return JsonResponse({'error': 'Usuario no encontrado'}, status=404)
-
-        # Si tiene tickets relacionados, mejor desactivar que borrar para preservar FK
-        has_tickets = (
-            Ticket.objects.filter(Q(requester=user) | Q(assignee=user) | Q(created_by=user)).exists()
-            or Comment.objects.filter(user=user).exists()
-        )
-        if has_tickets:
-            user.is_active = False
-            user.save(update_fields=['is_active'])
-            return JsonResponse({'ok': True, 'deactivated': True})
-        user.delete()
-        return JsonResponse({'ok': True, 'deleted': True})
+        if request.method == 'DELETE':
+            try:
+                user_id = int(request.GET.get('id') or 0)
+            except (TypeError, ValueError):
+                return JsonResponse({'error': 'id requerido'}, status=400)
+            result = UserAdminService.delete_user(request.user, user_id)
+            return JsonResponse({'ok': True, **result})
+    except APIValidationError as exc:
+        return JsonResponse({'error': exc.message}, status=exc.status)
 
     return JsonResponse({'error': 'Método no permitido'}, status=405)
 

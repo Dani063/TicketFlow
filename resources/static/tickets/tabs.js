@@ -27,6 +27,10 @@
         const ac = _getAppContent();
         if (ws) ws.hidden = true;
         if (ac) ac.hidden = false;
+        // Ninguna pestaña de ticket está visible mientras se muestra una
+        // página de la barra lateral: si una se quedaba "active", parecía
+        // seleccionada visualmente aunque no se estuviera viendo su pane.
+        setActive(null);
     }
 
     // Patch document.addEventListener once: handlers registered for

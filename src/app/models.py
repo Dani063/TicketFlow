@@ -284,6 +284,13 @@ class TicketEvent(models.Model):
                 fields=['ticket', 'field_name', 'created_at'],
                 name='app_evt_tkt_field_time',
             ),
+            # El reporting busca eventos de un tipo dentro de un rango sin saber
+            # de qué ticket son ("¿qué se resolvió esta semana?"). Sin este
+            # índice esa consulta degenera en un escaneo de toda la auditoría.
+            models.Index(
+                fields=['field_name', 'created_at'],
+                name='app_evt_field_time',
+            ),
         ]
 
 class AttachmentDraft(models.Model):
@@ -533,6 +540,49 @@ class AutomationExecution(models.Model):
         unique_together = [('rule', 'ticket', 'event_key')]
 
 
+class MailboxSyncCursor(models.Model):
+    """Puntero de sincronización de un buzón M365, **propio de cada entorno**.
+
+    Antes el puntero de «qué me queda por leer» era el flag ``isRead`` del propio
+    buzón de Exchange. Eso es estado compartido y mutable: con DEV y STA leyendo
+    el mismo buzón físico, el primero que pasaba marcaba el mensaje como leído y
+    el otro ya no lo veía nunca (no cumplía ``$filter=isRead eq false``). Una
+    carrera pura, y el perdedor no tenía forma de recuperar el correo.
+
+    El ``deltaLink`` de Graph es un token de estado opaco **por consumidor**: cada
+    entorno guarda el suyo aquí y avanza su propia secuencia sobre la misma
+    carpeta, sin tocar el buzón ni pisar a nadie.
+
+    La fila se identifica por la carpeta *física*, no por la dirección: las cuatro
+    direcciones de soporte son alias del mismo buzón y ``/users/<alias>/mailFolders/Inbox``
+    resuelve a la misma carpeta para todas.
+    """
+
+    # Los id de carpeta de Graph son largos (>255) y no caben en un índice de
+    # MySQL, así que la clave indexada es su sha256 y el id crudo va aparte.
+    environment = models.CharField(max_length=64, db_index=True)
+    folder_key = models.CharField(max_length=64)
+    folder_id = models.TextField()
+    mailbox = models.EmailField()
+    delta_link = models.TextField(blank=True, default='')
+    # 'delta' = ronda completa; 'partial' = se alcanzó el tope de páginas y el
+    # enlace guardado es un nextLink, que también es reanudable.
+    link_kind = models.CharField(max_length=16, blank=True, default='')
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    last_result = models.CharField(max_length=64, blank=True, default='')
+    last_error = models.TextField(null=True, blank=True)
+    last_message_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('environment', 'folder_key')]
+        ordering = ['environment', 'mailbox']
+
+    def __str__(self):
+        return f"{self.environment}:{self.mailbox}"
+
+
 class InboundEmailLog(models.Model):
     STATUS_RECEIVED = 'received'
     STATUS_PROCESSED = 'processed'
@@ -747,6 +797,65 @@ class HelpCenter(models.Model):
     def locale_supported(self, locale):
         return locale in (self.supported_locales or [self.default_locale])
 
+    # Identidad visual de las paginas publicas. Son propiedades y no campos a proposito:
+    # los ficheros se versionan en resources/static/help_centers/brand/ siguiendo la
+    # convencion <slug>-logo.png / <slug>-icon-<px>.png, asi que no hace falta ni
+    # migracion ni un dato en BBDD que pueda quedar apuntando a un fichero inexistente.
+    # Un centro sin ficheros propios cae en el logotipo de TicketFlow.
+
+    BRAND_ASSET_SLUGS = frozenset({"ecomfax", "recordia"})
+
+    @property
+    def has_brand_assets(self):
+        return self.slug in self.BRAND_ASSET_SLUGS
+
+    @property
+    def logo_static_path(self):
+        if not self.has_brand_assets:
+            return "tickets/logo.png"
+        return f"help_centers/brand/{self.slug}-logo.png"
+
+    @property
+    def icon_static_path(self):
+        if not self.has_brand_assets:
+            return "tickets/logo.png"
+        return f"help_centers/brand/{self.slug}-icon-180.png"
+
+    @property
+    def icon_small_static_path(self):
+        if not self.has_brand_assets:
+            return "tickets/logo.png"
+        return f"help_centers/brand/{self.slug}-icon-32.png"
+
+    # Documentacion legal que se sirve desde resources/static/help_centers/legal/.
+    # Se enlaza desde el pie; si se anade un PDF nuevo hay que declararlo aqui.
+    LEGAL_DOCUMENTS = {
+        "ecomfax": [
+            {"file": "eula-es.pdf", "es": "Acuerdo de licencia (EULA)", "en": "Licence agreement (ES)"},
+            {"file": "eula-en.pdf", "es": "Acuerdo de licencia (inglés)", "en": "Licence agreement (EULA)"},
+            {"file": "certificado-ens.pdf", "es": "Certificado ENS", "en": "ENS certificate"},
+        ],
+        "recordia": [
+            {"file": "declaracion-lopdgdd.pdf", "es": "Declaración LOPDGDD", "en": "LOPDGDD statement"},
+        ],
+    }
+
+    def legal_documents(self, locale="es"):
+        locale = "en" if locale == "en" else "es"
+        return [
+            {"label": row[locale], "path": f"help_centers/legal/{self.slug}/{row['file']}"}
+            for row in self.LEGAL_DOCUMENTS.get(self.slug, [])
+        ]
+
+    @property
+    def theme_color(self):
+        """Color de la barra del navegador movil.
+
+        No usa primary_color: ese campo guarda el navy heredado de la importacion de
+        Zendesk y ya no es el color con el que se pinta la cabecera. Ver brand.css.
+        """
+        return {"ecomfax": "#0093e9", "recordia": "#1b2487"}.get(self.slug, self.primary_color)
+
 
 class HelpCategory(models.Model):
     center = models.ForeignKey(HelpCenter, on_delete=models.CASCADE, related_name="categories")
@@ -928,3 +1037,126 @@ class PublicTicketAttempt(models.Model):
             models.Index(fields=["center", "ip_hash", "created_at"], name="public_ticket_ip_idx"),
             models.Index(fields=["center", "email_hash", "created_at"], name="public_ticket_email_idx"),
         ]
+
+
+class TicketFact(models.Model):
+    """Hechos precalculados por ticket: la tabla de hechos de /reporting/.
+
+    Hasta ahora cada peticion de reporting reconstruia en Python el ciclo de vida
+    de cada ticket releyendo ``TicketEvent`` y ``Comment``. Eso hacia que el coste
+    del informe dependiera del historico completo y no del rango pedido. Aqui se
+    persiste ese mismo calculo una sola vez por ticket, para que un informe sea
+    una lectura acotada en lugar de un replay.
+
+    Solo guarda lo que el reporting lee de verdad: los hechos del ciclo de vida y
+    las marcas de tiempo con las que se acotan las consultas. Las dimensiones
+    (producto, grupo, agente, empresa...) se siguen leyendo de ``Ticket``, que ya
+    tiene los indices compuestos adecuados: tener dos copias del mismo dato solo
+    anade una forma de que diverjan.
+
+    La mantiene ``app.tasks.refresh_reporting_facts`` (beat) y el backfill inicial
+    ``python main.py rebuild_reporting_facts``. Es un derivado puro: se puede
+    borrar y regenerar entera sin perder informacion de negocio.
+    """
+
+    ticket = models.OneToOneField(
+        Ticket, on_delete=models.CASCADE, primary_key=True, related_name="fact",
+    )
+
+    # --- Marcas de tiempo con las que se acota el informe --------------------
+    # Copiadas de Ticket para que build_sla descarte de un solo indice los
+    # tickets que no pueden aportar nada al rango pedido.
+    created_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(null=True, blank=True)
+    sla_breached_at = models.DateTimeField(null=True, blank=True)
+
+    # --- Hechos del ciclo de vida -------------------------------------------
+    agent_replies = models.PositiveIntegerField(default=0)
+    first_reply_at = models.DateTimeField(null=True, blank=True)
+    first_reply_hours = models.FloatField(null=True, blank=True)
+    first_assignment_at = models.DateTimeField(null=True, blank=True)
+    first_assignment_hours = models.FloatField(null=True, blank=True)
+    first_resolution_at = models.DateTimeField(null=True, blank=True)
+    first_resolution_hours = models.FloatField(null=True, blank=True)
+    full_resolution_at = models.DateTimeField(null=True, blank=True)
+    full_resolution_hours = models.FloatField(null=True, blank=True)
+    last_assignment_at = models.DateTimeField(null=True, blank=True)
+    assignment_to_resolution_hours = models.FloatField(null=True, blank=True)
+    assignee_stations = models.PositiveIntegerField(default=0)
+    group_stations = models.PositiveIntegerField(default=0)
+    reopens = models.PositiveIntegerField(default=0)
+
+    # La espera del solicitante sigue corriendo mientras el ticket esta abierto,
+    # asi que no se puede congelar en un numero. Se guarda lo ya acumulado y el
+    # instante desde el que sigue sumando (NULL = reloj parado), y la lectura
+    # completa el tramo pendiente contra el ``now`` del informe. Asi el valor es
+    # exacto para cualquier corte sin recalcular nada.
+    requester_wait_seconds = models.FloatField(default=0.0)
+    requester_wait_open_since = models.DateTimeField(null=True, blank=True)
+
+    # --- Control de frescura -------------------------------------------------
+    # source_updated_at guarda el Ticket.updated_at con el que se calculo la fila:
+    # comparar contra el actual detecta los tickets rancios sin guardar estado.
+    source_updated_at = models.DateTimeField(null=True, blank=True)
+    computed_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["created_at"], name="app_fact_created_idx"),
+            models.Index(fields=["full_resolution_at"], name="app_fact_resolved_idx"),
+            models.Index(fields=["first_reply_at"], name="app_fact_first_reply_idx"),
+            models.Index(fields=["sla_breached_at"], name="app_fact_sla_breach_idx"),
+            models.Index(fields=["updated_at"], name="app_fact_updated_idx"),
+        ]
+
+    def __str__(self):
+        return f"Hechos del ticket #{self.ticket_id}"
+
+
+class ReportingFactState(models.Model):
+    """Marca de que las tablas de hechos cubren ya todo el historico.
+
+    Hace falta una marca explicita y no un simple «¿hay alguna fila?»: mientras
+    el refresco se pone al dia, las tablas estan a medias, y una cola calculada a
+    medias no es un informe lento sino un dato falso. Hasta que esta marca
+    existe, /reporting/ sigue reconstruyendo desde la auditoria.
+
+    La escriben ``rebuild_all_facts`` y cada pasada completa de
+    ``refresh_stale_facts``, que ademas sirve de latido: ``backfilled_at`` dice
+    cuando se comprobo por ultima vez que no quedaba nada rancio.
+    """
+
+    singleton = models.PositiveSmallIntegerField(primary_key=True, default=1)
+    backfilled_at = models.DateTimeField(null=True, blank=True)
+    tickets = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"Hechos de reporting al dia: {self.backfilled_at or 'nunca'}"
+
+
+class TicketStatusInterval(models.Model):
+    """Tramos continuos de un ticket en un mismo estado normalizado.
+
+    Sustituye la reconstrucción del backlog, que releía todas las auditorías de
+    todos los tickets para cada uno de los 42 cortes del gráfico. Con estos
+    tramos, «cuántos tickets estaban abiertos el día D» es un rango indexado.
+
+    ``ended_at`` a NULL significa que el tramo sigue vigente. Un ticket reabierto
+    genera varios tramos no resueltos, así que el conteo sigue siendo exacto.
+    """
+
+    ticket = models.ForeignKey(
+        Ticket, on_delete=models.CASCADE, related_name="status_intervals",
+    )
+    status = models.CharField(max_length=32)
+    started_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "started_at", "ended_at"], name="app_interval_state_span"),
+            models.Index(fields=["ticket", "started_at"], name="app_interval_ticket_idx"),
+        ]
+
+    def __str__(self):
+        return f"#{self.ticket_id} {self.status} desde {self.started_at}"
