@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from app.management.commands.import_zendesk_help_centers import (
-    _append_attachment_downloads, _clean_body, _is_client_article,
+    _append_attachment_downloads, _clean_body, _ensure_article_body, _is_client_article,
 )
 from app.models import (
     Attachment, Brand, HelpArticle, HelpCategory, HelpCenter, HelpSection,
@@ -170,6 +170,14 @@ class PublicHelpCenterTests(TestCase):
         self.assertNotIn("evil.example", cleaned)
         self.assertIn("youtube.com/embed/abc", cleaned)
         self.assertIn('loading="lazy"', cleaned)
+        self.assertIn('referrerpolicy="strict-origin-when-cross-origin"', cleaned)
+
+    def test_articles_without_text_keep_their_embedded_media(self):
+        video = '<p><iframe src="https://www.youtube.com/embed/abc"></iframe></p>'
+        image = '<p><img src="/static/help_centers/content/ecomfax/1/captura.png" alt="Captura"></p>'
+        self.assertEqual(_ensure_article_body(video, "es"), video)
+        self.assertEqual(_ensure_article_body(image, "es"), image)
+        self.assertIn("help-source-empty", _ensure_article_body("<p></p>", "es"))
 
 
 @override_settings(OUTBOUND_EMAIL_ENABLED=False, AI_CLASSIFICATION_ENABLED=False, ALLOWED_HOSTS=["localhost", "testserver"])
@@ -267,6 +275,26 @@ class HelpContentSnapshotTests(SimpleTestCase):
         for url in static_refs:
             target = Path(settings.PROJECT_ROOT) / "resources" / url.lstrip("/")
             self.assertTrue(target.is_file(), f"Recurso local inexistente: {url}")
+
+    def test_video_articles_keep_their_embed(self):
+        checked = 0
+        for center in self.snapshot["centers"]:
+            for category in center["categories"]:
+                for section in category["sections"]:
+                    if not section["name"].lower().startswith("video"):
+                        continue
+                    for article in section["articles"]:
+                        self.assertIn(
+                            "youtube.com/embed/", article["body_html"],
+                            f"Videopildora sin vídeo: {article['source_id']}",
+                        )
+                        self.assertIn(
+                            'referrerpolicy="strict-origin-when-cross-origin"',
+                            article["body_html"],
+                            f"YouTube rechazará el vídeo sin referrer: {article['source_id']}",
+                        )
+                        checked += 1
+        self.assertEqual(checked, 12)
 
     def test_all_local_article_links_resolve(self):
         for center in self.snapshot["centers"]:

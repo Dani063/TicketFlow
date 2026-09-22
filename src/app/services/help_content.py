@@ -16,7 +16,7 @@ ALLOWED_TAGS = set(bleach.sanitizer.ALLOWED_TAGS) | {
 ALLOWED_ATTRIBUTES = {
     "a": ["href", "title", "target", "rel"],
     "img": ["src", "alt", "width", "height", "loading"],
-    "iframe": ["src", "title", "width", "height", "allow", "allowfullscreen", "loading"],
+    "iframe": ["src", "title", "width", "height", "allow", "allowfullscreen", "loading", "referrerpolicy"],
     "video": ["src", "controls", "width", "height"],
     "source": ["src", "type"],
     "th": ["colspan", "rowspan", "scope"],
@@ -45,7 +45,11 @@ def sanitize_help_html(value):
         host = (parsed.hostname or "").lower() if parsed else ""
         if host not in TRUSTED_VIDEO_HOSTS:
             return ""
-        return tag.replace("<iframe", '<iframe loading="lazy"', 1) if "loading=" not in tag else tag
+        extra = "" if "loading=" in tag.lower() else ' loading="lazy"'
+        # La página va con Referrer-Policy same-origin y sin Referer YouTube responde «error 153».
+        if "referrerpolicy=" not in tag.lower():
+            extra += ' referrerpolicy="strict-origin-when-cross-origin"'
+        return tag.replace("<iframe", f"<iframe{extra}", 1) if extra else tag
 
     body = re.sub(r"<iframe\b[^>]*>.*?</iframe>", safe_iframe, body, flags=re.I | re.S)
     return re.sub(r"<img(?![^>]*\bloading=)", '<img loading="lazy"', body, flags=re.I)
