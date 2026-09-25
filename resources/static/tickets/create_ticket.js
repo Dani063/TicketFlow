@@ -20,9 +20,103 @@ const _tfUserAjaxConfig = {
     dataType: 'json',
     delay: 200,
     data: params => ({ q: params.term || '', page: params.page || 1 }),
-    processResults: data => data,
+    processResults: data => _tfWithUserTitles(data),
     cache: true,
 };
+
+// Select2 usa `title` como tooltip del valor elegido: ahí va el email, que en
+// el campo no cabe junto al nombre.
+function _tfWithUserTitles(data) {
+    const results = ((data && data.results) || []).map(u => (u.email ? Object.assign({ title: u.email }, u) : u));
+    return { results, pagination: data && data.pagination };
+}
+
+// Opción de la lista de usuarios: nombre y, debajo, el email en pequeño. Los
+// dos se cortan con «…» para que el desplegable no se ensanche.
+function _tfUserResult(item) {
+    if (item.loading || !item.id) return item.text;
+    if (item.id === _TF_NEW_USER_ID) {
+        const add = document.createElement('span');
+        add.className = 'tf-select2-add-user';
+        add.innerHTML = '<i class="fas fa-user-plus" aria-hidden="true"></i> ';
+        add.appendChild(document.createTextNode('Añadir usuario'));
+        return add;
+    }
+    const el = document.createElement('span');
+    el.className = 'tf-user-opt';
+    const name = document.createElement('span');
+    name.className = 'tf-user-opt__name';
+    name.textContent = item.text || '';
+    el.appendChild(name);
+    if (item.email) {
+        const email = document.createElement('span');
+        email.className = 'tf-user-opt__email';
+        email.textContent = item.email;
+        el.appendChild(email);
+    }
+    return el;
+}
+
+// «Solicitante» y «CCs» con alta rápida: la primera opción de la lista es «+ Añadir
+// usuario», que abre TFQuickUser (quick_user.js) en vez de seleccionarse. Lo
+// escrito en el buscador llega prerrellenado al diálogo.
+const _TF_NEW_USER_ID = '__tf_new_user__';
+
+function _tfInitQuickCreateUserSelect(selectEl) {
+    const $select = window.jQuery(selectEl);
+    let lastTerm = '';
+    $select.select2({
+        width: '100%',
+        placeholder: '-',
+        allowClear: true,
+        minimumInputLength: 0,
+        ajax: Object.assign({}, _tfUserAjaxConfig, {
+            processResults: (data, params) => {
+                lastTerm = (params && params.term) || '';
+                const results = _tfWithUserTitles(data).results;
+                const more = !!(data && data.pagination && data.pagination.more);
+                const addUser = { id: _TF_NEW_USER_ID, text: '+ Añadir usuario' };
+                // Sin texto va arriba, a la vista. Con texto, al final: Select2
+                // resalta la primera opción y Enter tiene que elegir a la persona
+                // buscada, no abrir el alta.
+                if (!lastTerm) {
+                    if ((params.page || 1) === 1) results.unshift(addUser);
+                } else if (!more) {
+                    results.push(addUser);
+                }
+                return { results, pagination: data && data.pagination };
+            },
+        }),
+        templateResult: _tfUserResult,
+    });
+    $select.on('select2:selecting', async (e) => {
+        if (!e.params || !e.params.args || e.params.args.data.id !== _TF_NEW_USER_ID) return;
+        e.preventDefault();
+        $select.select2('close');
+        if (!window.TFQuickUser) return;
+        // Lo escrito en el buscador se aprovecha: si parece un email va al
+        // email y, si no, al nombre.
+        const term = lastTerm.trim();
+        const isEmail = term.includes('@');
+        const user = await window.TFQuickUser.open({ email: isEmail ? term : '', name: isEmail ? '' : term });
+        if (!user) return;
+        if (!$select.find('option[value="' + user.id + '"]').length) {
+            const option = new Option(user.text, user.id, false, false);
+            option.title = user.email || '';
+            $select.append(option);
+        }
+        // 'change' como en una selección normal: a partir de aquí el pane lo
+        // trata igual que si se hubiera elegido de la lista.
+        if (selectEl.multiple) {
+            // CCs: se añade a los que ya había, no los sustituye.
+            const current = ($select.val() || []).map(String);
+            if (!current.includes(String(user.id))) current.push(String(user.id));
+            $select.val(current).trigger('change');
+        } else {
+            $select.val(String(user.id)).trigger('change');
+        }
+    });
+}
 
 window.tfApplyPaneSelect2 = function (paneEl, opts) {
     if (!paneEl || !window.jQuery) return;
@@ -42,13 +136,16 @@ window.tfApplyPaneSelect2 = function (paneEl, opts) {
                     return;
                 }
             }
-            if (isAjaxUser) {
+            if (isAjaxUser && this.dataset.quickCreate) {
+                _tfInitQuickCreateUserSelect(this);
+            } else if (isAjaxUser) {
                 window.jQuery(this).select2({
                     width: '100%',
                     placeholder: '-',
                     allowClear: true,
                     minimumInputLength: 0,
                     ajax: _tfUserAjaxConfig,
+                    templateResult: _tfUserResult,
                 });
             } else if (this.id === 'tags') {
                 window.jQuery(this).select2({

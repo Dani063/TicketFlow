@@ -2351,3 +2351,63 @@ class MergeMessageTests(_BaseFixture):
         self.assertEqual(
             Comment.objects.filter(ticket=self.target, content="Llegan dos", is_public=False).count(), 1
         )
+
+
+class QuickCreateEndUserTests(_BaseFixture):
+    """Alta rápida de solicitante desde el desplegable del ticket."""
+
+    def _post(self, email):
+        return self.client.post(
+            reverse("quick_create_end_user"),
+            data=json.dumps({"email": email}),
+            content_type="application/json",
+        )
+
+    def test_agent_creates_an_end_user_with_just_the_email(self):
+        self.client.force_login(self.agent)
+        response = self._post("  Nuevo.Cliente@Empresa.com ")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["created"])
+        user = User.objects.get(id=payload["user"]["id"])
+        self.assertEqual(user.email, "nuevo.cliente@empresa.com")
+        self.assertEqual(user.name, "nuevo.cliente")
+        self.assertEqual(user.role.role_name, "End user")
+        self.assertFalse(is_agent(user))
+        self.assertFalse(user.has_usable_password())
+
+    def test_existing_email_returns_that_user(self):
+        self.client.force_login(self.agent)
+        payload = self._post(self.customer.email.upper()).json()
+        self.assertFalse(payload["created"])
+        self.assertEqual(payload["user"]["id"], self.customer.id)
+
+    def test_inactive_user_is_not_silently_reused(self):
+        self.customer.is_active = False
+        self.customer.save(update_fields=["is_active"])
+        self.client.force_login(self.agent)
+        response = self._post(self.customer.email)
+        self.assertEqual(response.status_code, 409)
+
+    def test_invalid_email_is_rejected(self):
+        self.client.force_login(self.agent)
+        self.assertEqual(self._post("sin-arroba").status_code, 400)
+
+    def test_end_users_cannot_create_users(self):
+        self.client.force_login(self.customer)
+        self.assertEqual(self._post("otro@example.com").status_code, 403)
+        self.assertFalse(User.objects.filter(email="otro@example.com").exists())
+
+    def test_optional_name_is_used_when_given(self):
+        self.client.force_login(self.agent)
+        response = self.client.post(
+            reverse("quick_create_end_user"),
+            data=json.dumps({"email": "marta@example.com", "name": "  Marta Prueba "}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.json()["user"]["text"], "Marta Prueba")
+
+    def test_user_search_returns_the_email_for_the_second_line(self):
+        self.client.force_login(self.agent)
+        results = self.client.get(reverse("users_search_api"), {"q": self.customer.email}).json()["results"]
+        self.assertEqual(results[0]["email"], self.customer.email)

@@ -1694,8 +1694,29 @@ def users_search_api(request):
     has_more = len(users) == page_size  # if full page, there might be more
 
     return JsonResponse({
-        'results': [{'id': u.id, 'text': u.name} for u in users],
+        # El email va aparte para que el desplegable lo pinte como segunda
+        # línea: con solo el nombre no se distinguen homónimos ni los nombres
+        # sacados del propio email.
+        'results': [{'id': u.id, 'text': u.name, 'email': u.email} for u in users],
         'pagination': {'more': has_more},
+    })
+
+
+@api_login_required
+@require_POST
+def quick_create_end_user(request):
+    """Alta de solicitante desde el desplegable «Solicitante» del ticket."""
+    if not _is_agent(request.user):
+        return json_error('forbidden', 'Permiso denegado', status=403)
+    try:
+        data = parse_json_body(request)
+        user, created = UserAdminService.create_end_user(data.get('email'), data.get('name'))
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+    return JsonResponse({
+        'ok': True,
+        'created': created,
+        'user': {'id': user.id, 'text': user.name, 'email': user.email},
     })
 
 
