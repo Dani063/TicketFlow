@@ -2150,3 +2150,264 @@ class SatisfactionSurveyTests(_BaseFixture):
         self._offer(self._resolved_ticket())
         self.assertEqual(SatisfactionRating.objects.filter(zendesk_id__isnull=True).count(), 2)
         self.assertEqual(SatisfactionRating.objects.count(), 3)
+
+
+class AgentInboxTests(_BaseFixture):
+    """Bandeja del agente: respuestas sin contestar y avisos de la campana."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.agent)
+
+    def _reply(self, ticket, actor, **kwargs):
+        from app.services.comments import CommentService
+
+        return CommentService.add_comment(
+            ticket, actor, "mensaje", is_public=True, send_requester_email=False, **kwargs
+        )
+
+    def _activity_ids(self):
+        response = self.client.get(reverse("recent_activity_api"))
+        self.assertEqual(response.status_code, 200)
+        return [row["ticket_id"] for row in response.json()["activity"]]
+
+    def test_ticket_enters_the_list_when_the_customer_writes_last(self):
+        ticket = self.make_ticket()
+        self.assertEqual(self._activity_ids(), [])
+
+        self._reply(ticket, self.customer)
+        self.assertEqual(self._activity_ids(), [ticket.id])
+
+    def test_answering_removes_it_from_the_list(self):
+        ticket = self.make_ticket()
+        self._reply(ticket, self.customer)
+        self._reply(ticket, self.agent)
+        self.assertEqual(self._activity_ids(), [])
+
+    def test_an_internal_note_does_not_count_as_an_answer(self):
+        from app.services.comments import CommentService
+
+        ticket = self.make_ticket()
+        self._reply(ticket, self.customer)
+        CommentService.add_comment(ticket, self.agent, "nota", is_public=False)
+        self.assertEqual(self._activity_ids(), [ticket.id])
+
+    def test_a_colleagues_answer_also_clears_it(self):
+        other = User.objects.create_user("other@example.com", "Other", "secret")
+        other.role = self.agent_role
+        other.save(update_fields=["role"])
+
+        ticket = self.make_ticket()
+        self._reply(ticket, self.customer)
+        self._reply(ticket, other)
+        self.assertEqual(self._activity_ids(), [])
+
+    def test_closed_tickets_stay_out(self):
+        ticket = self.make_ticket(status="closed")
+        self._reply(ticket, self.customer)
+        self.assertEqual(self._activity_ids(), [])
+
+    def test_opening_a_ticket_marks_its_notifications_read(self):
+        ticket = self.make_ticket()
+        self._reply(ticket, self.customer)
+        self.assertTrue(Notification.objects.filter(ticket=ticket, user=self.agent, read=False).exists())
+
+        response = self.client.post(
+            reverse("mark_ticket_notifications_read", args=[ticket.id])
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["cleared"], 1)
+        self.assertEqual(payload["unread"], 0)
+        self.assertFalse(Notification.objects.filter(user=self.agent, read=False).exists())
+
+    def test_marking_read_does_not_touch_other_users_notifications(self):
+        ticket = self.make_ticket()
+        self._reply(ticket, self.customer)
+        Notification.objects.create(user=self.admin, ticket=ticket, message="ajeno")
+
+        self.client.post(reverse("mark_ticket_notifications_read", args=[ticket.id]))
+        self.assertTrue(Notification.objects.filter(user=self.admin, read=False).exists())
+
+    def test_unread_count_is_not_capped_by_the_listed_page(self):
+        ticket = self.make_ticket()
+        for index in range(25):
+            Notification.objects.create(user=self.agent, ticket=ticket, message=f"aviso {index}")
+
+        payload = self.client.get(reverse("notifications_api")).json()
+        self.assertEqual(len(payload["notifications"]), 20)
+        self.assertEqual(payload["unread"], 25)
+
+    def test_reply_on_an_unassigned_ticket_reaches_the_group(self):
+        group = Group.objects.create(group_name="Soporte")
+        member = User.objects.create_user("member@example.com", "Member", "secret")
+        member.role = self.agent_role
+        member.group = group
+        member.save(update_fields=["role", "group"])
+
+        ticket = self.make_ticket(assignee=None, assigned_group=group)
+        self._reply(ticket, self.customer)
+        self.assertTrue(Notification.objects.filter(ticket=ticket, user=member, read=False).exists())
+
+    def test_home_table_includes_old_open_tickets_counted_in_the_button(self):
+        """La tabla heredaba el rango de 30 días de /tickets/ y el contador no."""
+        old = self.make_ticket()
+        Ticket.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=90))
+        stats = self.client.get(reverse("home_stats_api")).json()["stats"]
+        rows = self.client.get(
+            reverse("filter_tickets"), {"view": "home_you", "page": 1, "page_size": 50}
+        ).json()["tickets"]
+        self.assertEqual(stats["abiertos_you"], 1)
+        self.assertEqual([row["id"] for row in rows], [old.id])
+
+    def test_home_stats_endpoint_matches_the_dashboard(self):
+        self.make_ticket()
+        from_page = self.client.get(reverse("home")).context["stats"]
+        from_api = self.client.get(reverse("home_stats_api")).json()["stats"]
+        self.assertEqual(from_api, from_page)
+
+
+@override_settings(
+    OUTBOUND_EMAIL_ENABLED=True,
+    OUTBOUND_TICKET_CREATED_ENABLED=True,
+    OUTBOUND_AGENT_REPLY_ENABLED=True,
+)
+class MergeMessageTests(_BaseFixture):
+    """Paso 2 del modal de fusión: comentarios revisados por el agente."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.agent)
+        self.source = self.make_ticket(subject="origen", brand=self.brand_a)
+        self.target = self.make_ticket(subject="destino", brand=self.brand_a)
+        Comment.objects.create(ticket=self.source, user=self.customer, content="conversación original")
+
+    def _merge(self, **fields):
+        data = {"target_ticket_id": self.target.id, **fields}
+        return self.client.post(reverse("merge_ticket", args=[self.source.id]), data)
+
+    def test_public_closing_comment_stays_on_source_and_emails_its_requester(self):
+        response = self._merge(
+            source_comment="Lo unimos con el otro ticket",
+            source_comment_html="<p>Lo unimos con el <strong>otro</strong> ticket</p>",
+            source_is_public="true",
+            target_comment="Fusionado desde el origen",
+            target_comment_html="<p>Fusionado desde el origen</p>",
+            target_is_public="false",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        closing = Comment.objects.get(ticket=self.source)
+        self.assertTrue(closing.is_public)
+        self.assertIn("<strong>otro</strong>", closing.html_body)
+        self.assertTrue(
+            OutboundEmailLog.objects.filter(ticket=self.source, to_email=self.customer.email).exists()
+        )
+
+        note = Comment.objects.get(ticket=self.target, content="Fusionado desde el origen")
+        self.assertFalse(note.is_public)
+        self.assertFalse(OutboundEmailLog.objects.filter(ticket=self.target).exists())
+        # La conversación original viaja al destino, el comentario de cierre no.
+        self.assertTrue(Comment.objects.filter(ticket=self.target, content="conversación original").exists())
+
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.status, "closed")
+        self.assertEqual(self.source.merged_into, self.target)
+
+    def test_empty_messages_publish_nothing(self):
+        response = self._merge(
+            source_comment="  ", source_is_public="true",
+            target_comment="", target_is_public="true",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Comment.objects.filter(ticket=self.source).exists())
+        self.assertEqual(Comment.objects.filter(ticket=self.target).count(), 1)
+        self.assertFalse(OutboundEmailLog.objects.exists())
+
+    def test_merge_without_messages_keeps_the_old_behaviour(self):
+        response = self._merge()
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Comment.objects.filter(ticket=self.source).exists())
+        self.assertFalse(OutboundEmailLog.objects.exists())
+
+    def test_bulk_merge_posts_the_closing_comment_on_every_source(self):
+        other = self.make_ticket(subject="otro origen", brand=self.brand_a)
+        response = self.client.post(
+            reverse("bulk_merge"),
+            data=json.dumps({
+                "ids": [self.source.id, other.id],
+                "target_id": self.target.id,
+                "source_message": {"content": "Unidos", "html_body": "<p>Unidos</p>", "is_public": True},
+                "target_message": {"content": "Llegan dos", "html_body": "", "is_public": False},
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        for source in (self.source, other):
+            closing = Comment.objects.get(ticket=source)
+            self.assertEqual(closing.content, "Unidos")
+            self.assertTrue(closing.is_public)
+            self.assertTrue(OutboundEmailLog.objects.filter(ticket=source).exists())
+        self.assertEqual(
+            Comment.objects.filter(ticket=self.target, content="Llegan dos", is_public=False).count(), 1
+        )
+
+
+class QuickCreateEndUserTests(_BaseFixture):
+    """Alta rápida de solicitante desde el desplegable del ticket."""
+
+    def _post(self, email):
+        return self.client.post(
+            reverse("quick_create_end_user"),
+            data=json.dumps({"email": email}),
+            content_type="application/json",
+        )
+
+    def test_agent_creates_an_end_user_with_just_the_email(self):
+        self.client.force_login(self.agent)
+        response = self._post("  Nuevo.Cliente@Empresa.com ")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["created"])
+        user = User.objects.get(id=payload["user"]["id"])
+        self.assertEqual(user.email, "nuevo.cliente@empresa.com")
+        self.assertEqual(user.name, "nuevo.cliente")
+        self.assertEqual(user.role.role_name, "End user")
+        self.assertFalse(is_agent(user))
+        self.assertFalse(user.has_usable_password())
+
+    def test_existing_email_returns_that_user(self):
+        self.client.force_login(self.agent)
+        payload = self._post(self.customer.email.upper()).json()
+        self.assertFalse(payload["created"])
+        self.assertEqual(payload["user"]["id"], self.customer.id)
+
+    def test_inactive_user_is_not_silently_reused(self):
+        self.customer.is_active = False
+        self.customer.save(update_fields=["is_active"])
+        self.client.force_login(self.agent)
+        response = self._post(self.customer.email)
+        self.assertEqual(response.status_code, 409)
+
+    def test_invalid_email_is_rejected(self):
+        self.client.force_login(self.agent)
+        self.assertEqual(self._post("sin-arroba").status_code, 400)
+
+    def test_end_users_cannot_create_users(self):
+        self.client.force_login(self.customer)
+        self.assertEqual(self._post("otro@example.com").status_code, 403)
+        self.assertFalse(User.objects.filter(email="otro@example.com").exists())
+
+    def test_optional_name_is_used_when_given(self):
+        self.client.force_login(self.agent)
+        response = self.client.post(
+            reverse("quick_create_end_user"),
+            data=json.dumps({"email": "marta@example.com", "name": "  Marta Prueba "}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.json()["user"]["text"], "Marta Prueba")
+
+    def test_user_search_returns_the_email_for_the_second_line(self):
+        self.client.force_login(self.agent)
+        results = self.client.get(reverse("users_search_api"), {"q": self.customer.email}).json()["results"]
+        self.assertEqual(results[0]["email"], self.customer.email)

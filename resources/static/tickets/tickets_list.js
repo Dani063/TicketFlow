@@ -830,15 +830,26 @@
             _bmmSearchTimer = setTimeout(() => bmmSearch(this.value.trim()), 300);
         });
 
+        const _elBmmNext = document.getElementById('bmmNext');
+        if (_elBmmNext) _elBmmNext.addEventListener('click', bmmGoToReview);
+        const _elBmmBack = document.getElementById('bmmBack');
+        if (_elBmmBack) _elBmmBack.addEventListener('click', () => {
+            window.TFMergeReview.setStep(document.getElementById('bulkMergeOverlay'), 1, bmmButtons());
+        });
+
         const _elBmmConfirm = document.getElementById('bmmConfirm');
         if (_elBmmConfirm) _elBmmConfirm.addEventListener('click', async () => {
-            const targetId = parseInt(_elBmmConfirm.dataset.targetId || '0', 10);
-            if (!targetId) return;
+            if (!_bmmTarget) return;
+            const messages = window.TFMergeReview.for(document.getElementById('bulkMergeOverlay')).payload();
+            _elBmmConfirm.disabled = true;
             try {
                 const resp = await fetch('/tickets/bulk_merge/', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
-                    body: JSON.stringify({ids: [..._selectedIds], target_id: targetId}),
+                    body: JSON.stringify({
+                        ids: [..._selectedIds], target_id: _bmmTarget.id,
+                        source_message: messages.source, target_message: messages.target,
+                    }),
                 });
                 const json = await resp.json();
                 if (json.ok) {
@@ -848,9 +859,10 @@
                     loadTickets(_currentView, _currentPage);
                     refreshFilterCounts(true);
                 } else {
-                    window.toast.error(json.error || 'Error al fusionar');
+                    window.toast.error((json.error && json.error.message) || json.error || 'Error al fusionar');
+                    _elBmmConfirm.disabled = false;
                 }
-            } catch (e) { window.toast.error('Error de red'); }
+            } catch (e) { window.toast.error('Error de red'); _elBmmConfirm.disabled = false; }
         });
     }
 
@@ -893,19 +905,40 @@
         return v ? v[2] : null;
     }
 
+    // Dos pasos, como en el ticket: destino y revisión de los comentarios que
+    // deja la fusión (merge_review.js). El del origen le llega a cada cliente.
+    let _bmmTarget = null;      // { id, displayId, subject }
+
+    function bmmButtons() {
+        const el = (id) => document.getElementById(id);
+        return { cancel: el('bmmCancel'), back: el('bmmBack'), next: el('bmmNext'), confirm: el('bmmConfirm') };
+    }
+
     function openBulkMergeModal() {
         const overlay = document.getElementById('bulkMergeOverlay');
         overlay.classList.add('open');
         document.getElementById('bmmSearch').value = '';
         document.getElementById('bmmResults').innerHTML = '';
         document.getElementById('bmmSelectedTarget').classList.remove('show');
-        document.getElementById('bmmConfirm').disabled = true;
-        delete document.getElementById('bmmConfirm').dataset.targetId;
+        document.getElementById('bmmNext').disabled = true;
+        _bmmTarget = null;
+        window.TFMergeReview.for(overlay).reset();
+        window.TFMergeReview.setStep(overlay, 1, bmmButtons());
         setTimeout(() => document.getElementById('bmmSearch').focus(), 50);
     }
 
     function closeBulkMergeModal() {
         document.getElementById('bulkMergeOverlay').classList.remove('open');
+    }
+
+    function bmmGoToReview() {
+        const overlay = document.getElementById('bulkMergeOverlay');
+        if (!_bmmTarget) return;
+        window.TFMergeReview.for(overlay).show({
+            sources: [..._selectedIds].map(id => ({ displayId: id, subject: '' })),
+            target: _bmmTarget,
+        });
+        window.TFMergeReview.setStep(overlay, 2, bmmButtons());
     }
 
     async function bmmSearch(q) {
@@ -927,8 +960,15 @@
             tickets.forEach(t => {
                 const li = document.createElement('li');
                 li.dataset.id = t.id;
-                li.innerHTML = `<span class="bmm-id">#${t.id}</span><span class="bmm-subject">${t.subject}</span>`;
-                li.addEventListener('click', () => bmmSelectTarget(t.id, t.subject, li));
+                // El asunto viene de correo: se inserta como texto.
+                const idEl = document.createElement('span');
+                idEl.className = 'bmm-id';
+                idEl.textContent = '#' + (t.display_id || t.id);
+                const subjEl = document.createElement('span');
+                subjEl.className = 'bmm-subject';
+                subjEl.textContent = t.subject || '';
+                li.append(idEl, subjEl);
+                li.addEventListener('click', () => bmmSelectTarget(t, li));
                 list.appendChild(li);
             });
         } catch(e) {
@@ -936,15 +976,14 @@
         }
     }
 
-    function bmmSelectTarget(id, subject, li) {
+    function bmmSelectTarget(t, li) {
         document.querySelectorAll('#bmmResults li').forEach(el => el.classList.remove('selected'));
         li.classList.add('selected');
+        _bmmTarget = { id: t.id, displayId: t.display_id || t.id, subject: t.subject || '' };
         const target = document.getElementById('bmmSelectedTarget');
-        target.textContent = `Destino: #${id} — ${subject}`;
+        target.textContent = `Destino: #${_bmmTarget.displayId} — ${_bmmTarget.subject}`;
         target.classList.add('show');
-        const confirm = document.getElementById('bmmConfirm');
-        confirm.disabled = false;
-        confirm.dataset.targetId = id;
+        document.getElementById('bmmNext').disabled = false;
     }
 
     function openTicket(ticketId, subject) {

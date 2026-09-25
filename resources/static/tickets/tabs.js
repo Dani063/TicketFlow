@@ -965,18 +965,60 @@
         return '';
     }
 
+    // null hasta el primer sondeo: la cuenta inicial no debe animar la campana,
+    // solo los avisos que llegan con el agente ya delante.
+    let _lastUnread = null;
+
+    function setBadge(count) {
+        const badge = document.querySelector(".notifications .badge");
+        const bell = document.querySelector(".navbar-right .notifications");
+        if (!badge) return;
+        badge.textContent = count;
+        badge.style.display = count > 0 ? "inline-block" : "none";
+        if (bell) {
+            const previo = _lastUnread === null ? count : _lastUnread;
+            if (count > previo) {
+                bell.classList.remove("has-news");
+                void bell.offsetWidth;   // reinicia la animacion si ya estaba puesta
+                bell.classList.add("has-news");
+            } else if (count < previo || !count) {
+                // Ha bajado: el agente ya ha atendido algo, deja de reclamar.
+                bell.classList.remove("has-news");
+            }
+        }
+        _lastUnread = count;
+    }
+
+    function unreadFrom(data) {
+        return typeof data.unread === "number" ? data.unread : (data.notifications || []).length;
+    }
+
     async function updateBadge() {
         try {
             const res = await fetch("/api/notifications/");
             if (!res.ok) return;
-            const data = await res.json();
-            const badge = document.querySelector(".notifications .badge");
-            if (!badge) return;
-            const count = data.notifications.length;
-            badge.textContent = count;
-            badge.style.display = count > 0 ? "inline-block" : "none";
+            setBadge(unreadFrom(await res.json()));
         } catch (err) {
             console.error("Error actualizando badge", err);
+        }
+    }
+
+    // Abrir el ticket cuenta como leer sus avisos, se llegue desde donde se llegue.
+    async function markTicketNotificationsRead(ticketId) {
+        if (!ticketId) return;
+        try {
+            const res = await fetch(`/api/notifications/ticket/${encodeURIComponent(ticketId)}/read/`, {
+                method: "POST",
+                headers: { "X-CSRFToken": getCsrfToken() },
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.cleared) {
+                setBadge(unreadFrom(data));
+                refreshUpdates();
+            }
+        } catch (err) {
+            /* el aviso se quedara sin leer hasta el siguiente intento */
         }
     }
 
@@ -1054,7 +1096,7 @@
 
             list.innerHTML = "";
             if (!data.activity || !data.activity.length) {
-                list.innerHTML = "<li class='upd-empty'>Sin actualizaciones recientes</li>";
+                list.innerHTML = "<li class='upd-empty'>Nadie espera respuesta tuya</li>";
                 return;
             }
             data.activity.forEach(n => {
@@ -1066,13 +1108,20 @@
                 li.dataset.requester = n.requester || '';
                 li.dataset.assignee  = n.assignee  || '';
                 li.dataset.priority  = n.priority  || '';
-                li.innerHTML = `
-                    <span class="tl-badge status-${(n.status||'').toLowerCase()}">${(n.status||'').slice(0,1).toUpperCase()}</span>
-                    <div class="tl-content">
-                        <div class="tl-subject">#${n.ticket_id} ${n.subject || ''}</div>
-                        <div class="tl-when">${n.updated_at}</div>
-                    </div>
-                `;
+                // Asunto y remitente vienen de correo: se insertan como texto.
+                const badge = document.createElement('span');
+                badge.className = `tl-badge status-${(n.status || '').toLowerCase()}`;
+                badge.textContent = (n.status || '').slice(0, 1).toUpperCase();
+                const subject = document.createElement('div');
+                subject.className = 'tl-subject';
+                subject.textContent = `#${n.ticket_id} ${n.subject || ''}`;
+                const when = document.createElement('div');
+                when.className = 'tl-when';
+                when.textContent = (n.replied_by ? `${n.replied_by} · ` : '') + (n.replied_at || '');
+                const content = document.createElement('div');
+                content.className = 'tl-content';
+                content.append(subject, when);
+                li.append(badge, content);
                 li.addEventListener('click',       () => openTicket(n.ticket_id));
                 li.addEventListener('mouseenter',  () => showUpdPopup(li));
                 li.addEventListener('mouseleave',  hideUpdPopup);
@@ -1116,16 +1165,13 @@
                 const data = await res.json();
 
                 notifList.innerHTML = "";
-                const badge = document.querySelector(".notifications .badge");
+                setBadge(unreadFrom(data));
 
                 if (!data.notifications.length) {
                     notifList.innerHTML = "<li class='notif-empty'><i class='far fa-bell' aria-hidden='true'></i>" +
                         "<strong>Estás al día</strong><span>No hay notificaciones nuevas.</span></li>";
-                    if (badge) { badge.textContent = "0"; badge.style.display = "none"; }
                     return;
                 }
-
-                if (badge) { badge.textContent = data.notifications.length; badge.style.display = "inline-block"; }
 
                 data.notifications.forEach(n => {
                     const li = document.createElement("li");
@@ -1182,6 +1228,9 @@
                     hide(notifPop); toggleActive(null);
                 } else {
                     hide(userPop); show(notifPop); loadNotifications(); toggleActive('notif');
+                    // Ya los ha visto: la campana deja de reclamar atención.
+                    const bell = document.querySelector('.navbar-right .notifications');
+                    if (bell) bell.classList.remove('has-news');
                 }
                 return;
             }
@@ -1391,7 +1440,18 @@
             initSearch();
             updateBadge();
             refreshUpdates();
-            setInterval(updateBadge, 30000);
+            if (!window.__tfNotifPollTimer) {
+                // El sondeo se salta la pestaña en segundo plano; la carga
+                // inicial y el visibilitychange sí tienen que pasar siempre.
+                window.__tfNotifPollTimer = setInterval(() => {
+                    if (document.hidden) return;
+                    updateBadge();
+                    refreshUpdates();
+                }, 15000);
+                document.addEventListener('visibilitychange', () => {
+                    if (!document.hidden) { updateBadge(); refreshUpdates(); }
+                });
+            }
 
             // Tab overflow ("···") popup: open/close + close on outside click.
             document.addEventListener('click', (e) => {
@@ -1529,6 +1589,7 @@
         const tabText = subject || ('Ticket ' + ticketId);
         const tabUrl = (window.urls && window.urls.create_ticket) || '/tickets/create/';
         const fullUrl = tabUrl + '?id=' + ticketId;
+        markTicketNotificationsRead(ticketId);
         if (window.Tabs && typeof window.Tabs.addTab === 'function') {
             window.Tabs.addTab(tabText, fullUrl);
         } else {

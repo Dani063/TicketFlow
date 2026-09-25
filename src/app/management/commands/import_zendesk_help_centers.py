@@ -95,6 +95,9 @@ COMMUNITY_ARTICLES = {
     ],
 }
 
+_EMBED_RE = re.compile(r"<(?:iframe|img|video)\b", re.I)
+
+
 def _slug(title, source_id):
     return (slugify(title, allow_unicode=False)[:185] or f"article-{source_id}")
 
@@ -141,7 +144,8 @@ def _append_attachment_downloads(body, attachments, locale):
 
 
 def _ensure_article_body(body, locale):
-    if strip_tags(body or "").strip():
+    # Una videopildora o un articulo solo ilustrado no tiene texto, pero si contenido.
+    if strip_tags(body or "").strip() or _EMBED_RE.search(body or ""):
         return body
     message = (
         "El artículo original no contiene información adicional."
@@ -409,6 +413,10 @@ class Command(BaseCommand):
                     article["body_html"] = re.sub(
                         r'<div class="help-downloads">\s*<h2>[^<]+</h2>\s*<ul>\s*</ul>\s*</div>',
                         '', article["body_html"], flags=re.I | re.S,
+                    )
+                    # Retirar los recursos perdidos puede vaciar un articulo solo ilustrado.
+                    article["body_html"] = _ensure_article_body(
+                        article["body_html"], category["locale"],
                     )
 
     def _rewrite_article_links(self, center):

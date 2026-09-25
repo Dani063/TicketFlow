@@ -5,15 +5,17 @@ TicketFlow incorpora los antiguos centros de Zendesk de eComFax y Recordia como 
 ## Contenido migrado
 
 - 230 artículos de cliente: eComFax (66 ES, 65 EN) y Recordia (49 ES, 50 EN).
-- 18 categorías, 65 secciones, destacados, enlaces internos, vídeos y 331 recursos/documentos locales.
-- 14 PDF, un manual DOCX y 316 recursos gráficos recuperados y servidos desde TicketFlow.
+- 18 categorías, 65 secciones, destacados, enlaces internos, las 12 videopíldoras de eComFax y 335 recursos/documentos locales.
+- 14 PDF, un manual DOCX y 320 recursos gráficos recuperados y servidos desde TicketFlow.
 - EULA de eComFax ES/EN, certificado ENS y declaración LOPDGDD de Recordia recuperados como PDF local.
 - Las tres publicaciones de la antigua comunidad se transformaron en artículos informativos ES/EN; no se replica el foro interactivo.
 - Cuatro capturas históricas ya eliminadas en Zendesk se omiten para no mostrar imágenes rotas.
 
+Un artículo puede no tener texto y aun así tener contenido: las videopíldoras son solo un `<iframe>` de YouTube y algún artículo ilustrado, solo imágenes. El importador los da por vacíos si mide el cuerpo con `strip_tags`, y los sustituye por el aviso «El artículo original no contiene información adicional». Los vídeos además necesitan `referrerpolicy="strict-origin-when-cross-origin"` en el `<iframe>`: la página envía `Referrer-Policy: same-origin`, y sin cabecera `Referer` YouTube rechaza los vídeos con dominio de inserción restringido con un «Error 153» en lugar del reproductor.
+
 La importación autenticada distingue los segmentos de Zendesk: conserva el contenido anónimo y el destinado a clientes autenticados (`249029`), y excluye borradores y documentación exclusiva de agentes (`249009`). Los recursos que dejan de estar referenciados se retiran del árbol estático para que la documentación interna tampoco quede accesible mediante una URL directa.
 
-El snapshot maestro reproducible está en `resources/help_content/help_centers.json` y actúa como semilla de despliegue, no como fuente de verdad después de que un agente edita un artículo. Para que el artefacto corporativo no dependa de carpetas externas al paquete Python, las migraciones `0051_seed_help_center_content` y `0052_refresh_help_center_content` cargan la copia comprimida e integrada de `src/app/migration_data/help_content_snapshot_0052.py`. Tras refrescar el JSON maestro hay que regenerarla con:
+El snapshot maestro reproducible está en `resources/help_content/help_centers.json` y actúa como semilla de despliegue, no como fuente de verdad después de que un agente edita un artículo. Para que el artefacto corporativo no dependa de carpetas externas al paquete Python, las migraciones `0051_seed_help_center_content`, `0052_refresh_help_center_content` y `0063_restore_media_only_help_articles` cargan la copia comprimida e integrada de `src/app/migration_data/help_content_snapshot_0052.py`. Tras refrescar el JSON maestro hay que regenerarla con:
 
 ```powershell
 python scripts/build_help_content_snapshot.py

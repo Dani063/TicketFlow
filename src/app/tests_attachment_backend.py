@@ -360,8 +360,14 @@ class AttachmentBackendTests(AttachmentFixtures, TestCase):
         first = self.client.post(url, data, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         again = self.client.post(url, data, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         self.assertEqual(first.status_code, 200)
-        self.assertEqual(set(first.json()), {'ticket_id', 'url'})
-        self.assertEqual(first.json(), again.json())
+        # 'ticket' es la cabecera con la que el pane repinta estado y fecha.
+        self.assertEqual(set(first.json()), {'ticket_id', 'url', 'ticket'})
+        # El reenvio no puede devolver otro ticket; su reloj, en cambio, no forma
+        # parte del contrato y avanza unos milisegundos entre las dos llamadas.
+        primero, repetido = first.json(), again.json()
+        primero['ticket'].pop('updated_ts')
+        repetido['ticket'].pop('updated_ts')
+        self.assertEqual(primero, repetido)
         ticket = Ticket.objects.get(pk=first.json()['ticket_id'])
         self.assertEqual(ticket.comment_set.get().attachment_set.get().id, att.id)
         data['subject'] = 'Changed'

@@ -97,6 +97,41 @@ class UserAdminService:
         return user
 
     @staticmethod
+    def create_end_user(email, name=None):
+        """Alta rápida de un solicitante desde el ticket: solo hace falta el email.
+
+        Devuelve (usuario, creado). Si el email ya existe y está activo se
+        devuelve ese usuario, que es lo que el agente quería seleccionar (el
+        nombre recibido se ignora: no se renombra a nadie desde aquí). Sin
+        nombre, sale de la parte local del email, igual que en la ingesta de
+        correo; se puede cambiar después desde el panel de usuarios.
+        """
+        email = (email or '').strip().lower()
+        if not _EMAIL_RE.match(email):
+            raise APIValidationError('invalid_email', 'Email no válido', status=400)
+        existing = User.objects.filter(email__iexact=email).first()
+        if existing:
+            if not existing.is_active:
+                raise APIValidationError(
+                    'user_inactive',
+                    'Ya existe un usuario con ese email, pero está desactivado. Reactívalo desde el panel de usuarios.',
+                    status=409,
+                )
+            return existing, False
+
+        role, _ = Role.objects.get_or_create(role_name='End user')
+        user = User(
+            email=email,
+            name=(name or '').strip()[:255] or email.split('@')[0],
+            role=role,
+            group=Group.objects.filter(group_name__iexact='End users').first(),
+            is_active=True,
+        )
+        user.set_unusable_password()
+        user.save()
+        return user, True
+
+    @staticmethod
     def update_user(actor, user_id, data):
         if not user_id:
             raise APIValidationError('id_required', 'id requerido', status=400)

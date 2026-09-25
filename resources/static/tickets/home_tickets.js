@@ -41,6 +41,8 @@
         home_satisfaccion: 'Tus tickets valorados',
     };
 
+    const AUTO_REFRESH_MS = 20000;
+
     let _view = DEFAULT_VIEW;
     let _page = 1;
     let _pageSize = 50;
@@ -301,15 +303,18 @@
         }
     }
 
-    async function load(view, page) {
+    async function load(view, page, opts) {
+        const silent = !!(opts && opts.silent);
         _view = view || DEFAULT_VIEW;
         _page = page || 1;
         const seq = ++_reqSeq;
 
         const spinner = $('homeLoadingSpinner');
         const tbody = $('homeTicketsTableBody');
-        if (spinner) spinner.style.display = 'flex';
-        clearSelection();
+        // En un refresco automatico no se pinta spinner ni se toca la seleccion:
+        // el agente no ha pedido nada y no debe notar que la tabla se recarga.
+        if (spinner && !silent) spinner.style.display = 'flex';
+        if (!silent) clearSelection();
 
         try {
             let url = `/tickets/filter/?view=${encodeURIComponent(_view)}` +
@@ -357,11 +362,60 @@
                 tbody.innerHTML = emptyRow('Error de red al cargar tickets.', 'var(--color-danger)');
             }
         } finally {
-            if (spinner && seq === _reqSeq) spinner.style.display = 'none';
+            if (spinner && !silent && seq === _reqSeq) spinner.style.display = 'none';
         }
     }
 
+    // ---- Refresco automatico ---------------------------------------------
+
+    async function refreshStats() {
+        try {
+            const res = await fetch('/api/home-stats/');
+            if (!res.ok) return;
+            const data = await res.json();
+            const stats = data.stats || {};
+            const write = (view, value) => {
+                const el = document.querySelector(`.stat[data-view="${view}"] .stat-number`);
+                if (el && el.textContent !== String(value)) el.textContent = value;
+            };
+            write('home_you', stats.abiertos_you);
+            write('home_groups', stats.abiertos_groups);
+            write('home_bien', stats.bien);
+            write('home_mal', stats.mal);
+            write('home_solventado', stats.solventado);
+            write('home_satisfaccion', stats.total_rated ? `${stats.satisfaccion_pct}%` : '—');
+        } catch (e) {
+            /* cosmetico: si falla, se queda el numero anterior */
+        }
+    }
+
+    function autoRefresh() {
+        if (document.hidden) return;
+        if (!$('homeTicketsTableBody')) return;            // ya no estamos en la home
+        // No pisar trabajo en curso: seleccion en bloque o modal de fusion abierto.
+        if (document.querySelector('#homeTicketsTableBody .ticket-checkbox:checked')) return;
+        const merge = $('homeBulkMergeOverlay');
+        if (merge && merge.classList.contains('open')) return;
+        // La vista previa se cierra con el mouseout de la fila: si la fila
+        // desaparece debajo del cursor, la tarjeta se queda colgada.
+        const card = $('ticket-preview-card');
+        if (card && card.style.display === 'block') return;
+        load(_view, _page, { silent: true });
+        refreshStats();
+    }
+
     // ---- Modal de fusión --------------------------------------------------
+
+    // Dos pasos, como en el ticket: destino y revisión de los comentarios que
+    // deja la fusión (merge_review.js). El del origen le llega a cada cliente.
+    let _mergeTarget = null;    // { id, displayId, subject }
+
+    function mergeButtons() {
+        return {
+            cancel: $('homeBmmCancel'), back: $('homeBmmBack'),
+            next: $('homeBmmNext'), confirm: $('homeBmmConfirm'),
+        };
+    }
 
     function openMergeModal() {
         const ov = $('homeBulkMergeOverlay');
@@ -370,9 +424,10 @@
         $('homeBmmSearch').value = '';
         $('homeBmmResults').innerHTML = '';
         $('homeBmmSelectedTarget').classList.remove('show');
-        const confirm = $('homeBmmConfirm');
-        confirm.disabled = true;
-        delete confirm.dataset.targetId;
+        $('homeBmmNext').disabled = true;
+        _mergeTarget = null;
+        window.TFMergeReview.for(ov).reset();
+        window.TFMergeReview.setStep(ov, 1, mergeButtons());
         setTimeout(() => $('homeBmmSearch').focus(), 50);
     }
 
@@ -381,15 +436,24 @@
         if (ov) ov.classList.remove('open');
     }
 
-    function selectMergeTarget(id, subject, li) {
+    function selectMergeTarget(t, li) {
         document.querySelectorAll('#homeBmmResults li').forEach(el => el.classList.remove('selected'));
         li.classList.add('selected');
+        _mergeTarget = { id: t.id, displayId: t.display_id || t.id, subject: t.subject || '' };
         const target = $('homeBmmSelectedTarget');
-        target.textContent = `Destino: #${id} — ${subject}`;
+        target.textContent = `Destino: #${_mergeTarget.displayId} — ${_mergeTarget.subject}`;
         target.classList.add('show');
-        const confirm = $('homeBmmConfirm');
-        confirm.disabled = false;
-        confirm.dataset.targetId = id;
+        $('homeBmmNext').disabled = false;
+    }
+
+    function goToMergeReview() {
+        const ov = $('homeBulkMergeOverlay');
+        if (!ov || !_mergeTarget) return;
+        window.TFMergeReview.for(ov).show({
+            sources: [..._selected].map(id => ({ displayId: id, subject: '' })),
+            target: _mergeTarget,
+        });
+        window.TFMergeReview.setStep(ov, 2, mergeButtons());
     }
 
     async function searchMergeTarget(q) {
@@ -411,13 +475,13 @@
                 li.dataset.id = t.id;
                 const id = document.createElement('span');
                 id.className = 'bmm-id';
-                id.textContent = '#' + t.id;
+                id.textContent = '#' + (t.display_id || t.id);
                 const subj = document.createElement('span');
                 subj.className = 'bmm-subject';
                 subj.textContent = t.subject || '';
                 li.appendChild(id);
                 li.appendChild(subj);
-                li.addEventListener('click', () => selectMergeTarget(t.id, t.subject, li));
+                li.addEventListener('click', () => selectMergeTarget(t, li));
                 list.appendChild(li);
             });
         } catch (e) {
@@ -597,15 +661,26 @@
             searchTimer = setTimeout(() => searchMergeTarget(q), 300);
         });
 
+        const bmmNext = $('homeBmmNext');
+        if (bmmNext) bmmNext.addEventListener('click', goToMergeReview);
+        const bmmBack = $('homeBmmBack');
+        if (bmmBack) bmmBack.addEventListener('click', () => {
+            window.TFMergeReview.setStep($('homeBulkMergeOverlay'), 1, mergeButtons());
+        });
+
         const bmmConfirm = $('homeBmmConfirm');
         if (bmmConfirm) bmmConfirm.addEventListener('click', async () => {
-            const targetId = parseInt(bmmConfirm.dataset.targetId || '0', 10);
-            if (!targetId) return;
+            if (!_mergeTarget) return;
+            const messages = window.TFMergeReview.for($('homeBulkMergeOverlay')).payload();
+            bmmConfirm.disabled = true;
             try {
                 const res = await fetch(BULK_MERGE_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
-                    body: JSON.stringify({ ids: [..._selected], target_id: targetId }),
+                    body: JSON.stringify({
+                        ids: [..._selected], target_id: _mergeTarget.id,
+                        source_message: messages.source, target_message: messages.target,
+                    }),
                 });
                 const json = await res.json();
                 if (json.ok) {
@@ -613,9 +688,10 @@
                     closeMergeModal();
                     load(_view, _page);
                 } else {
-                    window.toast.error(json.error || 'Error al fusionar');
+                    window.toast.error((json.error && json.error.message) || json.error || 'Error al fusionar');
+                    bmmConfirm.disabled = false;
                 }
-            } catch (e) { window.toast.error('Error de red'); }
+            } catch (e) { window.toast.error('Error de red'); bmmConfirm.disabled = false; }
         });
 
         // Listener singleton: tabs.js re-ejecuta este script al volver a la
@@ -629,6 +705,17 @@
         initHoverPreview();
         fitTableHeight();
         load(DEFAULT_VIEW, 1);
+
+        // Un unico temporizador para toda la sesion: tabs.js re-ejecuta este
+        // script cada vez que se vuelve a la home y se irian acumulando.
+        if (window.__tfHomeAutoTimer) clearInterval(window.__tfHomeAutoTimer);
+        window.__tfHomeAutoTimer = setInterval(autoRefresh, AUTO_REFRESH_MS);
+        if (!window.__tfHomeVisibilityBound) {
+            window.__tfHomeVisibilityBound = true;
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) autoRefresh();
+            });
+        }
     }
 
     init();

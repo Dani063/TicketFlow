@@ -31,6 +31,7 @@ urlpatterns = [
     path("tickets/export.pdf", views.tickets_export_pdf, name="tickets_export_pdf"),
     path('api/tags/', views.tags_api, name='tags_api'),
     path('api/users/search/', views.users_search_api, name='users_search_api'),
+    path('api/users/quick-create/', views.quick_create_end_user, name='quick_create_end_user'),
     path('tickets/<int:ticket_id>/attachments/upload/', views.upload_attachment, name='upload_attachment'),
     path('attachments/<int:attachment_id>/pending/delete/', views.delete_pending_attachment, name='delete_pending_attachment'),
     path('attachments/<int:attachment_id>/download/', public_views.attachment_download, name='attachment_download'),
@@ -90,7 +91,9 @@ urlpatterns = [
     path("api/users/<int:user_id>/notes/", views.update_user_notes, name="update_user_notes"),
     path("api/notifications/", views.notifications_api, name="notifications_api"),
     path("api/notifications/<int:notif_id>/read/", views.mark_notification_read, name="mark_notification_read"),
+    path("api/notifications/ticket/<int:ticket_id>/read/", views.mark_ticket_notifications_read, name="mark_ticket_notifications_read"),
     path("api/activity/", views.recent_activity_api, name="recent_activity_api"),
+    path("api/home-stats/", views.home_stats_api, name="home_stats_api"),
 
     path('login/', views.login_redirect, name='login'),
     path('dev-login/', views.dev_login, name='dev_login'),

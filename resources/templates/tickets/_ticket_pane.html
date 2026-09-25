@@ -77,10 +77,10 @@
             </div>
             <div class="form-group">
                 <label for="solicitante">Solicitante</label>
-                <select id="solicitante" name="solicitante" class="select2" data-select2-type="ajax-user">
+                <select id="solicitante" name="solicitante" class="select2" data-select2-type="ajax-user"{% if can_use_internal %} data-quick-create="1"{% endif %}>
                     <option value="" disabled selected>-</option>
                     {% if ticket and ticket.requester %}
-                    <option value="{{ ticket.requester.id }}" selected>{{ ticket.requester.name }}</option>
+                    <option value="{{ ticket.requester.id }}" title="{{ ticket.requester.email }}" selected>{{ ticket.requester.name }}</option>
                     {% endif %}
                 </select>
             </div>
@@ -104,10 +104,10 @@
             </div>
             <div class="form-group">
                 <label for="ccs">CCs</label>
-                <select id="ccs" name="ccs" class="select2" multiple data-select2-type="ajax-user">
+                <select id="ccs" name="ccs" class="select2" multiple data-select2-type="ajax-user"{% if can_use_internal %} data-quick-create="1"{% endif %}>
                     {% if ticket %}
                     {% for u in ticket.ccs.all %}
-                    <option value="{{ u.id }}" selected>{{ u.name }}</option>
+                    <option value="{{ u.id }}" title="{{ u.email }}" selected>{{ u.name }}</option>
                     {% endfor %}
                     {% endif %}
                 </select>
@@ -485,27 +485,42 @@
 </form>
 
 {% if ticket and can_use_internal and not ticket.merged_into %}
-<div id="merge-modal" class="dialog-backdrop tf-dialog-merge">
+<div id="merge-modal" class="dialog-backdrop tf-dialog-merge"
+     data-source-id="{{ ticket.zendesk_id|default:ticket.id }}" data-source-subject="{{ ticket.subject }}">
     <div class="dialog dialog--lg dialog--form" role="dialog" aria-modal="true">
         <div class="dialog__header">
             <h3 class="dialog__title"><i class="fas fa-code-branch"></i> Fusionar ticket</h3>
             <button type="button" id="merge-modal-close" class="dialog__close" aria-label="Cerrar">&times;</button>
         </div>
         <div class="dialog__body">
-            <p>El ticket actual (<strong>#{{ ticket.zendesk_id|default:ticket.id }}</strong>) se cerrará y sus comentarios pasarán al ticket destino.</p>
-            <div class="tf-field">
-                <label for="merge-search-input">Buscar ticket destino por ID o asunto:</label>
-                <input type="text" id="merge-search-input" class="tf-input merge-search-input" placeholder="Escribe para buscar…" autocomplete="off">
+            <div class="merge-steps" aria-hidden="true">
+                <span id="merge-step-label">Paso 1 de 2</span>
+                <span class="merge-steps__bar is-done"></span>
+                <span class="merge-steps__bar" id="merge-step-bar-2"></span>
             </div>
-            <ul id="merge-search-results" class="merge-search-results"></ul>
-            <div id="merge-selected" class="merge-selected" style="display:none">
-                Destino seleccionado: <strong id="merge-selected-label"></strong>
-                <input type="hidden" id="merge-target-id">
+
+            <div id="merge-step-1" class="merge-step">
+                <p>El ticket actual (<strong>#{{ ticket.zendesk_id|default:ticket.id }}</strong>) se cerrará y sus comentarios pasarán al ticket destino.</p>
+                <div class="tf-field">
+                    <label for="merge-search-input">Buscar ticket destino por ID o asunto:</label>
+                    <input type="text" id="merge-search-input" class="tf-input merge-search-input" placeholder="Escribe para buscar…" autocomplete="off">
+                </div>
+                <ul id="merge-search-results" class="merge-search-results"></ul>
+                <div id="merge-selected" class="merge-selected" style="display:none">
+                    Destino seleccionado: <strong id="merge-selected-label"></strong>
+                    <input type="hidden" id="merge-target-id">
+                </div>
+            </div>
+
+            <div id="merge-step-2" class="merge-step" hidden>
+                {% include "tickets/_merge_review.html" %}
             </div>
         </div>
         <div class="dialog__footer">
             <button type="button" id="merge-cancel-btn" class="tf-btn tf-btn--secondary">Cancelar</button>
-            <button type="button" id="merge-confirm-btn" class="tf-btn tf-btn--primary" disabled>Confirmar fusión</button>
+            <button type="button" id="merge-back-btn" class="tf-btn tf-btn--secondary" hidden>Atrás</button>
+            <button type="button" id="merge-next-btn" class="tf-btn tf-btn--primary" disabled>Siguiente</button>
+            <button type="button" id="merge-confirm-btn" class="tf-btn tf-btn--primary" hidden>Fusionar</button>
         </div>
     </div>
 </div>

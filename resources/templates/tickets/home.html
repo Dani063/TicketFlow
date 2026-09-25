@@ -9,20 +9,32 @@
 {% block content %}
 <!-- Bulk merge modal (solo para agentes) -->
 {% if user.role and user.role.role_name|lower not in 'end user,end-user,cliente,customer' %}
-<div id="homeBulkMergeOverlay" class="dialog-backdrop">
+<div id="homeBulkMergeOverlay" class="dialog-backdrop tf-dialog-merge">
     <div class="dialog dialog--lg dialog--form" role="dialog" aria-modal="true">
         <div class="dialog__header">
             <h3 class="dialog__title"><i class="fas fa-code-branch"></i> Fusionar tickets en...</h3>
             <button type="button" class="dialog__close" id="homeBmmClose" aria-label="Cerrar">&times;</button>
         </div>
         <div class="dialog__body">
-            <input type="text" class="tf-input bmm-search" id="homeBmmSearch" placeholder="Buscar ticket destino por asunto o ID...">
-            <ul class="bmm-results" id="homeBmmResults"></ul>
-            <div class="bmm-selected-target" id="homeBmmSelectedTarget"></div>
+            <div class="merge-steps" aria-hidden="true">
+                <span data-role="step-label">Paso 1 de 2</span>
+                <span class="merge-steps__bar is-done"></span>
+                <span class="merge-steps__bar" data-role="step-bar-2"></span>
+            </div>
+            <div class="merge-step" data-step="1">
+                <input type="text" class="tf-input bmm-search" id="homeBmmSearch" placeholder="Buscar ticket destino por asunto o ID...">
+                <ul class="bmm-results" id="homeBmmResults"></ul>
+                <div class="bmm-selected-target" id="homeBmmSelectedTarget"></div>
+            </div>
+            <div class="merge-step" data-step="2" hidden>
+                {% include "tickets/_merge_review.html" %}
+            </div>
         </div>
         <div class="dialog__footer">
             <button type="button" class="tf-btn tf-btn--secondary" id="homeBmmCancel">Cancelar</button>
-            <button type="button" class="tf-btn tf-btn--primary" id="homeBmmConfirm" disabled>Fusionar</button>
+            <button type="button" class="tf-btn tf-btn--secondary" id="homeBmmBack" hidden>Atrás</button>
+            <button type="button" class="tf-btn tf-btn--primary" id="homeBmmNext" disabled>Siguiente</button>
+            <button type="button" class="tf-btn tf-btn--primary" id="homeBmmConfirm" hidden>Fusionar</button>
         </div>
     </div>
 </div>
@@ -63,9 +75,9 @@
 </div>
 
 <div class="dashboard-layout">
-<aside class="left-column dashboard-sidebar" aria-label="Actualizaciones recientes">
+<aside class="left-column dashboard-sidebar" aria-label="Tickets sin contestar">
     <div class="updates">
-        <h3>Actualizaciones recientes</h3>
+        <h3 title="Tickets cuyo último mensaje es del cliente. Desaparecen en cuanto respondes.">Tickets sin contestar</h3>
         <ul id="updates-list">
             {# Skeleton placeholders shown until refreshUpdates() populates the list #}
             <li class="skeleton-row" aria-hidden="true">
@@ -211,5 +223,5 @@ window.__homeData = {
     currentUserGroupId: {% if current_user_group_id %}{{ current_user_group_id }}{% else %}null{% endif %}
 };
 </script>
-<script src="{% static 'tickets/home_tickets.js' %}?v=s6.2"></script>
+<script src="{% static 'tickets/home_tickets.js' %}?v=s6.4"></script>
 {% endblock %}

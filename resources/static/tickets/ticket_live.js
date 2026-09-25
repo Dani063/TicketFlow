@@ -32,7 +32,20 @@
         return null;
     }
 
+    // La comparte create_ticket.js al publicar: si cada uno pintase la cabecera
+    // por su cuenta, acabarian divergiendo. Aqui vive la unica version.
+    window.tfApplyTicketHeader = applyHeader;
+
     function applyHeader(pane, ticket) {
+        if (!pane || !ticket) return;
+        // Descarta lo que el servidor leyo antes de lo ya pintado: el sondeo
+        // puede salir antes de publicar y volver despues.
+        var live0 = pane.__tfLive;
+        var ts = Number(ticket.updated_ts) || 0;
+        if (live0 && ts) {
+            if (live0.headerTs && ts < live0.headerTs) return;
+            live0.headerTs = ts;
+        }
         const badge = pane.querySelector('.ticket-status-badge');
         if (badge && ticket.status) {
             badge.className = 'ticket-status-badge status-badge-' + ticket.status;

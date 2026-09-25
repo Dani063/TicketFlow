@@ -20,9 +20,103 @@ const _tfUserAjaxConfig = {
     dataType: 'json',
     delay: 200,
     data: params => ({ q: params.term || '', page: params.page || 1 }),
-    processResults: data => data,
+    processResults: data => _tfWithUserTitles(data),
     cache: true,
 };
+
+// Select2 usa `title` como tooltip del valor elegido: ahí va el email, que en
+// el campo no cabe junto al nombre.
+function _tfWithUserTitles(data) {
+    const results = ((data && data.results) || []).map(u => (u.email ? Object.assign({ title: u.email }, u) : u));
+    return { results, pagination: data && data.pagination };
+}
+
+// Opción de la lista de usuarios: nombre y, debajo, el email en pequeño. Los
+// dos se cortan con «…» para que el desplegable no se ensanche.
+function _tfUserResult(item) {
+    if (item.loading || !item.id) return item.text;
+    if (item.id === _TF_NEW_USER_ID) {
+        const add = document.createElement('span');
+        add.className = 'tf-select2-add-user';
+        add.innerHTML = '<i class="fas fa-user-plus" aria-hidden="true"></i> ';
+        add.appendChild(document.createTextNode('Añadir usuario'));
+        return add;
+    }
+    const el = document.createElement('span');
+    el.className = 'tf-user-opt';
+    const name = document.createElement('span');
+    name.className = 'tf-user-opt__name';
+    name.textContent = item.text || '';
+    el.appendChild(name);
+    if (item.email) {
+        const email = document.createElement('span');
+        email.className = 'tf-user-opt__email';
+        email.textContent = item.email;
+        el.appendChild(email);
+    }
+    return el;
+}
+
+// «Solicitante» y «CCs» con alta rápida: la primera opción de la lista es «+ Añadir
+// usuario», que abre TFQuickUser (quick_user.js) en vez de seleccionarse. Lo
+// escrito en el buscador llega prerrellenado al diálogo.
+const _TF_NEW_USER_ID = '__tf_new_user__';
+
+function _tfInitQuickCreateUserSelect(selectEl) {
+    const $select = window.jQuery(selectEl);
+    let lastTerm = '';
+    $select.select2({
+        width: '100%',
+        placeholder: '-',
+        allowClear: true,
+        minimumInputLength: 0,
+        ajax: Object.assign({}, _tfUserAjaxConfig, {
+            processResults: (data, params) => {
+                lastTerm = (params && params.term) || '';
+                const results = _tfWithUserTitles(data).results;
+                const more = !!(data && data.pagination && data.pagination.more);
+                const addUser = { id: _TF_NEW_USER_ID, text: '+ Añadir usuario' };
+                // Sin texto va arriba, a la vista. Con texto, al final: Select2
+                // resalta la primera opción y Enter tiene que elegir a la persona
+                // buscada, no abrir el alta.
+                if (!lastTerm) {
+                    if ((params.page || 1) === 1) results.unshift(addUser);
+                } else if (!more) {
+                    results.push(addUser);
+                }
+                return { results, pagination: data && data.pagination };
+            },
+        }),
+        templateResult: _tfUserResult,
+    });
+    $select.on('select2:selecting', async (e) => {
+        if (!e.params || !e.params.args || e.params.args.data.id !== _TF_NEW_USER_ID) return;
+        e.preventDefault();
+        $select.select2('close');
+        if (!window.TFQuickUser) return;
+        // Lo escrito en el buscador se aprovecha: si parece un email va al
+        // email y, si no, al nombre.
+        const term = lastTerm.trim();
+        const isEmail = term.includes('@');
+        const user = await window.TFQuickUser.open({ email: isEmail ? term : '', name: isEmail ? '' : term });
+        if (!user) return;
+        if (!$select.find('option[value="' + user.id + '"]').length) {
+            const option = new Option(user.text, user.id, false, false);
+            option.title = user.email || '';
+            $select.append(option);
+        }
+        // 'change' como en una selección normal: a partir de aquí el pane lo
+        // trata igual que si se hubiera elegido de la lista.
+        if (selectEl.multiple) {
+            // CCs: se añade a los que ya había, no los sustituye.
+            const current = ($select.val() || []).map(String);
+            if (!current.includes(String(user.id))) current.push(String(user.id));
+            $select.val(current).trigger('change');
+        } else {
+            $select.val(String(user.id)).trigger('change');
+        }
+    });
+}
 
 window.tfApplyPaneSelect2 = function (paneEl, opts) {
     if (!paneEl || !window.jQuery) return;
@@ -42,13 +136,16 @@ window.tfApplyPaneSelect2 = function (paneEl, opts) {
                     return;
                 }
             }
-            if (isAjaxUser) {
+            if (isAjaxUser && this.dataset.quickCreate) {
+                _tfInitQuickCreateUserSelect(this);
+            } else if (isAjaxUser) {
                 window.jQuery(this).select2({
                     width: '100%',
                     placeholder: '-',
                     allowClear: true,
                     minimumInputLength: 0,
                     ajax: _tfUserAjaxConfig,
+                    templateResult: _tfUserResult,
                 });
             } else if (this.id === 'tags') {
                 window.jQuery(this).select2({
@@ -424,6 +521,7 @@ window.initTicketPane = function (root, ctx) {
             textarea.value = '';
             lastAttempt = null;
             if (data.new_status) rootEl.querySelector('#selected-status').textContent = data.new_status;
+            window.tfApplyTicketHeader?.(rootEl, data.ticket);
         } catch (_) {
             window.toast.error('No se pudo confirmar la publicación. Reintenta; no se duplicará el mensaje.');
         } finally { setSubmissionBusy(false); }
@@ -487,6 +585,9 @@ window.initTicketPane = function (root, ctx) {
                 return false;
             }
             _formBaseline = serializeTicketForm();
+            try {
+                window.tfApplyTicketHeader?.(rootEl, (await res.json()).ticket);
+            } catch (_) { /* respuesta no JSON: la cabecera la arregla el sondeo */ }
             return true;
         } catch (err) {
             console.error('Error guardando los campos del ticket:', err);
@@ -1343,19 +1444,55 @@ window.initTicketPane = function (root, ctx) {
     }
 
     // ---- Merge de tickets ----
+    // Dos pasos: elegir destino y revisar los comentarios que deja la fusion en
+    // cada ticket. El del origen es el que le llega al cliente al cerrarse, asi
+    // que se puede editar para explicar el motivo sin tener que escribir otra
+    // respuesta aparte.
     const mergeBtn = rootEl.querySelector('#merge-btn');
     const mergeModal = rootEl.querySelector('#merge-modal');
-    const mergeModalClose = rootEl.querySelector('#merge-modal-close');
-    const mergeCancelBtn = rootEl.querySelector('#merge-cancel-btn');
-    const mergeConfirmBtn = rootEl.querySelector('#merge-confirm-btn');
-    const mergeSearchInput = rootEl.querySelector('#merge-search-input');
-    const mergeSearchResults = rootEl.querySelector('#merge-search-results');
-    const mergeSelected = rootEl.querySelector('#merge-selected');
-    const mergeSelectedLabel = rootEl.querySelector('#merge-selected-label');
-    const mergeTargetId = rootEl.querySelector('#merge-target-id');
 
     if (mergeBtn && mergeModal) {
+        const q$ = (sel) => mergeModal.querySelector(sel);
+        const mergeModalClose = q$('#merge-modal-close');
+        const mergeCancelBtn = q$('#merge-cancel-btn');
+        const mergeBackBtn = q$('#merge-back-btn');
+        const mergeNextBtn = q$('#merge-next-btn');
+        const mergeConfirmBtn = q$('#merge-confirm-btn');
+        const mergeSearchInput = q$('#merge-search-input');
+        const mergeSearchResults = q$('#merge-search-results');
+        const mergeSelected = q$('#merge-selected');
+        const mergeSelectedLabel = q$('#merge-selected-label');
+        const mergeTargetId = q$('#merge-target-id');
+        const step1 = q$('#merge-step-1');
+        const step2 = q$('#merge-step-2');
+        const stepLabel = q$('#merge-step-label');
+        const stepBar2 = q$('#merge-step-bar-2');
+        const review = window.TFMergeReview.for(mergeModal);
+        const source = {
+            displayId: mergeModal.dataset.sourceId,
+            subject: mergeModal.dataset.sourceSubject || '',
+        };
+
         let searchTimer = null;
+        let target = null;          // { id, displayId, subject }
+
+        function showStep(n) {
+            step1.hidden = n !== 1;
+            step2.hidden = n !== 2;
+            stepLabel.textContent = 'Paso ' + n + ' de 2';
+            stepBar2.classList.toggle('is-done', n === 2);
+            mergeCancelBtn.hidden = n !== 1;
+            mergeNextBtn.hidden = n !== 1;
+            mergeBackBtn.hidden = n !== 2;
+            mergeConfirmBtn.hidden = n !== 2;
+            mergeConfirmBtn.disabled = false;
+        }
+
+        function goToReview() {
+            if (!target) return;
+            review.show({ sources: [source], target });
+            showStep(2);
+        }
 
         function openMergeModal() {
             mergeModal.classList.add('open');
@@ -1363,7 +1500,10 @@ window.initTicketPane = function (root, ctx) {
             mergeSearchResults.innerHTML = '';
             mergeSelected.style.display = 'none';
             mergeTargetId.value = '';
-            mergeConfirmBtn.disabled = true;
+            mergeNextBtn.disabled = true;
+            target = null;
+            review.reset();
+            showStep(1);
             setTimeout(() => mergeSearchInput.focus(), 30);
         }
 
@@ -1371,9 +1511,20 @@ window.initTicketPane = function (root, ctx) {
             mergeModal.classList.remove('open');
         }
 
+        function selectTarget(t) {
+            target = { id: t.id, displayId: t.display_id || t.id, subject: t.subject || '' };
+            mergeTargetId.value = t.id;
+            mergeSelectedLabel.textContent = '#' + target.displayId + ' — ' + target.subject;
+            mergeSelected.style.display = 'block';
+            mergeNextBtn.disabled = false;
+            mergeSearchResults.innerHTML = '';
+        }
+
         mergeBtn.addEventListener('click', openMergeModal);
         mergeModalClose.addEventListener('click', closeMergeModal);
         mergeCancelBtn.addEventListener('click', closeMergeModal);
+        mergeBackBtn.addEventListener('click', () => showStep(1));
+        mergeNextBtn.addEventListener('click', goToReview);
         mergeModal.addEventListener('click', (e) => { if (e.target === mergeModal) closeMergeModal(); });
 
         mergeSearchInput.addEventListener('input', () => {
@@ -1392,17 +1543,21 @@ window.initTicketPane = function (root, ctx) {
                         return;
                     }
                     tickets.forEach(t => {
+                        // El asunto viene de correo: se inserta como texto.
                         const li = document.createElement('li');
                         li.className = 'merge-result-item';
                         li.dataset.id = t.id;
-                        li.innerHTML = `<span class="merge-result-id">#${t.id}</span> <span class="merge-result-subject">${t.subject}</span> <span class="merge-result-status status-${t.status}">${t.status}</span>`;
-                        li.addEventListener('click', () => {
-                            mergeTargetId.value = t.id;
-                            mergeSelectedLabel.textContent = `#${t.id} — ${t.subject}`;
-                            mergeSelected.style.display = 'block';
-                            mergeConfirmBtn.disabled = false;
-                            mergeSearchResults.innerHTML = '';
-                        });
+                        const id = document.createElement('span');
+                        id.className = 'merge-result-id';
+                        id.textContent = '#' + (t.display_id || t.id);
+                        const subject = document.createElement('span');
+                        subject.className = 'merge-result-subject';
+                        subject.textContent = t.subject || '';
+                        const status = document.createElement('span');
+                        status.className = 'merge-result-status status-' + t.status;
+                        status.textContent = t.status;
+                        li.append(id, subject, status);
+                        li.addEventListener('click', () => selectTarget(t));
                         mergeSearchResults.appendChild(li);
                     });
                 } catch (e) {
@@ -1413,27 +1568,33 @@ window.initTicketPane = function (root, ctx) {
         });
 
         mergeConfirmBtn.addEventListener('click', async () => {
-            const targetId = mergeTargetId.value;
-            if (!targetId) return;
-            const ok = await window.dialog.confirm({
-                title: 'Fusionar ticket',
-                message: '¿Seguro que quieres fusionar este ticket? La acción no se puede deshacer.',
-                confirmText: 'Fusionar',
-                cancelText: 'Cancelar',
-                variant: 'danger',
-            });
-            if (!ok) return;
+            if (!target) return;
             mergeConfirmBtn.disabled = true;
             try {
                 const fd = new FormData();
-                fd.append('target_ticket_id', targetId);
-                const res = await fetch(window.urls.merge_ticket, {
+                fd.append('target_ticket_id', target.id);
+                const messages = review.payload();
+                Object.keys(messages).forEach((key) => {
+                    fd.append(key + '_comment', messages[key].content);
+                    fd.append(key + '_comment_html', messages[key].html_body);
+                    fd.append(key + '_is_public', messages[key].is_public ? 'true' : 'false');
+                });
+                // URL de ESTE pane, nunca window.urls.merge_ticket: esa global
+                // la pisa cada pestaña de ticket al cargarse, así que llegaba
+                // vacía (POST a «undefined») o con el ticket de otra pestaña.
+                const mergeUrl = (ctx && ctx.mergeTicketUrl) || ('/tickets/' + ctx.ticketId + '/merge/');
+                const res = await fetch(mergeUrl, {
                     method: 'POST',
                     headers: { 'X-CSRFToken': getCookie('csrftoken') },
                     body: fd,
                 });
                 const data = await res.json();
-                if (!res.ok) { window.toast.error(data.error || 'Error al fusionar'); mergeConfirmBtn.disabled = false; return; }
+                if (!res.ok) {
+                    const err = data.error;
+                    window.toast.error((err && err.message) || err || 'Error al fusionar');
+                    mergeConfirmBtn.disabled = false;
+                    return;
+                }
                 closeMergeModal();
                 window.location.href = `/tickets/create/?id=${data.target_id}`;
             } catch (e) {
