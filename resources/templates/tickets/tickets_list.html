@@ -10,20 +10,32 @@
 {% block content %}
 <!-- Bulk merge modal (solo para agentes) -->
 {% if user.role and user.role.role_name|lower not in 'end user,end-user,cliente,customer' %}
-<div id="bulkMergeOverlay" class="dialog-backdrop">
+<div id="bulkMergeOverlay" class="dialog-backdrop tf-dialog-merge">
     <div class="dialog dialog--lg dialog--form" role="dialog" aria-modal="true">
         <div class="dialog__header">
             <h3 class="dialog__title"><i class="fas fa-code-branch"></i> Fusionar tickets en...</h3>
             <button type="button" class="dialog__close" id="bmmClose" aria-label="Cerrar">&times;</button>
         </div>
         <div class="dialog__body">
-            <input type="text" class="tf-input bmm-search" id="bmmSearch" placeholder="Buscar ticket destino por asunto o ID...">
-            <ul class="bmm-results" id="bmmResults"></ul>
-            <div class="bmm-selected-target" id="bmmSelectedTarget"></div>
+            <div class="merge-steps" aria-hidden="true">
+                <span data-role="step-label">Paso 1 de 2</span>
+                <span class="merge-steps__bar is-done"></span>
+                <span class="merge-steps__bar" data-role="step-bar-2"></span>
+            </div>
+            <div class="merge-step" data-step="1">
+                <input type="text" class="tf-input bmm-search" id="bmmSearch" placeholder="Buscar ticket destino por asunto o ID...">
+                <ul class="bmm-results" id="bmmResults"></ul>
+                <div class="bmm-selected-target" id="bmmSelectedTarget"></div>
+            </div>
+            <div class="merge-step" data-step="2" hidden>
+                {% include "tickets/_merge_review.html" %}
+            </div>
         </div>
         <div class="dialog__footer">
             <button type="button" class="tf-btn tf-btn--secondary" id="bmmCancel">Cancelar</button>
-            <button type="button" class="tf-btn tf-btn--primary" id="bmmConfirm" disabled>Fusionar</button>
+            <button type="button" class="tf-btn tf-btn--secondary" id="bmmBack" hidden>Atrás</button>
+            <button type="button" class="tf-btn tf-btn--primary" id="bmmNext" disabled>Siguiente</button>
+            <button type="button" class="tf-btn tf-btn--primary" id="bmmConfirm" hidden>Fusionar</button>
         </div>
     </div>
 </div>
@@ -340,5 +352,5 @@
 <script>
 window.__ticketsData = { createTicketUrl: "{% url 'create_ticket' %}" };
 </script>
-<script src="{% static 'tickets/tickets_list.js' %}?v=s6.5"></script>
+<script src="{% static 'tickets/tickets_list.js' %}?v=s6.6"></script>
 {% endblock %}

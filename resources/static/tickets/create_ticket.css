@@ -1865,6 +1865,63 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
     border-radius: 6px; padding: 8px 12px;
     font-size: 13px; color: #166534;
 }
+/* Paso 2 del modal de fusion: revisar los comentarios de origen y destino */
+.merge-steps {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: var(--space-3, 12px);
+    font-size: 12px; color: var(--color-text-muted);
+}
+.merge-steps__bar {
+    width: 64px; height: 4px; border-radius: 2px;
+    background: var(--color-border);
+}
+.merge-steps__bar.is-done { background: var(--color-primary); }
+.merge-step[hidden],
+.tf-dialog-merge .tf-btn[hidden] { display: none; }  /* .tf-btn fija display y anula [hidden] */
+.merge-review + .merge-review { margin-top: var(--space-4, 16px); }
+.merge-review__head {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    margin-bottom: 6px;
+}
+.merge-review__title { font-size: 13px; font-weight: 600; color: var(--color-text); }
+.merge-review__id {
+    font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 4px;
+    background: var(--color-surface-2); color: var(--color-text);
+}
+.merge-review__hint { font-size: 12px; color: var(--color-text-muted); }
+.merge-review__note { margin: var(--space-3, 12px) 0 0; font-size: 12px; color: var(--color-text-muted); }
+.merge-editor {
+    border: 1px solid var(--color-input-border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--color-input-bg);
+}
+.merge-editor__bar {
+    display: flex; align-items: center;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface-2);
+}
+.merge-vis { display: inline-flex; gap: 2px; }
+.merge-vis__opt {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px; border: 1px solid transparent; border-radius: 14px;
+    background: none; color: var(--color-text-muted);
+    font-size: 12px; cursor: pointer;
+}
+.merge-vis__opt:hover { color: var(--color-text); }
+.merge-vis__opt.is-active {
+    background: var(--color-surface); border-color: var(--color-border-strong);
+    color: var(--color-text); font-weight: 600;
+}
+.merge-editor .ql-toolbar.ql-snow { border: none; border-bottom: 1px solid var(--color-border); }
+.merge-editor .ql-container.ql-snow { border: none; font-size: 13px; }
+.merge-editor .ql-editor { min-height: 96px; max-height: 180px; overflow-y: auto; color: var(--color-input-text); }
+/* Interno: mismo tono que las notas internas de la conversacion */
+.merge-editor.is-internal .ql-container { background: #fffdf0; }
+.merge-editor.is-internal { border-left: 3px solid #f0c36d; }
+:root[data-theme="dark"] .merge-editor.is-internal .ql-container { background: #2a230a; }
+:root[data-theme="dark"] .merge-editor.is-internal { border-left-color: #ca8a04; }
 .merge-modal-footer {
     display: flex; justify-content: flex-end; gap: 8px;
     padding: 12px 20px; border-top: 1px solid #e2e8f0;

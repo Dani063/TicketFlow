@@ -2254,3 +2254,89 @@ class AgentInboxTests(_BaseFixture):
         from_page = self.client.get(reverse("home")).context["stats"]
         from_api = self.client.get(reverse("home_stats_api")).json()["stats"]
         self.assertEqual(from_api, from_page)
+
+
+@override_settings(
+    OUTBOUND_EMAIL_ENABLED=True,
+    OUTBOUND_TICKET_CREATED_ENABLED=True,
+    OUTBOUND_AGENT_REPLY_ENABLED=True,
+)
+class MergeMessageTests(_BaseFixture):
+    """Paso 2 del modal de fusión: comentarios revisados por el agente."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.agent)
+        self.source = self.make_ticket(subject="origen", brand=self.brand_a)
+        self.target = self.make_ticket(subject="destino", brand=self.brand_a)
+        Comment.objects.create(ticket=self.source, user=self.customer, content="conversación original")
+
+    def _merge(self, **fields):
+        data = {"target_ticket_id": self.target.id, **fields}
+        return self.client.post(reverse("merge_ticket", args=[self.source.id]), data)
+
+    def test_public_closing_comment_stays_on_source_and_emails_its_requester(self):
+        response = self._merge(
+            source_comment="Lo unimos con el otro ticket",
+            source_comment_html="<p>Lo unimos con el <strong>otro</strong> ticket</p>",
+            source_is_public="true",
+            target_comment="Fusionado desde el origen",
+            target_comment_html="<p>Fusionado desde el origen</p>",
+            target_is_public="false",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        closing = Comment.objects.get(ticket=self.source)
+        self.assertTrue(closing.is_public)
+        self.assertIn("<strong>otro</strong>", closing.html_body)
+        self.assertTrue(
+            OutboundEmailLog.objects.filter(ticket=self.source, to_email=self.customer.email).exists()
+        )
+
+        note = Comment.objects.get(ticket=self.target, content="Fusionado desde el origen")
+        self.assertFalse(note.is_public)
+        self.assertFalse(OutboundEmailLog.objects.filter(ticket=self.target).exists())
+        # La conversación original viaja al destino, el comentario de cierre no.
+        self.assertTrue(Comment.objects.filter(ticket=self.target, content="conversación original").exists())
+
+        self.source.refresh_from_db()
+        self.assertEqual(self.source.status, "closed")
+        self.assertEqual(self.source.merged_into, self.target)
+
+    def test_empty_messages_publish_nothing(self):
+        response = self._merge(
+            source_comment="  ", source_is_public="true",
+            target_comment="", target_is_public="true",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Comment.objects.filter(ticket=self.source).exists())
+        self.assertEqual(Comment.objects.filter(ticket=self.target).count(), 1)
+        self.assertFalse(OutboundEmailLog.objects.exists())
+
+    def test_merge_without_messages_keeps_the_old_behaviour(self):
+        response = self._merge()
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Comment.objects.filter(ticket=self.source).exists())
+        self.assertFalse(OutboundEmailLog.objects.exists())
+
+    def test_bulk_merge_posts_the_closing_comment_on_every_source(self):
+        other = self.make_ticket(subject="otro origen", brand=self.brand_a)
+        response = self.client.post(
+            reverse("bulk_merge"),
+            data=json.dumps({
+                "ids": [self.source.id, other.id],
+                "target_id": self.target.id,
+                "source_message": {"content": "Unidos", "html_body": "<p>Unidos</p>", "is_public": True},
+                "target_message": {"content": "Llegan dos", "html_body": "", "is_public": False},
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        for source in (self.source, other):
+            closing = Comment.objects.get(ticket=source)
+            self.assertEqual(closing.content, "Unidos")
+            self.assertTrue(closing.is_public)
+            self.assertTrue(OutboundEmailLog.objects.filter(ticket=source).exists())
+        self.assertEqual(
+            Comment.objects.filter(ticket=self.target, content="Llegan dos", is_public=False).count(), 1
+        )

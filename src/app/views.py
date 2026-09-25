@@ -2401,6 +2401,7 @@ def global_search(request):
 
     tickets_data = [{
         "id": t.id,
+        "display_id": t.zendesk_id or t.id,
         "subject": t.subject,
         "status": t.status,
         "requester": t.requester.name if t.requester else "-",
@@ -2431,12 +2432,38 @@ def global_search(request):
     return JsonResponse({"tickets": tickets_data, "users": users_data})
 
 
+def _merge_message(data, prefix):
+    """Comentario revisado en el paso 2 del modal de fusión, o None si no viene."""
+    if f'{prefix}_comment' not in data:
+        return None
+    return {
+        'content': data.get(f'{prefix}_comment', ''),
+        'html_body': data.get(f'{prefix}_comment_html', ''),
+        'is_public': data.get(f'{prefix}_is_public') == 'true',
+    }
+
+
+def _merge_message_json(message):
+    """Igual que _merge_message, para el cuerpo JSON de la fusión en bloque."""
+    if not isinstance(message, dict):
+        return None
+    return {
+        'content': str(message.get('content') or ''),
+        'html_body': str(message.get('html_body') or ''),
+        'is_public': message.get('is_public') is True,
+    }
+
+
 @api_login_required
 @require_POST
 def merge_ticket(request, ticket_id):
     try:
         target_id = int(request.POST.get('target_ticket_id', ''))
-        target = MergeService.merge_ticket(ticket_id, target_id, request.user)
+        target = MergeService.merge_ticket(
+            ticket_id, target_id, request.user,
+            source_message=_merge_message(request.POST, 'source'),
+            target_message=_merge_message(request.POST, 'target'),
+        )
     except (ValueError, TypeError):
         return json_error('invalid_target', 'Ticket destino no encontrado', status=404)
     except Ticket.DoesNotExist:
@@ -2478,7 +2505,11 @@ def bulk_merge(request):
         return json_error('missing_fields', 'ids y target_id requeridos', status=400)
 
     try:
-        target, merged_count = MergeService.bulk_merge(ids, target_id, request.user)
+        target, merged_count = MergeService.bulk_merge(
+            ids, target_id, request.user,
+            source_message=_merge_message_json(data.get('source_message')),
+            target_message=_merge_message_json(data.get('target_message')),
+        )
     except Ticket.DoesNotExist:
         return json_error('target_not_found', 'Ticket destino no encontrado', status=404)
     except APIValidationError as exc:

@@ -1347,19 +1347,55 @@ window.initTicketPane = function (root, ctx) {
     }
 
     // ---- Merge de tickets ----
+    // Dos pasos: elegir destino y revisar los comentarios que deja la fusion en
+    // cada ticket. El del origen es el que le llega al cliente al cerrarse, asi
+    // que se puede editar para explicar el motivo sin tener que escribir otra
+    // respuesta aparte.
     const mergeBtn = rootEl.querySelector('#merge-btn');
     const mergeModal = rootEl.querySelector('#merge-modal');
-    const mergeModalClose = rootEl.querySelector('#merge-modal-close');
-    const mergeCancelBtn = rootEl.querySelector('#merge-cancel-btn');
-    const mergeConfirmBtn = rootEl.querySelector('#merge-confirm-btn');
-    const mergeSearchInput = rootEl.querySelector('#merge-search-input');
-    const mergeSearchResults = rootEl.querySelector('#merge-search-results');
-    const mergeSelected = rootEl.querySelector('#merge-selected');
-    const mergeSelectedLabel = rootEl.querySelector('#merge-selected-label');
-    const mergeTargetId = rootEl.querySelector('#merge-target-id');
 
     if (mergeBtn && mergeModal) {
+        const q$ = (sel) => mergeModal.querySelector(sel);
+        const mergeModalClose = q$('#merge-modal-close');
+        const mergeCancelBtn = q$('#merge-cancel-btn');
+        const mergeBackBtn = q$('#merge-back-btn');
+        const mergeNextBtn = q$('#merge-next-btn');
+        const mergeConfirmBtn = q$('#merge-confirm-btn');
+        const mergeSearchInput = q$('#merge-search-input');
+        const mergeSearchResults = q$('#merge-search-results');
+        const mergeSelected = q$('#merge-selected');
+        const mergeSelectedLabel = q$('#merge-selected-label');
+        const mergeTargetId = q$('#merge-target-id');
+        const step1 = q$('#merge-step-1');
+        const step2 = q$('#merge-step-2');
+        const stepLabel = q$('#merge-step-label');
+        const stepBar2 = q$('#merge-step-bar-2');
+        const review = window.TFMergeReview.for(mergeModal);
+        const source = {
+            displayId: mergeModal.dataset.sourceId,
+            subject: mergeModal.dataset.sourceSubject || '',
+        };
+
         let searchTimer = null;
+        let target = null;          // { id, displayId, subject }
+
+        function showStep(n) {
+            step1.hidden = n !== 1;
+            step2.hidden = n !== 2;
+            stepLabel.textContent = 'Paso ' + n + ' de 2';
+            stepBar2.classList.toggle('is-done', n === 2);
+            mergeCancelBtn.hidden = n !== 1;
+            mergeNextBtn.hidden = n !== 1;
+            mergeBackBtn.hidden = n !== 2;
+            mergeConfirmBtn.hidden = n !== 2;
+            mergeConfirmBtn.disabled = false;
+        }
+
+        function goToReview() {
+            if (!target) return;
+            review.show({ sources: [source], target });
+            showStep(2);
+        }
 
         function openMergeModal() {
             mergeModal.classList.add('open');
@@ -1367,7 +1403,10 @@ window.initTicketPane = function (root, ctx) {
             mergeSearchResults.innerHTML = '';
             mergeSelected.style.display = 'none';
             mergeTargetId.value = '';
-            mergeConfirmBtn.disabled = true;
+            mergeNextBtn.disabled = true;
+            target = null;
+            review.reset();
+            showStep(1);
             setTimeout(() => mergeSearchInput.focus(), 30);
         }
 
@@ -1375,9 +1414,20 @@ window.initTicketPane = function (root, ctx) {
             mergeModal.classList.remove('open');
         }
 
+        function selectTarget(t) {
+            target = { id: t.id, displayId: t.display_id || t.id, subject: t.subject || '' };
+            mergeTargetId.value = t.id;
+            mergeSelectedLabel.textContent = '#' + target.displayId + ' — ' + target.subject;
+            mergeSelected.style.display = 'block';
+            mergeNextBtn.disabled = false;
+            mergeSearchResults.innerHTML = '';
+        }
+
         mergeBtn.addEventListener('click', openMergeModal);
         mergeModalClose.addEventListener('click', closeMergeModal);
         mergeCancelBtn.addEventListener('click', closeMergeModal);
+        mergeBackBtn.addEventListener('click', () => showStep(1));
+        mergeNextBtn.addEventListener('click', goToReview);
         mergeModal.addEventListener('click', (e) => { if (e.target === mergeModal) closeMergeModal(); });
 
         mergeSearchInput.addEventListener('input', () => {
@@ -1396,17 +1446,21 @@ window.initTicketPane = function (root, ctx) {
                         return;
                     }
                     tickets.forEach(t => {
+                        // El asunto viene de correo: se inserta como texto.
                         const li = document.createElement('li');
                         li.className = 'merge-result-item';
                         li.dataset.id = t.id;
-                        li.innerHTML = `<span class="merge-result-id">#${t.id}</span> <span class="merge-result-subject">${t.subject}</span> <span class="merge-result-status status-${t.status}">${t.status}</span>`;
-                        li.addEventListener('click', () => {
-                            mergeTargetId.value = t.id;
-                            mergeSelectedLabel.textContent = `#${t.id} — ${t.subject}`;
-                            mergeSelected.style.display = 'block';
-                            mergeConfirmBtn.disabled = false;
-                            mergeSearchResults.innerHTML = '';
-                        });
+                        const id = document.createElement('span');
+                        id.className = 'merge-result-id';
+                        id.textContent = '#' + (t.display_id || t.id);
+                        const subject = document.createElement('span');
+                        subject.className = 'merge-result-subject';
+                        subject.textContent = t.subject || '';
+                        const status = document.createElement('span');
+                        status.className = 'merge-result-status status-' + t.status;
+                        status.textContent = t.status;
+                        li.append(id, subject, status);
+                        li.addEventListener('click', () => selectTarget(t));
                         mergeSearchResults.appendChild(li);
                     });
                 } catch (e) {
@@ -1417,27 +1471,29 @@ window.initTicketPane = function (root, ctx) {
         });
 
         mergeConfirmBtn.addEventListener('click', async () => {
-            const targetId = mergeTargetId.value;
-            if (!targetId) return;
-            const ok = await window.dialog.confirm({
-                title: 'Fusionar ticket',
-                message: '¿Seguro que quieres fusionar este ticket? La acción no se puede deshacer.',
-                confirmText: 'Fusionar',
-                cancelText: 'Cancelar',
-                variant: 'danger',
-            });
-            if (!ok) return;
+            if (!target) return;
             mergeConfirmBtn.disabled = true;
             try {
                 const fd = new FormData();
-                fd.append('target_ticket_id', targetId);
+                fd.append('target_ticket_id', target.id);
+                const messages = review.payload();
+                Object.keys(messages).forEach((key) => {
+                    fd.append(key + '_comment', messages[key].content);
+                    fd.append(key + '_comment_html', messages[key].html_body);
+                    fd.append(key + '_is_public', messages[key].is_public ? 'true' : 'false');
+                });
                 const res = await fetch(window.urls.merge_ticket, {
                     method: 'POST',
                     headers: { 'X-CSRFToken': getCookie('csrftoken') },
                     body: fd,
                 });
                 const data = await res.json();
-                if (!res.ok) { window.toast.error(data.error || 'Error al fusionar'); mergeConfirmBtn.disabled = false; return; }
+                if (!res.ok) {
+                    const err = data.error;
+                    window.toast.error((err && err.message) || err || 'Error al fusionar');
+                    mergeConfirmBtn.disabled = false;
+                    return;
+                }
                 closeMergeModal();
                 window.location.href = `/tickets/create/?id=${data.target_id}`;
             } catch (e) {

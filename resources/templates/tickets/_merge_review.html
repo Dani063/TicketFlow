@@ -1,0 +1,38 @@
+{# Paso 2 de los modales de fusión: comentarios que la fusión deja en origen y destino. #}
+{# Lo maneja merge_review.js (window.TFMergeReview); los textos de cabecera los rellena él. #}
+<div class="merge-review-block" data-merge-review>
+    <section class="merge-review">
+        <div class="merge-review__head">
+            <span class="merge-review__title" data-role="source-title">Ticket origen</span>
+            <span class="merge-review__id" data-role="source-ids"></span>
+            <span class="merge-review__hint" data-role="source-hint">Se cerrará con este comentario</span>
+        </div>
+        <div class="merge-editor" data-merge-editor="source">
+            <div class="merge-editor__bar">
+                <div class="merge-vis" role="group" aria-label="Visibilidad del comentario del ticket origen">
+                    <button type="button" class="merge-vis__opt" data-public="true"><i class="fas fa-eye"></i> Público</button>
+                    <button type="button" class="merge-vis__opt" data-public="false"><i class="fas fa-user-shield"></i> Interno</button>
+                </div>
+            </div>
+            <div class="merge-editor__quill"></div>
+        </div>
+    </section>
+
+    <section class="merge-review">
+        <div class="merge-review__head">
+            <span class="merge-review__title">Ticket destino</span>
+            <span class="merge-review__id" data-role="target-id"></span>
+            <span class="merge-review__hint">Recibirá este comentario</span>
+        </div>
+        <div class="merge-editor" data-merge-editor="target">
+            <div class="merge-editor__bar">
+                <div class="merge-vis" role="group" aria-label="Visibilidad del comentario del ticket destino">
+                    <button type="button" class="merge-vis__opt" data-public="true"><i class="fas fa-eye"></i> Público</button>
+                    <button type="button" class="merge-vis__opt" data-public="false"><i class="fas fa-user-shield"></i> Interno</button>
+                </div>
+            </div>
+            <div class="merge-editor__quill"></div>
+        </div>
+    </section>
+    <p class="merge-review__note">Los comentarios públicos se envían por correo al solicitante de cada ticket. Deja un mensaje vacío para no publicar nada en ese ticket.</p>
+</div>

@@ -406,6 +406,17 @@
 
     // ---- Modal de fusión --------------------------------------------------
 
+    // Dos pasos, como en el ticket: destino y revisión de los comentarios que
+    // deja la fusión (merge_review.js). El del origen le llega a cada cliente.
+    let _mergeTarget = null;    // { id, displayId, subject }
+
+    function mergeButtons() {
+        return {
+            cancel: $('homeBmmCancel'), back: $('homeBmmBack'),
+            next: $('homeBmmNext'), confirm: $('homeBmmConfirm'),
+        };
+    }
+
     function openMergeModal() {
         const ov = $('homeBulkMergeOverlay');
         if (!ov) return;
@@ -413,9 +424,10 @@
         $('homeBmmSearch').value = '';
         $('homeBmmResults').innerHTML = '';
         $('homeBmmSelectedTarget').classList.remove('show');
-        const confirm = $('homeBmmConfirm');
-        confirm.disabled = true;
-        delete confirm.dataset.targetId;
+        $('homeBmmNext').disabled = true;
+        _mergeTarget = null;
+        window.TFMergeReview.for(ov).reset();
+        window.TFMergeReview.setStep(ov, 1, mergeButtons());
         setTimeout(() => $('homeBmmSearch').focus(), 50);
     }
 
@@ -424,15 +436,24 @@
         if (ov) ov.classList.remove('open');
     }
 
-    function selectMergeTarget(id, subject, li) {
+    function selectMergeTarget(t, li) {
         document.querySelectorAll('#homeBmmResults li').forEach(el => el.classList.remove('selected'));
         li.classList.add('selected');
+        _mergeTarget = { id: t.id, displayId: t.display_id || t.id, subject: t.subject || '' };
         const target = $('homeBmmSelectedTarget');
-        target.textContent = `Destino: #${id} — ${subject}`;
+        target.textContent = `Destino: #${_mergeTarget.displayId} — ${_mergeTarget.subject}`;
         target.classList.add('show');
-        const confirm = $('homeBmmConfirm');
-        confirm.disabled = false;
-        confirm.dataset.targetId = id;
+        $('homeBmmNext').disabled = false;
+    }
+
+    function goToMergeReview() {
+        const ov = $('homeBulkMergeOverlay');
+        if (!ov || !_mergeTarget) return;
+        window.TFMergeReview.for(ov).show({
+            sources: [..._selected].map(id => ({ displayId: id, subject: '' })),
+            target: _mergeTarget,
+        });
+        window.TFMergeReview.setStep(ov, 2, mergeButtons());
     }
 
     async function searchMergeTarget(q) {
@@ -454,13 +475,13 @@
                 li.dataset.id = t.id;
                 const id = document.createElement('span');
                 id.className = 'bmm-id';
-                id.textContent = '#' + t.id;
+                id.textContent = '#' + (t.display_id || t.id);
                 const subj = document.createElement('span');
                 subj.className = 'bmm-subject';
                 subj.textContent = t.subject || '';
                 li.appendChild(id);
                 li.appendChild(subj);
-                li.addEventListener('click', () => selectMergeTarget(t.id, t.subject, li));
+                li.addEventListener('click', () => selectMergeTarget(t, li));
                 list.appendChild(li);
             });
         } catch (e) {
@@ -640,15 +661,26 @@
             searchTimer = setTimeout(() => searchMergeTarget(q), 300);
         });
 
+        const bmmNext = $('homeBmmNext');
+        if (bmmNext) bmmNext.addEventListener('click', goToMergeReview);
+        const bmmBack = $('homeBmmBack');
+        if (bmmBack) bmmBack.addEventListener('click', () => {
+            window.TFMergeReview.setStep($('homeBulkMergeOverlay'), 1, mergeButtons());
+        });
+
         const bmmConfirm = $('homeBmmConfirm');
         if (bmmConfirm) bmmConfirm.addEventListener('click', async () => {
-            const targetId = parseInt(bmmConfirm.dataset.targetId || '0', 10);
-            if (!targetId) return;
+            if (!_mergeTarget) return;
+            const messages = window.TFMergeReview.for($('homeBulkMergeOverlay')).payload();
+            bmmConfirm.disabled = true;
             try {
                 const res = await fetch(BULK_MERGE_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
-                    body: JSON.stringify({ ids: [..._selected], target_id: targetId }),
+                    body: JSON.stringify({
+                        ids: [..._selected], target_id: _mergeTarget.id,
+                        source_message: messages.source, target_message: messages.target,
+                    }),
                 });
                 const json = await res.json();
                 if (json.ok) {
@@ -656,9 +688,10 @@
                     closeMergeModal();
                     load(_view, _page);
                 } else {
-                    window.toast.error(json.error || 'Error al fusionar');
+                    window.toast.error((json.error && json.error.message) || json.error || 'Error al fusionar');
+                    bmmConfirm.disabled = false;
                 }
-            } catch (e) { window.toast.error('Error de red'); }
+            } catch (e) { window.toast.error('Error de red'); bmmConfirm.disabled = false; }
         });
 
         // Listener singleton: tabs.js re-ejecuta este script al volver a la
