@@ -2249,6 +2249,17 @@ class AgentInboxTests(_BaseFixture):
         self._reply(ticket, self.customer)
         self.assertTrue(Notification.objects.filter(ticket=ticket, user=member, read=False).exists())
 
+    def test_home_table_includes_old_open_tickets_counted_in_the_button(self):
+        """La tabla heredaba el rango de 30 días de /tickets/ y el contador no."""
+        old = self.make_ticket()
+        Ticket.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=90))
+        stats = self.client.get(reverse("home_stats_api")).json()["stats"]
+        rows = self.client.get(
+            reverse("filter_tickets"), {"view": "home_you", "page": 1, "page_size": 50}
+        ).json()["tickets"]
+        self.assertEqual(stats["abiertos_you"], 1)
+        self.assertEqual([row["id"] for row in rows], [old.id])
+
     def test_home_stats_endpoint_matches_the_dashboard(self):
         self.make_ticket()
         from_page = self.client.get(reverse("home")).context["stats"]

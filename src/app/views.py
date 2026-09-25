@@ -407,7 +407,13 @@ def _ticket_listing_queryset(request):
     date_from, date_to, start_dt, end_dt = _parse_filter_date_range(request.GET)
     if brand_id:
         base_qs = base_qs.filter(brand_id=brand_id)
-    base_qs = base_qs.filter(created_at__range=(start_dt, end_dt))
+    # La home no tiene selector de fechas y sus contadores no llevan rango:
+    # con el de 30 días por defecto, un ticket abierto creado hace meses
+    # contaba en «Tú» pero no salía en la tabla. Las vistas home_* ya acotan
+    # por su cuenta lo que tiene cota temporal (las de los últimos 60 días).
+    view = request.GET.get('view') or ''
+    if not view.startswith('home_'):
+        base_qs = base_qs.filter(created_at__range=(start_dt, end_dt))
     return base_qs, brand_id, date_from, date_to
 
 
@@ -562,7 +568,10 @@ def _tickets_for_view(base_qs, view, user):
 
 
 def _home_stats(user):
-    tickets_qs = Ticket.objects.filter(
+    # Mismo universo que la tabla (_base_tickets_queryset): sin fusionados ni
+    # eliminados, o el número del botón no cuadra con las filas al pulsarlo.
+    live = Ticket.objects.filter(merged_into__isnull=True, is_deleted=False)
+    tickets_qs = live.filter(
         Q(requester=user) | Q(assignee=user) | Q(ccs=user)
     ).distinct()
 
@@ -570,7 +579,7 @@ def _home_stats(user):
     abiertos_you = tickets_qs.filter(status="open").count()
     abiertos_groups = 0
     if user.group:
-        abiertos_groups = Ticket.objects.filter(
+        abiertos_groups = live.filter(
             assignee__group=user.group, status="open"
         ).distinct().count()
 
