@@ -135,10 +135,37 @@ class TicketLiveTests(TestCase):
 
         del_live = self.live()["comments"][0]
 
-        # add_comment anade new_status; por lo demas las dos rutas alimentan la
-        # misma funcion de render del frontend y no pueden divergir.
-        self.assertEqual(set(del_post) - {"new_status"}, set(del_live))
+        # add_comment anade new_status y la cabecera del ticket; por lo demas las
+        # dos rutas alimentan la misma funcion de render del frontend y no pueden
+        # divergir.
+        self.assertEqual(set(del_post) - {"new_status", "ticket"}, set(del_live))
         self.assertEqual(del_post["id"], del_live["id"])
         self.assertEqual(del_post["conversation_html"], del_live["conversation_html"])
         self.assertEqual(del_post["speaker_kind"], del_live["speaker_kind"])
         self.assertEqual(del_post["username"], del_live["username"])
+
+    def test_publicar_devuelve_la_cabecera_ya_con_el_estado_nuevo(self):
+        """Publicar dejaba la chapa de estado con el valor con que cargo la pagina."""
+        self.client.force_login(self.agent)
+        respuesta = self.client.post(
+            reverse("add_comment", args=[self.ticket.id]),
+            data=json.dumps({"content": "cerramos", "is_public": True, "new_status": "resolved"}),
+            content_type="application/json",
+        )
+        self.assertEqual(respuesta.status_code, 200)
+        cabecera = respuesta.json()["ticket"]
+        self.assertEqual(cabecera["status"], "resolved")
+        self.assertEqual(cabecera["status_display"], "Resolved")
+        # Misma forma que la del sondeo: el frontend las pinta con la misma funcion.
+        self.assertEqual(set(cabecera), set(self.live()["ticket"]))
+
+    def test_la_cabecera_lleva_reloj_del_servidor_para_ordenar_respuestas(self):
+        """Sin el, el sondeo repinta con lo que leyo antes de publicar."""
+        self.client.force_login(self.agent)
+        antes = self.live()["ticket"]["updated_ts"]
+        respuesta = self.client.post(
+            reverse("add_comment", args=[self.ticket.id]),
+            data=json.dumps({"content": "cerramos", "is_public": True, "new_status": "resolved"}),
+            content_type="application/json",
+        )
+        self.assertGreater(respuesta.json()["ticket"]["updated_ts"], antes)

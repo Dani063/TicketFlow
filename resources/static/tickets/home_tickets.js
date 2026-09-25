@@ -41,6 +41,8 @@
         home_satisfaccion: 'Tus tickets valorados',
     };
 
+    const AUTO_REFRESH_MS = 20000;
+
     let _view = DEFAULT_VIEW;
     let _page = 1;
     let _pageSize = 50;
@@ -301,15 +303,18 @@
         }
     }
 
-    async function load(view, page) {
+    async function load(view, page, opts) {
+        const silent = !!(opts && opts.silent);
         _view = view || DEFAULT_VIEW;
         _page = page || 1;
         const seq = ++_reqSeq;
 
         const spinner = $('homeLoadingSpinner');
         const tbody = $('homeTicketsTableBody');
-        if (spinner) spinner.style.display = 'flex';
-        clearSelection();
+        // En un refresco automatico no se pinta spinner ni se toca la seleccion:
+        // el agente no ha pedido nada y no debe notar que la tabla se recarga.
+        if (spinner && !silent) spinner.style.display = 'flex';
+        if (!silent) clearSelection();
 
         try {
             let url = `/tickets/filter/?view=${encodeURIComponent(_view)}` +
@@ -357,8 +362,46 @@
                 tbody.innerHTML = emptyRow('Error de red al cargar tickets.', 'var(--color-danger)');
             }
         } finally {
-            if (spinner && seq === _reqSeq) spinner.style.display = 'none';
+            if (spinner && !silent && seq === _reqSeq) spinner.style.display = 'none';
         }
+    }
+
+    // ---- Refresco automatico ---------------------------------------------
+
+    async function refreshStats() {
+        try {
+            const res = await fetch('/api/home-stats/');
+            if (!res.ok) return;
+            const data = await res.json();
+            const stats = data.stats || {};
+            const write = (view, value) => {
+                const el = document.querySelector(`.stat[data-view="${view}"] .stat-number`);
+                if (el && el.textContent !== String(value)) el.textContent = value;
+            };
+            write('home_you', stats.abiertos_you);
+            write('home_groups', stats.abiertos_groups);
+            write('home_bien', stats.bien);
+            write('home_mal', stats.mal);
+            write('home_solventado', stats.solventado);
+            write('home_satisfaccion', stats.total_rated ? `${stats.satisfaccion_pct}%` : '—');
+        } catch (e) {
+            /* cosmetico: si falla, se queda el numero anterior */
+        }
+    }
+
+    function autoRefresh() {
+        if (document.hidden) return;
+        if (!$('homeTicketsTableBody')) return;            // ya no estamos en la home
+        // No pisar trabajo en curso: seleccion en bloque o modal de fusion abierto.
+        if (document.querySelector('#homeTicketsTableBody .ticket-checkbox:checked')) return;
+        const merge = $('homeBulkMergeOverlay');
+        if (merge && merge.classList.contains('open')) return;
+        // La vista previa se cierra con el mouseout de la fila: si la fila
+        // desaparece debajo del cursor, la tarjeta se queda colgada.
+        const card = $('ticket-preview-card');
+        if (card && card.style.display === 'block') return;
+        load(_view, _page, { silent: true });
+        refreshStats();
     }
 
     // ---- Modal de fusión --------------------------------------------------
@@ -629,6 +672,17 @@
         initHoverPreview();
         fitTableHeight();
         load(DEFAULT_VIEW, 1);
+
+        // Un unico temporizador para toda la sesion: tabs.js re-ejecuta este
+        // script cada vez que se vuelve a la home y se irian acumulando.
+        if (window.__tfHomeAutoTimer) clearInterval(window.__tfHomeAutoTimer);
+        window.__tfHomeAutoTimer = setInterval(autoRefresh, AUTO_REFRESH_MS);
+        if (!window.__tfHomeVisibilityBound) {
+            window.__tfHomeVisibilityBound = true;
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) autoRefresh();
+            });
+        }
     }
 
     init();

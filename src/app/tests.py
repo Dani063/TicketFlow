@@ -2150,3 +2150,107 @@ class SatisfactionSurveyTests(_BaseFixture):
         self._offer(self._resolved_ticket())
         self.assertEqual(SatisfactionRating.objects.filter(zendesk_id__isnull=True).count(), 2)
         self.assertEqual(SatisfactionRating.objects.count(), 3)
+
+
+class AgentInboxTests(_BaseFixture):
+    """Bandeja del agente: respuestas sin contestar y avisos de la campana."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.agent)
+
+    def _reply(self, ticket, actor, **kwargs):
+        from app.services.comments import CommentService
+
+        return CommentService.add_comment(
+            ticket, actor, "mensaje", is_public=True, send_requester_email=False, **kwargs
+        )
+
+    def _activity_ids(self):
+        response = self.client.get(reverse("recent_activity_api"))
+        self.assertEqual(response.status_code, 200)
+        return [row["ticket_id"] for row in response.json()["activity"]]
+
+    def test_ticket_enters_the_list_when_the_customer_writes_last(self):
+        ticket = self.make_ticket()
+        self.assertEqual(self._activity_ids(), [])
+
+        self._reply(ticket, self.customer)
+        self.assertEqual(self._activity_ids(), [ticket.id])
+
+    def test_answering_removes_it_from_the_list(self):
+        ticket = self.make_ticket()
+        self._reply(ticket, self.customer)
+        self._reply(ticket, self.agent)
+        self.assertEqual(self._activity_ids(), [])
+
+    def test_an_internal_note_does_not_count_as_an_answer(self):
+        from app.services.comments import CommentService
+
+        ticket = self.make_ticket()
+        self._reply(ticket, self.customer)
+        CommentService.add_comment(ticket, self.agent, "nota", is_public=False)
+        self.assertEqual(self._activity_ids(), [ticket.id])
+
+    def test_a_colleagues_answer_also_clears_it(self):
+        other = User.objects.create_user("other@example.com", "Other", "secret")
+        other.role = self.agent_role
+        other.save(update_fields=["role"])
+
+        ticket = self.make_ticket()
+        self._reply(ticket, self.customer)
+        self._reply(ticket, other)
+        self.assertEqual(self._activity_ids(), [])
+
+    def test_closed_tickets_stay_out(self):
+        ticket = self.make_ticket(status="closed")
+        self._reply(ticket, self.customer)
+        self.assertEqual(self._activity_ids(), [])
+
+    def test_opening_a_ticket_marks_its_notifications_read(self):
+        ticket = self.make_ticket()
+        self._reply(ticket, self.customer)
+        self.assertTrue(Notification.objects.filter(ticket=ticket, user=self.agent, read=False).exists())
+
+        response = self.client.post(
+            reverse("mark_ticket_notifications_read", args=[ticket.id])
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["cleared"], 1)
+        self.assertEqual(payload["unread"], 0)
+        self.assertFalse(Notification.objects.filter(user=self.agent, read=False).exists())
+
+    def test_marking_read_does_not_touch_other_users_notifications(self):
+        ticket = self.make_ticket()
+        self._reply(ticket, self.customer)
+        Notification.objects.create(user=self.admin, ticket=ticket, message="ajeno")
+
+        self.client.post(reverse("mark_ticket_notifications_read", args=[ticket.id]))
+        self.assertTrue(Notification.objects.filter(user=self.admin, read=False).exists())
+
+    def test_unread_count_is_not_capped_by_the_listed_page(self):
+        ticket = self.make_ticket()
+        for index in range(25):
+            Notification.objects.create(user=self.agent, ticket=ticket, message=f"aviso {index}")
+
+        payload = self.client.get(reverse("notifications_api")).json()
+        self.assertEqual(len(payload["notifications"]), 20)
+        self.assertEqual(payload["unread"], 25)
+
+    def test_reply_on_an_unassigned_ticket_reaches_the_group(self):
+        group = Group.objects.create(group_name="Soporte")
+        member = User.objects.create_user("member@example.com", "Member", "secret")
+        member.role = self.agent_role
+        member.group = group
+        member.save(update_fields=["role", "group"])
+
+        ticket = self.make_ticket(assignee=None, assigned_group=group)
+        self._reply(ticket, self.customer)
+        self.assertTrue(Notification.objects.filter(ticket=ticket, user=member, read=False).exists())
+
+    def test_home_stats_endpoint_matches_the_dashboard(self):
+        self.make_ticket()
+        from_page = self.client.get(reverse("home")).context["stats"]
+        from_api = self.client.get(reverse("home_stats_api")).json()["stats"]
+        self.assertEqual(from_api, from_page)

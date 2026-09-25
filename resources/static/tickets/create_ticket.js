@@ -424,6 +424,7 @@ window.initTicketPane = function (root, ctx) {
             textarea.value = '';
             lastAttempt = null;
             if (data.new_status) rootEl.querySelector('#selected-status').textContent = data.new_status;
+            window.tfApplyTicketHeader?.(rootEl, data.ticket);
         } catch (_) {
             window.toast.error('No se pudo confirmar la publicación. Reintenta; no se duplicará el mensaje.');
         } finally { setSubmissionBusy(false); }
@@ -487,6 +488,9 @@ window.initTicketPane = function (root, ctx) {
                 return false;
             }
             _formBaseline = serializeTicketForm();
+            try {
+                window.tfApplyTicketHeader?.(rootEl, (await res.json()).ticket);
+            } catch (_) { /* respuesta no JSON: la cabecera la arregla el sondeo */ }
             return true;
         } catch (err) {
             console.error('Error guardando los campos del ticket:', err);

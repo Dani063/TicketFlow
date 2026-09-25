@@ -90,7 +90,9 @@ urlpatterns = [
     path("api/users/<int:user_id>/notes/", views.update_user_notes, name="update_user_notes"),
     path("api/notifications/", views.notifications_api, name="notifications_api"),
     path("api/notifications/<int:notif_id>/read/", views.mark_notification_read, name="mark_notification_read"),
+    path("api/notifications/ticket/<int:ticket_id>/read/", views.mark_ticket_notifications_read, name="mark_ticket_notifications_read"),
     path("api/activity/", views.recent_activity_api, name="recent_activity_api"),
+    path("api/home-stats/", views.home_stats_api, name="home_stats_api"),
 
     path('login/', views.login_redirect, name='login'),
     path('dev-login/', views.dev_login, name='dev_login'),

@@ -63,9 +63,9 @@
 </div>
 
 <div class="dashboard-layout">
-<aside class="left-column dashboard-sidebar" aria-label="Actualizaciones recientes">
+<aside class="left-column dashboard-sidebar" aria-label="Respuestas sin contestar">
     <div class="updates">
-        <h3>Actualizaciones recientes</h3>
+        <h3 title="Tickets cuyo último mensaje es del cliente. Desaparecen en cuanto respondes.">Respuestas sin contestar</h3>
         <ul id="updates-list">
             {# Skeleton placeholders shown until refreshUpdates() populates the list #}
             <li class="skeleton-row" aria-hidden="true">
@@ -211,5 +211,5 @@ window.__homeData = {
     currentUserGroupId: {% if current_user_group_id %}{{ current_user_group_id }}{% else %}null{% endif %}
 };
 </script>
-<script src="{% static 'tickets/home_tickets.js' %}?v=s6.2"></script>
+<script src="{% static 'tickets/home_tickets.js' %}?v=s6.3"></script>
 {% endblock %}

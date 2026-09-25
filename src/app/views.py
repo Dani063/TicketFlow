@@ -31,7 +31,7 @@ from django.views.decorators.http import require_GET
 from django.core.cache import cache
 from .api import APIValidationError, api_login_required, json_error, json_ok, parse_json_body
 from .constants import CHANNEL_CHOICES, SERVICE_CHOICES, SLA_AT_RISK_WINDOW_MINUTES, TICKET_TYPE_CHOICES
-from .permissions import can_manage_users, can_update_ticket, can_view_ticket, is_admin as permission_is_admin, is_agent as permission_is_agent
+from .permissions import agent_user_filter, can_manage_users, can_update_ticket, can_view_ticket, is_admin as permission_is_admin, is_agent as permission_is_agent
 from .sanitizers import sanitize_email_html
 from .services.conversation import prepare_comments
 from .services.assignment import AssignmentService
@@ -561,10 +561,7 @@ def _tickets_for_view(base_qs, view, user):
     return base_qs
 
 
-@login_required
-def home(request):
-    user = request.user
-
+def _home_stats(user):
     tickets_qs = Ticket.objects.filter(
         Q(requester=user) | Q(assignee=user) | Q(ccs=user)
     ).distinct()
@@ -607,12 +604,8 @@ def home(request):
     total_rated = bien_g + mal_g
     satisfaccion_pct = round((bien_g / total_rated) * 100) if total_rated > 0 else None
 
-    context = {
-        "username": user.name,
-        "email": user.email,
+    return {
         "pendientes_count": pendientes_count,
-        "current_user_id": user.id,
-        "current_user_group_id": user.group_id,
         "stats": {
             "abiertos_you": abiertos_you,
             "abiertos_groups": abiertos_groups,
@@ -621,9 +614,26 @@ def home(request):
             "solventado": solventado,
             "satisfaccion_pct": satisfaccion_pct,
             "total_rated": total_rated,
-        }
+        },
+    }
+
+
+@login_required
+def home(request):
+    user = request.user
+    context = {
+        "username": user.name,
+        "email": user.email,
+        "current_user_id": user.id,
+        "current_user_group_id": user.group_id,
+        **_home_stats(user),
     }
     return render(request, "tickets/home.html", context)
+
+
+@api_login_required
+def home_stats_api(request):
+    return JsonResponse(_home_stats(request.user))
 
 @login_required
 def tickets_list(request):
@@ -1708,7 +1718,10 @@ def create_ticket(request):
             return json_error('ticket_not_found', 'Ticket no encontrado', status=404)
         url = f'{request.path}?id={ticket.id}'
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-            return JsonResponse({'ticket_id': ticket.id, 'url': url})
+            return JsonResponse({
+                'ticket_id': ticket.id, 'url': url,
+                'ticket': _ticket_header_payload(ticket),
+            })
         return redirect(url)
 
     # GET .
@@ -1897,6 +1910,30 @@ def take_ticket(request, ticket_id):
 
 # Funcionalidades de Comentarios
 
+def _ticket_header_payload(ticket):
+    """Cabecera del pane: estado, asignado, prioridad y fecha.
+
+    La devuelven las tres rutas que pueden cambiarla —publicar, guardar campos
+    y el sondeo—, para que todas repinten lo mismo. Sin esto, publicar dejaba
+    la chapa de estado con el valor con el que se cargo la pagina.
+    """
+    return {
+        'status': ticket.status,
+        'status_display': ticket.get_status_display(),
+        'assignee_id': ticket.assignee_id,
+        'assignee_name': ticket.assignee.name if ticket.assignee else '',
+        'priority': ticket.priority or '',
+        'updated_at': (
+            timezone.localtime(ticket.updated_at).strftime('%d/%m/%Y %H:%M')
+            if ticket.updated_at else ''
+        ),
+        # Reloj del servidor para ordenar respuestas: el sondeo y la publicacion
+        # compiten, y sin esto la del sondeo —leida antes de publicar— repinta
+        # la cabecera con el estado antiguo.
+        'updated_ts': ticket.updated_at.timestamp() if ticket.updated_at else 0,
+    }
+
+
 def _comment_payload(comment, ticket):
     """Forma canonica de un comentario para el frontend.
 
@@ -1956,8 +1993,12 @@ def add_comment(request, ticket_id):
         visible_comments = visible_comments.filter(is_public=True)
     presented = prepare_comments(list(visible_comments))
     published = next(c for c in presented if c.pk == comment.pk)
+    # add_comment relee el ticket con select_for_update y muta esa copia, asi
+    # que esta instancia sigue con el estado con el que entro la peticion.
+    ticket.refresh_from_db()
     payload = _comment_payload(published, ticket)
     payload['new_status'] = applied_status
+    payload['ticket'] = _ticket_header_payload(ticket)
     return JsonResponse(payload)
 
 
@@ -1997,17 +2038,7 @@ def ticket_live(request, ticket_id):
         comments = [_comment_payload(c, ticket) for c in presented if c.pk in new_ids]
 
     return JsonResponse({
-        'ticket': {
-            'status': ticket.status,
-            'status_display': ticket.get_status_display(),
-            'assignee_id': ticket.assignee_id,
-            'assignee_name': ticket.assignee.name if ticket.assignee else '',
-            'priority': ticket.priority or '',
-            'updated_at': (
-                timezone.localtime(ticket.updated_at).strftime('%d/%m/%Y %H:%M')
-                if ticket.updated_at else ''
-            ),
-        },
+        'ticket': _ticket_header_payload(ticket),
         'comments': comments,
         'last_comment_id': max(new_ids) if new_ids else after,
     })
@@ -2064,43 +2095,69 @@ def notifications_api(request):
             "id": n.id,
             "message": n.message,
             "ticket_id": n.ticket_id,
-            "created_at": n.created_at.strftime("%d/%m %H:%M"),
+            "created_at": timezone.localtime(n.created_at).strftime("%d/%m %H:%M"),
         }
         for n in notifs
     ]
-    return JsonResponse({"notifications": data})
+    # `unread` es el total real: la lista viene recortada y el contador de la
+    # campana se quedaría clavado en el límite.
+    return JsonResponse({
+        "notifications": data,
+        "unread": NotificationService.unread_count(request.user),
+    })
 
 @api_login_required
 def recent_activity_api(request):
-    # Solo actualizaciones de los últimos 30 días — sin este corte los tickets
-    # importados de Zendesk muestran updated_at de hace años en el dashboard.
+    """Conversaciones en las que la última palabra no es tuya.
+
+    No es «lo último que he tocado»: eso subía al principio el ticket que
+    acababas de responder y no se iba nunca al leerlo. Aquí solo entra el
+    ticket cuyo último comentario público es de la otra parte, así que
+    desaparece de la lista en cuanto contestas.
+    """
+    # Sin corte temporal, los tickets importados de Zendesk asoman respuestas
+    # de hace años.
     recent_cutoff = timezone.now() - timedelta(days=30)
     base = Ticket.objects.filter(
-        merged_into__isnull=True,
-        is_deleted=False,
-        updated_at__gte=recent_cutoff,
-    )
+        merged_into__isnull=True, is_deleted=False,
+    ).exclude(status="closed")
+
+    last_public = Comment.objects.filter(
+        ticket=OuterRef("pk"), is_public=True,
+    ).order_by("-created_at", "-id")
     if _is_agent(request.user):
-        tickets = (
-            base
-            .filter(Q(assignee=request.user) | Q(created_by=request.user))
-            .select_related('requester', 'assignee')
-            .order_by('-updated_at')
-            .distinct()[:10]
+        base = base.filter(assignee=request.user)
+    else:
+        base = base.filter(Q(requester=request.user) | Q(ccs=request.user)).distinct()
+
+    tickets = base.annotate(
+        last_comment_at=Subquery(last_public.values("created_at")[:1]),
+        last_comment_user=Subquery(last_public.values("user_id")[:1]),
+    ).filter(last_comment_at__gte=recent_cutoff)
+
+    if _is_agent(request.user):
+        # La última palabra es del cliente: se excluye a la plantilla entera,
+        # no solo a uno mismo, para que la respuesta de un compañero tampoco
+        # cuente como pendiente de contestar.
+        tickets = tickets.exclude(
+            last_comment_user__in=User.objects.filter(agent_user_filter()).values("id")
         )
     else:
-        tickets = (
-            base
-            .filter(Q(requester=request.user) | Q(ccs=request.user) | Q(created_by=request.user))
-            .select_related('requester', 'assignee')
-            .order_by('-updated_at')
-            .distinct()[:10]
-        )
+        tickets = tickets.exclude(last_comment_user=request.user.id)
+
+    tickets = tickets.select_related("requester", "assignee").order_by("-last_comment_at")[:10]
+    authors = {
+        user.id: user.name
+        for user in User.objects.filter(
+            id__in={t.last_comment_user for t in tickets if t.last_comment_user}
+        ).only("id", "name")
+    }
     data = [
         {
             "ticket_id": t.id,
             "subject": t.subject,
-            "updated_at": t.updated_at.strftime("%d/%m %H:%M") if t.updated_at else "",
+            "replied_at": timezone.localtime(t.last_comment_at).strftime("%d/%m %H:%M"),
+            "replied_by": authors.get(t.last_comment_user, ""),
             "status": t.status,
             "priority": t.priority or "",
             "requester": t.requester.name if t.requester else "",
@@ -2119,7 +2176,22 @@ def mark_notification_read(request, notif_id):
     notif = get_object_or_404(Notification, id=notif_id, user=request.user)
     notif.read = True
     notif.save()
-    return JsonResponse({"ok": True})
+    return JsonResponse({"ok": True, "unread": NotificationService.unread_count(request.user)})
+
+
+@api_login_required
+@require_POST
+def mark_ticket_notifications_read(request, ticket_id):
+    """Abrir el ticket cuenta como haber leído sus avisos.
+
+    Si no, el contador solo bajaba pulsando el item del panel y quedaba
+    inflado en cuanto el agente entraba al ticket por la tabla o la pestaña.
+    """
+    updated = NotificationService.mark_ticket_read(request.user, ticket_id)
+    return JsonResponse({
+        "ok": True, "cleared": updated,
+        "unread": NotificationService.unread_count(request.user),
+    })
 
 @api_login_required
 @require_POST
