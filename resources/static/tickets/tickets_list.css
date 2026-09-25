@@ -288,3 +288,28 @@
         width: 100%;
     }
 }
+
+/* La columna de filtros ocupa el alto visible y solo hace scroll la lista.
+   El max-height fijo de style.css (100vh - 120px) no descontaba lo que hay
+   encima de la lista (cabecera, titulo, buscador) y, al desplegar secciones,
+   el final quedaba por debajo del borde de la ventana, que no tiene scroll. */
+@media (min-width: 721px) {
+    .tf-split-layout > .ticket-filters-panel {
+        display: flex;
+        flex-direction: column;
+        height: calc(100vh - 102px);
+        height: calc(100dvh - 102px);
+        overflow: hidden;
+    }
+
+    .ticket-filters-panel > * {
+        flex-shrink: 0;
+    }
+
+    .ticket-filters-panel > #filters {
+        flex: 1 1 auto;
+        min-height: 0;
+        max-height: none;
+        margin-bottom: 0;
+    }
+}
