@@ -1579,7 +1579,11 @@ window.initTicketPane = function (root, ctx) {
                     fd.append(key + '_comment_html', messages[key].html_body);
                     fd.append(key + '_is_public', messages[key].is_public ? 'true' : 'false');
                 });
-                const res = await fetch(window.urls.merge_ticket, {
+                // URL de ESTE pane, nunca window.urls.merge_ticket: esa global
+                // la pisa cada pestaña de ticket al cargarse, así que llegaba
+                // vacía (POST a «undefined») o con el ticket de otra pestaña.
+                const mergeUrl = (ctx && ctx.mergeTicketUrl) || ('/tickets/' + ctx.ticketId + '/merge/');
+                const res = await fetch(mergeUrl, {
                     method: 'POST',
                     headers: { 'X-CSRFToken': getCookie('csrftoken') },
                     body: fd,
