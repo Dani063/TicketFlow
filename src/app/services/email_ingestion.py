@@ -4,6 +4,7 @@ import re
 from collections import Counter
 from datetime import timedelta
 
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.utils import timezone
@@ -27,7 +28,60 @@ TICKET_TAG_RE = re.compile(r"\[ticket\s*#\d+\]", re.IGNORECASE)
 BODY_RE = re.compile(r"<body[^>]*>(.*?)</body>", re.DOTALL | re.IGNORECASE)
 
 
+class InvalidEmailSender(ValueError):
+    """Remitente no procesable: se conserva el mensaje sin bloquear el cursor."""
+
+    def __init__(self, code, message):
+        self.code = code
+        super().__init__(f"{code}: {message}")
+
+
 class EmailIngestionService:
+    REJECTED_SENDER_RESULT = "reject_invalid_sender"
+
+    @staticmethod
+    def validate_sender(email, name):
+        """Valida antes de escribir; los errores no incluyen datos del remitente."""
+        if not isinstance(email, str):
+            raise InvalidEmailSender("sender_email_invalid", "El correo del remitente no es texto.")
+        email = email.strip().lower()
+        email_field = User._meta.get_field("email")
+        if len(email) > email_field.max_length:
+            raise InvalidEmailSender(
+                "sender_email_too_long",
+                f"El correo del remitente tiene {len(email)} caracteres; el máximo es {email_field.max_length}.",
+            )
+        try:
+            email_field.clean(email, None)
+        except ValidationError:
+            raise InvalidEmailSender("sender_email_invalid", "El correo del remitente no tiene un formato válido.") from None
+
+        if name is None:
+            name = ""
+        if not isinstance(name, str):
+            raise InvalidEmailSender("sender_name_invalid", "El nombre del remitente no es texto.")
+        name = name.strip() or email.split("@")[0]
+        name_limit = User._meta.get_field("name").max_length
+        if len(name) > name_limit:
+            raise InvalidEmailSender(
+                "sender_name_too_long",
+                f"El nombre del remitente tiene {len(name)} caracteres; el máximo es {name_limit}.",
+            )
+        return email, name
+
+    @staticmethod
+    def message_sender(message):
+        sender = message.get("from") or {}
+        if not isinstance(sender, dict):
+            raise InvalidEmailSender("sender_email_invalid", "El remitente no tiene un formato válido.")
+        sender = sender.get("emailAddress") or {}
+        if not isinstance(sender, dict):
+            raise InvalidEmailSender("sender_email_invalid", "El remitente no tiene un formato válido.")
+        email = sender.get("address")
+        if email is None or (isinstance(email, str) and not email.strip()):
+            return "", ""  # Se mantiene el tratamiento previo de mensajes sin remitente.
+        return EmailIngestionService.validate_sender(email, sender.get("name"))
+
     @staticmethod
     def is_auto_generated(message):
         """Detecta auto-respuestas/correo automatizado por cabeceras RFC 3834 y
@@ -83,12 +137,24 @@ class EmailIngestionService:
         log.conversation_id = conversation_id
         log.payload = message
         log.error = None
-        log.save(update_fields=["status", "conversation_id", "payload", "error"])
+        log.result = None
+        log.save(update_fields=["status", "conversation_id", "payload", "error", "result"])
 
         try:
             result, ticket = EmailIngestionService._process_message(
                 message, brand, attachments=attachments,
             )
+        except InvalidEmailSender as exc:
+            # El payload original queda para revisión. Solo este fallo permanente
+            # permite avanzar el cursor; los demás errores conservan sus reintentos.
+            log.status = InboundEmailLog.STATUS_FAILED
+            log.result = EmailIngestionService.REJECTED_SENDER_RESULT
+            log.error = str(exc)
+            log.processed_at = timezone.now()
+            log.save(update_fields=["status", "result", "error", "processed_at"])
+            record_metric("email.rejected", labels={"brand_id": brand.id if brand else None, "reason": exc.code})
+            logger.warning("inbound_email_rejected", extra={"log_id": log.id, "reason": exc.code})
+            return log.result
         except Exception as exc:
             log.status = InboundEmailLog.STATUS_FAILED
             log.error = str(exc)
@@ -114,9 +180,7 @@ class EmailIngestionService:
         msg_id = message["id"]
         conversation_id = message.get("conversationId") or ""
         subject = message.get("subject") or "(sin asunto)"
-        sender = message.get("from", {}).get("emailAddress", {})
-        sender_email = sender.get("address", "").strip().lower()
-        sender_name = sender.get("name", "")
+        sender_email, sender_name = EmailIngestionService.message_sender(message)
         text_body, html_body = EmailIngestionService.extract_body(message)
         if html_body:
             html_body = sanitize_email_html(html_body)
@@ -243,10 +307,10 @@ class EmailIngestionService:
 
     @staticmethod
     def get_or_create_requester(email, name):
-        email = email.strip().lower()
+        email, name = EmailIngestionService.validate_sender(email, name)
         user, created = User.objects.get_or_create(
             email=email,
-            defaults={"name": name.strip() if name else email.split("@")[0]},
+            defaults={"name": name},
         )
         if created:
             user.set_unusable_password()

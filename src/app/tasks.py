@@ -12,7 +12,7 @@ from django.utils import timezone
 from celery import shared_task
 from app.services.assignment import AssignmentService
 from app.services.attachments import AttachmentService
-from app.services.email_ingestion import EmailIngestionService
+from app.services.email_ingestion import EmailIngestionService, InvalidEmailSender
 from app.services.metrics import record_metric
 from app.services.msgraph import GRAPH_BASE, get_graph_token
 from app.services.reporting_facts import refresh_stale_facts
@@ -191,15 +191,22 @@ def _already_ingested(brand, message_id):
 
 
 def _ingest_message(msg, brand, mailbox, headers, mark_read):
-    """Procesa un mensaje; un fallo impide avanzar el cursor de esta vuelta."""
+    """Solo un remitente inválido se aparta; otros fallos conservan el cursor."""
     msg_id = msg['id']
     if _already_ingested(brand, msg_id):
         return 'skip_dup'
 
     try:
+        try:
+            EmailIngestionService.message_sender(msg)
+            invalid_sender = False
+        except InvalidEmailSender:
+            # process_message guarda el rechazo antes de permitir continuar.
+            # No descargamos adjuntos de un correo que no puede crear un usuario.
+            invalid_sender = True
         attachments = (
             _fetch_m365_attachments(mailbox, msg_id, headers)
-            if msg.get('hasAttachments')
+            if msg.get('hasAttachments') and not invalid_sender
             else []
         )
         result = _process_message(msg, brand, attachments=attachments)
@@ -212,7 +219,7 @@ def _ingest_message(msg, brand, mailbox, headers, mark_read):
 
     # Marcar como leído ya NO es el cursor: es cortesía para quien mire el buzón,
     # y por eso puede apagarse en los entornos que no son dueños del buzón.
-    if mark_read:
+    if mark_read and result != EmailIngestionService.REJECTED_SENDER_RESULT:
         try:
             requests.patch(
                 f'{GRAPH_BASE}/users/{quote(mailbox, safe="@")}/messages/{quote(msg_id, safe="")}',

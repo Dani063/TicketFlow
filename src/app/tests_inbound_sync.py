@@ -12,7 +12,8 @@ from urllib.parse import unquote
 from django.test import TestCase, override_settings
 
 from app import tasks
-from app.models import Brand, InboundEmailLog, MailboxSyncCursor, Role, Ticket
+from app.models import Brand, InboundEmailLog, MailboxSyncCursor, Role, Ticket, User
+from app.services.email_ingestion import EmailIngestionService, InvalidEmailSender
 
 
 class _Response:
@@ -344,6 +345,210 @@ class MailboxCursorTests(_SyncFixture):
 
         fetch.assert_not_called()
         self.assertFalse(Ticket.objects.exists())
+
+
+@override_settings(ENVIRONMENT_NAME='Staging', INBOUND_MARK_READ_ENABLED=True)
+class InvalidEmailSenderTests(_SyncFixture):
+    """Un remitente no procesable se conserva sin detener su buzon."""
+
+    def rejected_message(self, msg_id='msg-rejected', address=None, name='Cliente', **extra):
+        if address is None:
+            address = 'a' * 248 + '@example.com'  # 260 caracteres, como el fallo real.
+        return graph_message(
+            msg_id,
+            **{'from': {'emailAddress': {'address': address, 'name': name}}, **extra},
+        )
+
+    def assert_rejected(self, message, reason):
+        log = InboundEmailLog.objects.get(brand=self.brand, message_id=message['id'])
+        self.assertEqual(log.status, InboundEmailLog.STATUS_FAILED)
+        self.assertEqual(log.result, 'reject_invalid_sender')
+        self.assertIn(reason, log.error)
+        self.assertEqual(log.payload, message)
+        self.assertIsNotNone(log.processed_at)
+        self.assertIsNone(log.ticket_id)
+        self.assertFalse(Ticket.objects.filter(email_message_id=message['id']).exists())
+        return log
+
+    def test_overlong_email_is_retained_and_next_message_advances_the_cursor(self):
+        rejected = self.rejected_message()
+        valid = graph_message('msg-next')
+        graph = FakeGraph(
+            {'helpdesk@cloudwws.example': 'FOLDER-1'},
+            [[page([rejected, valid], delta_link='https://graph.test/delta/1')]],
+        )
+
+        self.run_poll(graph)
+
+        log = self.assert_rejected(rejected, 'sender_email_too_long')
+        self.assertNotIn(rejected['from']['emailAddress']['address'], log.error)
+        self.assertTrue(Ticket.objects.filter(email_message_id='msg-next').exists())
+        self.assertEqual(User.objects.count(), 1)
+        cursor = MailboxSyncCursor.objects.get(environment='Staging')
+        self.assertEqual(cursor.delta_link, 'https://graph.test/delta/1')
+        self.assertEqual(cursor.last_result, 'delta')
+        self.assertIsNone(cursor.last_error)
+        self.assertEqual(cursor.last_message_count, 2)
+        # El mensaje rechazado queda sin marcar como leido para su revision.
+        self.assertEqual(len(graph.patched), 1)
+        self.assertTrue(graph.patched[0].endswith('/messages/msg-next'))
+
+    def test_existing_length_failure_is_reclassified_without_a_second_log(self):
+        message = self.rejected_message()
+        previous = InboundEmailLog.objects.create(
+            brand=self.brand, message_id=message['id'], payload=message,
+            status=InboundEmailLog.STATUS_FAILED,
+            error="(1406, Data too long for column 'email' at row 1)",
+        )
+        graph = FakeGraph(
+            {'helpdesk@cloudwws.example': 'FOLDER-1'},
+            [[page([message], delta_link='https://graph.test/delta/1')]],
+        )
+
+        self.run_poll(graph)
+
+        log = self.assert_rejected(message, 'sender_email_too_long')
+        self.assertEqual(log.pk, previous.pk)
+        self.assertEqual(log.received_at, previous.received_at)
+        self.assertEqual(InboundEmailLog.objects.count(), 1)
+        self.assertEqual(MailboxSyncCursor.objects.get().last_result, 'delta')
+        self.assertEqual(graph.patched, [])
+
+    def test_invalid_sender_fields_are_retained_without_creating_users(self):
+        cases = [
+            ('invalid-email', 'not-an-email', 'Cliente', 'sender_email_invalid'),
+            ('invalid-type', 123, 'Cliente', 'sender_email_invalid'),
+            ('long-name', 'cliente@example.com', 'n' * 260, 'sender_name_too_long'),
+            ('invalid-name', 'cliente@example.com', {'name': 'Cliente'}, 'sender_name_invalid'),
+        ]
+        for msg_id, address, name, reason in cases:
+            with self.subTest(msg_id=msg_id):
+                message = self.rejected_message(msg_id, address, name)
+                graph = FakeGraph(
+                    {'helpdesk@cloudwws.example': 'FOLDER-1'},
+                    [[page([message], delta_link=f'https://graph.test/delta/{msg_id}')]],
+                )
+                self.run_poll(graph)
+                self.assert_rejected(message, reason)
+                self.assertEqual(graph.patched, [])
+                self.assertEqual(MailboxSyncCursor.objects.get().last_result, 'delta')
+        self.assertFalse(User.objects.exists())
+
+    def test_rejected_sender_does_not_download_attachments(self):
+        message = self.rejected_message(hasAttachments=True)
+        graph = FakeGraph(
+            {'helpdesk@cloudwws.example': 'FOLDER-1'},
+            [[page([message], delta_link='https://graph.test/delta/1')]],
+        )
+
+        with patch.object(tasks, '_fetch_m365_attachments', side_effect=RuntimeError('Graph 503')) as fetch:
+            self.run_poll(graph)
+
+        fetch.assert_not_called()
+        self.assert_rejected(message, 'sender_email_too_long')
+        self.assertEqual(MailboxSyncCursor.objects.get().last_result, 'delta')
+
+    def test_later_transient_failure_still_retries_without_losing_the_rejection(self):
+        rejected = self.rejected_message()
+        graph = FakeGraph(
+            {'helpdesk@cloudwws.example': 'FOLDER-1'},
+            [
+                [page([], delta_link='https://graph.test/delta/0')],
+                [page([rejected, graph_message('msg-retry')], delta_link='https://graph.test/delta/1')],
+            ],
+            repeat=True,
+        )
+        self.run_poll(graph)
+        process = tasks._process_message
+
+        def fail_valid(message, brand, attachments=None):
+            if message['id'] == 'msg-retry':
+                raise RuntimeError('Temporary ingestion failure')
+            return process(message, brand, attachments=attachments)
+
+        with patch.object(tasks, '_process_message', side_effect=fail_valid):
+            self.run_poll(graph)
+
+        log = self.assert_rejected(rejected, 'sender_email_too_long')
+        cursor = MailboxSyncCursor.objects.get()
+        self.assertEqual(cursor.delta_link, 'https://graph.test/delta/0')
+        self.assertEqual(cursor.last_result, 'error')
+        self.assertIn('Temporary ingestion failure', cursor.last_error)
+        self.run_poll(graph)
+        self.assertEqual(self.assert_rejected(rejected, 'sender_email_too_long').pk, log.pk)
+        self.assertTrue(Ticket.objects.filter(email_message_id='msg-retry').exists())
+        cursor.refresh_from_db()
+        self.assertEqual(cursor.delta_link, 'https://graph.test/delta/1')
+        self.assertIsNone(cursor.last_error)
+
+    def test_exact_field_limits_and_multibyte_names_are_not_rejected(self):
+        address = 'customer@' + '.'.join(('a' * 63, 'b' * 63, 'c' * 63, 'd' * 54))
+        self.assertEqual(len(address), User._meta.get_field('email').max_length)
+        name = 'ñ' * User._meta.get_field('name').max_length
+        message = self.rejected_message(address=address, name=name)
+        graph = FakeGraph(
+            {'helpdesk@cloudwws.example': 'FOLDER-1'},
+            [[page([message], delta_link='https://graph.test/delta/1')]],
+        )
+
+        self.run_poll(graph)
+
+        user = User.objects.get(email=address)
+        self.assertEqual(user.name, name)
+        self.assertEqual(InboundEmailLog.objects.get().status, InboundEmailLog.STATUS_PROCESSED)
+        self.assertTrue(Ticket.objects.filter(email_message_id=message['id']).exists())
+
+    def test_normalization_does_not_modify_the_original_payload(self):
+        message = self.rejected_message(address='  CLIENTE@EXAMPLE.COM  ', name='  Cliente  ')
+
+        result = EmailIngestionService.process_message(message, self.brand)
+
+        self.assertEqual(result, 'ticket_created')
+        self.assertEqual(User.objects.get().email, 'cliente@example.com')
+        self.assertEqual(User.objects.get().name, 'Cliente')
+        self.assertEqual(InboundEmailLog.objects.get().payload, message)
+        self.assertEqual(message['from']['emailAddress']['address'], '  CLIENTE@EXAMPLE.COM  ')
+
+    def test_requester_validation_runs_before_any_database_write(self):
+        with self.assertRaises(InvalidEmailSender) as rejected:
+            EmailIngestionService.get_or_create_requester('a' * 248 + '@example.com', 'Cliente')
+        self.assertEqual(rejected.exception.code, 'sender_email_too_long')
+        self.assertFalse(User.objects.exists())
+
+    def test_corrected_sender_can_reprocess_the_same_log(self):
+        message = self.rejected_message()
+        self.assertEqual(
+            EmailIngestionService.process_message(message, self.brand),
+            EmailIngestionService.REJECTED_SENDER_RESULT,
+        )
+        previous = self.assert_rejected(message, 'sender_email_too_long')
+        corrected = self.rejected_message(address='cliente@example.com')
+
+        self.assertEqual(EmailIngestionService.process_message(corrected, self.brand), 'ticket_created')
+
+        log = InboundEmailLog.objects.get()
+        self.assertEqual(log.pk, previous.pk)
+        self.assertEqual(log.status, InboundEmailLog.STATUS_PROCESSED)
+        self.assertEqual(log.result, 'ticket_created')
+        self.assertIsNone(log.error)
+        self.assertEqual(log.payload, corrected)
+        self.assertIsNotNone(log.ticket_id)
+        self.assertEqual(Ticket.objects.count(), 1)
+
+    def test_rejection_is_not_reused_for_a_later_transient_failure(self):
+        message = self.rejected_message()
+        EmailIngestionService.process_message(message, self.brand)
+        corrected = self.rejected_message(address='cliente@example.com')
+
+        with patch.object(EmailIngestionService, '_process_message', side_effect=RuntimeError('Temporary failure')):
+            with self.assertRaisesRegex(RuntimeError, 'Temporary failure'):
+                EmailIngestionService.process_message(corrected, self.brand)
+
+        log = InboundEmailLog.objects.get()
+        self.assertEqual(log.status, InboundEmailLog.STATUS_FAILED)
+        self.assertIsNone(log.result)
+        self.assertEqual(log.error, 'Temporary failure')
+        self.assertEqual(log.payload, corrected)
 
 
 class SharedMailboxTests(_SyncFixture):
