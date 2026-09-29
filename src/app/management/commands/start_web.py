@@ -20,7 +20,18 @@ class Command(BaseCommand):
         parser.add_argument("--loglevel", default="info")
 
     def handle(self, *args, **options):
-        self._apply_migrations()
+        # Se mantiene el arranque actual salvo que el entorno delegue en un Job.
+        run_migrations = os.getenv("RUN_MIGRATIONS_ON_STARTUP", "true").strip().lower()
+        if run_migrations in ("1", "true", "yes", "on"):
+            self._apply_migrations()
+        elif run_migrations in ("0", "false", "no", "off"):
+            self.stdout.write(
+                "Skipping database migrations (RUN_MIGRATIONS_ON_STARTUP=false)."
+            )
+        else:
+            raise CommandError(
+                "RUN_MIGRATIONS_ON_STARTUP must be true/false, 1/0, yes/no or on/off."
+            )
 
         # El runtime corporativo descarga el artefacto versionado en
         # /app/service/<servicio>.<version> y añade allí el .env. Eso hace que

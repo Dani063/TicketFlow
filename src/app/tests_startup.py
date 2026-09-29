@@ -10,6 +10,7 @@ from app.context_processors import fragment_base
 from TicketFlow.settings import _resolve_ticketflow_version
 
 
+@patch.dict(os.environ, {}, clear=True)
 class StartWebCommandTests(SimpleTestCase):
     @patch("app.management.commands.start_web.os.execvp")
     @patch("app.management.commands.start_web.call_command")
@@ -36,6 +37,103 @@ class StartWebCommandTests(SimpleTestCase):
         self.assertEqual(command[:2], ["gunicorn", "TicketFlow.wsgi:application"])
         workers_index = command.index("--workers")
         self.assertEqual(command[workers_index + 1], "2")
+
+    @patch("app.management.commands.start_web.os.execvp")
+    @patch("app.management.commands.start_web.call_command")
+    @patch("app.management.commands.start_web.connection")
+    def test_explicit_true_keeps_startup_migrations(
+        self, database, management_call, execvp
+    ):
+        database.vendor = "sqlite"
+
+        for value in ("true", "1", "yes", "on", " TRUE "):
+            with self.subTest(value=value), patch.dict(
+                os.environ, {"RUN_MIGRATIONS_ON_STARTUP": value}
+            ):
+                management_call.reset_mock()
+                execvp.reset_mock()
+
+                call_command("start_web")
+
+                self.assertEqual(
+                    management_call.call_args_list,
+                    [
+                        call("migrate", interactive=False, verbosity=1),
+                        call("collectstatic", interactive=False, verbosity=1),
+                    ],
+                )
+                execvp.assert_called_once()
+
+    @patch("app.management.commands.start_web.os.execvp")
+    @patch("app.management.commands.start_web.call_command")
+    @patch("app.management.commands.start_web.connection")
+    def test_pro_can_skip_migrations_without_skipping_static_files_or_gunicorn(
+        self, database, management_call, execvp
+    ):
+        database.vendor = "mysql"
+
+        for value in ("false", "0", "no", "off", " FALSE "):
+            with self.subTest(value=value), patch.dict(
+                os.environ,
+                {
+                    "ENVIRONMENT_NAME": "Production",
+                    "RUN_MIGRATIONS_ON_STARTUP": value,
+                },
+            ):
+                management_call.reset_mock()
+                execvp.reset_mock()
+
+                call_command("start_web")
+
+                management_call.assert_called_once_with(
+                    "collectstatic", interactive=False, verbosity=1
+                )
+                database.cursor.assert_not_called()
+                database.close.assert_not_called()
+                execvp.assert_called_once()
+
+    @patch("app.management.commands.start_web.os.execvp")
+    @patch("app.management.commands.start_web.call_command")
+    @patch("app.management.commands.start_web.connection")
+    def test_other_environments_keep_migrations_enabled_by_default(
+        self, database, management_call, execvp
+    ):
+        database.vendor = "sqlite"
+
+        for environment in ("Development", "Staging", "local"):
+            with self.subTest(environment=environment), patch.dict(
+                os.environ, {"ENVIRONMENT_NAME": environment}
+            ):
+                management_call.reset_mock()
+                execvp.reset_mock()
+
+                call_command("start_web")
+
+                self.assertEqual(
+                    management_call.call_args_list,
+                    [
+                        call("migrate", interactive=False, verbosity=1),
+                        call("collectstatic", interactive=False, verbosity=1),
+                    ],
+                )
+                execvp.assert_called_once()
+
+    @patch("app.management.commands.start_web.os.execvp")
+    @patch("app.management.commands.start_web.call_command")
+    @patch("app.management.commands.start_web.connection")
+    def test_invalid_migration_setting_stops_startup(
+        self, database, management_call, execvp
+    ):
+        for value in ("", "disabled", "tru"):
+            with self.subTest(value=value), patch.dict(
+                os.environ, {"RUN_MIGRATIONS_ON_STARTUP": value}
+            ):
+                with self.assertRaisesRegex(CommandError, "RUN_MIGRATIONS_ON_STARTUP"):
+                    call_command("start_web")
+
+                management_call.assert_not_called()
+                database.cursor.assert_not_called()
+                execvp.assert_not_called()
 
     @patch("app.management.commands.start_web.os.execvp")
     @patch("app.management.commands.start_web.call_command")

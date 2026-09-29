@@ -2,7 +2,30 @@
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+from django.db.migrations.loader import MigrationLoader
+from django.test import SimpleTestCase, TransactionTestCase
+
+
+class MigrateJobSmokeCheckTests(SimpleTestCase):
+    previous = ("app", "0063_restore_media_only_help_articles")
+    target = ("app", "0064_migrate_job_smoke_check")
+
+    def setUp(self):
+        self.loader = MigrationLoader(None)
+
+    def test_smoke_check_is_empty_and_follows_the_previous_migration(self):
+        migration = self.loader.get_migration(*self.target)
+
+        self.assertEqual(migration.dependencies, [self.previous])
+        self.assertEqual(migration.operations, [])
+        self.assertEqual(self.loader.graph.leaf_nodes("app"), [self.target])
+        self.assertFalse(self.loader.detect_conflicts())
+
+    def test_smoke_check_does_not_change_the_model_state(self):
+        before = self.loader.project_state([self.previous])
+        after = self.loader.project_state([self.target])
+
+        self.assertEqual(after.models, before.models)
 
 
 class ReleaseMigrationTests(TransactionTestCase):

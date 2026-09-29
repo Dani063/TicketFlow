@@ -46,6 +46,23 @@ python main.py start_web [opciones]
 | `--bind ADDR` | `0.0.0.0:8000` | Dirección y puerto de escucha |
 | `--loglevel LEVEL` | `info` | Nivel de log: `debug`, `info`, `warning`, `error` |
 
+#### Migraciones al arrancar el web
+
+`start_web` aplica las migraciones antes de recoger los estáticos y arrancar
+Gunicorn. `RUN_MIGRATIONS_ON_STARTUP` vale `true` por defecto, por lo que DEV, STA
+y local conservan el comportamiento actual sin cambios de configuración.
+
+Para delegar las migraciones en un Job únicamente en PRO, establecer
+`RUN_MIGRATIONS_ON_STARTUP: "false"` en el ConfigMap del web de PRO, después de
+preparar el Job y su ejecución antes del despliegue de web, worker y beat. No
+desactivar este paso mientras no exista otro proceso responsable de migrar.
+La variable no afecta al comando `python main.py migrate --noinput` del Job.
+
+Se aceptan `true/false`, `1/0`, `yes/no` y `on/off`, sin distinguir mayúsculas ni
+espacios exteriores. Un valor inválido detiene el arranque para evitar omitir
+migraciones por un error de configuración. En modo desactivado se mantienen
+`collectstatic` y el arranque de Gunicorn, y se registra la omisión en el log.
+
 **Dimensionado de workers**
 
 La fórmula recomendada por Gunicorn es `2 * CPU + 1`. Con los recursos definidos en el deployment (`500m` CPU = 0.5 cores):
