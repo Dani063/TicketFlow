@@ -5,6 +5,8 @@ from collections import Counter
 from datetime import timedelta
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import transaction
 from django.utils import timezone
 from django.utils.html import strip_tags
@@ -123,6 +125,21 @@ class EmailIngestionService:
 
         if not sender_email:
             return "skip_no_sender", None
+
+        # Graph can expose malformed From addresses (including URL fragments).
+        # Retrying one of those forever would hold the mailbox delta cursor and
+        # prevent later, valid replies from reaching their tickets.
+        try:
+            if len(sender_email) > User._meta.get_field("email").max_length:
+                raise ValidationError("sender exceeds user email field")
+            validate_email(sender_email)
+        except ValidationError:
+            logger.warning(
+                "inbound_invalid_sender",
+                extra={"message_id": msg_id, "sender_length": len(sender_email)},
+            )
+            record_metric("email.inbound.invalid_sender", labels={"brand_id": brand.id if brand else None})
+            return "skip_invalid_sender", None
 
         requester = EmailIngestionService.get_or_create_requester(sender_email, sender_name)
         existing_comment = (

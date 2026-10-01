@@ -12,7 +12,7 @@ from urllib.parse import unquote
 from django.test import TestCase, override_settings
 
 from app import tasks
-from app.models import Brand, InboundEmailLog, MailboxSyncCursor, Role, Ticket
+from app.models import Brand, Comment, InboundEmailLog, MailboxSyncCursor, Role, Ticket
 
 
 class _Response:
@@ -191,6 +191,35 @@ class MailboxCursorTests(_SyncFixture):
         self.assertEqual(cursor.delta_link, 'https://graph.test/delta/1')
         self.assertEqual(cursor.last_result, 'error')
         self.assertIn('Graph 503', cursor.last_error)
+
+    def test_invalid_sender_does_not_block_a_later_ticket_reply(self):
+        first = FakeGraph(
+            {'helpdesk@cloudwws.example': 'FOLDER-1'},
+            [[page([graph_message('msg-original')], delta_link='https://graph.test/delta/0')]],
+        )
+        self.run_poll(first)
+        ticket = Ticket.objects.get(email_message_id='msg-original')
+
+        invalid = graph_message('msg-invalid')
+        invalid['from']['emailAddress']['address'] = 'x' * 250 + '@example.com'
+        reply = graph_message(
+            'msg-reply',
+            subject=f'RE: [Ticket #{ticket.id}] Respuesta de soporte',
+            conversationId='different-conversation',
+        )
+        second = FakeGraph(
+            {'helpdesk@cloudwws.example': 'FOLDER-1'},
+            [[page([invalid, reply], delta_link='https://graph.test/delta/1')]],
+        )
+        self.run_poll(second)
+
+        invalid_log = InboundEmailLog.objects.get(message_id='msg-invalid')
+        self.assertEqual(invalid_log.status, InboundEmailLog.STATUS_PROCESSED)
+        self.assertEqual(invalid_log.result, 'skip_invalid_sender')
+        self.assertTrue(Comment.objects.filter(ticket=ticket, email_message_id='msg-reply').exists())
+        self.assertEqual(Ticket.objects.count(), 1)
+        self.assertEqual(MailboxSyncCursor.objects.get(environment='Staging').delta_link,
+                         'https://graph.test/delta/1')
 
     def test_failed_message_is_retried_without_reingesting_previous_messages(self):
         graph = FakeGraph(
