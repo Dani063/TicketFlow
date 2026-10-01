@@ -87,6 +87,9 @@ class OutboundEmailService:
     @staticmethod
     def blocking_reason_for_log(log):
         """Revalida los kill switches justo antes de entregar una fila encolada."""
+        start_at = getattr(settings, "OUTBOUND_EMAIL_START_AT", None)
+        if start_at and log.created_at < start_at:
+            return "before_cutover"
         return (
             OutboundEmailService._delivery_block(log.brand, log.to_email)
             or OutboundEmailService._template_block(log.template_key)

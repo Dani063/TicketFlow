@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/2.1/ref/settings/
 import os
 import posixpath
 import logging as _logging
+from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 from TicketFlow.attachment_config import attachment_storage_config
@@ -575,6 +576,16 @@ INBOUND_MARK_READ_ENABLED = os.getenv('INBOUND_MARK_READ_ENABLED', 'true').lower
 # SES autentica con el rol IAM del pod (como SQS/SSM): sin credenciales SMTP.
 # Kill switch global; en local conviene dejarlo a false (BBDD compartida).
 OUTBOUND_EMAIL_ENABLED = os.getenv('OUTBOUND_EMAIL_ENABLED', 'false').lower() in ('1', 'true', 'yes', 'on')
+# Corte de activación: las entregas anteriores nunca deben salir al encender PRO.
+_outbound_start_raw = os.getenv('OUTBOUND_EMAIL_START_AT', '').strip()
+OUTBOUND_EMAIL_START_AT = None
+if _outbound_start_raw:
+    try:
+        OUTBOUND_EMAIL_START_AT = datetime.fromisoformat(_outbound_start_raw.replace('Z', '+00:00'))
+    except ValueError as exc:
+        raise RuntimeError('OUTBOUND_EMAIL_START_AT debe ser una fecha ISO 8601 con zona horaria') from exc
+    if OUTBOUND_EMAIL_START_AT.tzinfo is None or OUTBOUND_EMAIL_START_AT.utcoffset() is None:
+        raise RuntimeError('OUTBOUND_EMAIL_START_AT debe incluir zona horaria')
 # Interruptores por tipo de mensaje. Son opt-in para que activar el transporte no
 # habilite accidentalmente automatizaciones que el entorno no quiere usar.
 OUTBOUND_TICKET_CREATED_ENABLED = os.getenv(

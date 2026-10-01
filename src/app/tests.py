@@ -1014,6 +1014,34 @@ class OutboundEmailTests(_BaseFixture):
         self.assertEqual(log.status, OutboundEmailLog.STATUS_SUPPRESSED)
         self.assertEqual(log.result, "disabled")
 
+    def test_cutover_suppresses_old_queued_email_but_allows_new_email(self):
+        from app.services.email_outbound import OutboundEmailService
+        from app.tasks import send_outbound_email
+
+        cutover = timezone.now() - timedelta(hours=1)
+        old = OutboundEmailLog.objects.create(
+            brand=self.brand_a, template_key="agent_reply", to_email=self.customer.email,
+            status=OutboundEmailLog.STATUS_QUEUED,
+        )
+        OutboundEmailLog.objects.filter(pk=old.pk).update(created_at=cutover - timedelta(seconds=1))
+        recent = OutboundEmailLog.objects.create(
+            brand=self.brand_a, template_key="agent_reply", to_email=self.customer.email,
+            status=OutboundEmailLog.STATUS_QUEUED,
+        )
+
+        with override_settings(OUTBOUND_EMAIL_START_AT=cutover), patch.object(
+            OutboundEmailService, "deliver", return_value=None,
+        ) as deliver:
+            self.assertEqual(send_outbound_email(old.pk), "suppressed")
+            deliver.assert_not_called()
+            self.assertEqual(send_outbound_email(recent.pk), "sent")
+            deliver.assert_called_once()
+
+        old.refresh_from_db()
+        recent.refresh_from_db()
+        self.assertEqual(old.result, "before_cutover")
+        self.assertEqual(recent.status, OutboundEmailLog.STATUS_SENT)
+
     def test_own_mailbox_and_noreply_recipients_are_suppressed(self):
         own = User.objects.create_user("helpdesk@ecomfax.example", "Other Brand Mailbox", "secret")
         ticket = self._create_ticket_via_service(requester_id=own.id)
@@ -1932,6 +1960,28 @@ class SatisfactionSurveyTests(_BaseFixture):
         self.assertIsNone(legacy.resolved_at)
         self.assertEqual(SatisfactionService.offer_pending_surveys(), 0)
         self.assertFalse(SatisfactionRating.objects.exists())
+
+    def test_cutover_surveys_only_new_terminal_transitions(self):
+        now = timezone.now()
+        cutover = now - timedelta(hours=36)
+        old_resolved = self._resolved_ticket(hours_ago=48)
+        old_closed = self._resolved_ticket(hours_ago=48)
+        Ticket.objects.filter(pk=old_closed.pk).update(
+            status="closed", closed_at=now - timedelta(hours=40),
+        )
+        new_resolved = self._resolved_ticket(hours_ago=30)
+        new_closed = self._resolved_ticket(hours_ago=48)
+        Ticket.objects.filter(pk=new_closed.pk).update(
+            status="closed", closed_at=now - timedelta(hours=30),
+        )
+
+        with override_settings(OUTBOUND_EMAIL_START_AT=cutover):
+            self.assertEqual(SatisfactionService.offer_pending_surveys(), 2)
+
+        offered_ids = set(SatisfactionRating.objects.values_list("ticket_id", flat=True))
+        self.assertEqual(offered_ids, {new_resolved.pk, new_closed.pk})
+        self.assertNotIn(old_resolved.pk, offered_ids)
+        self.assertNotIn(old_closed.pk, offered_ids)
 
     def test_merged_and_deleted_tickets_are_never_surveyed(self):
         target = self.make_ticket()

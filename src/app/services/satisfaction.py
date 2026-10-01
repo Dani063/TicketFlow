@@ -14,7 +14,7 @@ import secrets
 from datetime import timedelta
 
 from django.conf import settings
-from django.db.models import Exists, OuterRef
+from django.db.models import Case, DateTimeField, Exists, F, OuterRef, When
 from django.utils import timezone
 
 from app.models import SatisfactionRating, SatisfactionReason, Ticket, TicketEvent
@@ -60,14 +60,23 @@ class SatisfactionService:
             .filter(
                 status__in=TERMINAL_STATUSES,
                 resolved_at__isnull=False,
-                resolved_at__lte=cutoff,
                 is_deleted=False,
                 merged_into__isnull=True,
             )
+            # Si se cierra ahora un ticket resuelto antes, cuenta el cierre de ahora.
+            .annotate(survey_terminal_at=Case(
+                When(closed_at__gt=F("resolved_at"), then=F("closed_at")),
+                default=F("resolved_at"),
+                output_field=DateTimeField(),
+            ))
+            .filter(survey_terminal_at__lte=cutoff)
             .exclude(Exists(already_offered))
             .select_related("requester", "assignee", "brand")
-            .order_by("resolved_at")
+            .order_by("survey_terminal_at")
         )
+        start_at = getattr(settings, "OUTBOUND_EMAIL_START_AT", None)
+        if start_at:
+            qs = qs.filter(survey_terminal_at__gte=start_at)
         return qs[:limit] if limit else qs
 
     @staticmethod
