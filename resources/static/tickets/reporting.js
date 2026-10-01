@@ -56,7 +56,7 @@
         },
         {
             key: 'unsolved', title: 'Pendientes', icon: 'fa-hourglass-half',
-            description: 'Foto actual de tickets abiertos y pendientes.',
+            description: 'Foto de los tickets abiertos y pendientes al final del periodo.',
             charts: [
                 ['status', 'Estado actual', 'Abiertos y pendientes'],
                 ['assignment', 'Asignación de abiertos', 'Asignados y sin asignar'],
@@ -68,8 +68,8 @@
             key: 'backlog', title: 'Evolución del backlog', icon: 'fa-layer-group',
             description: 'Reconstrucción del inventario abierto en cortes diarios y semanales.',
             charts: [
-                ['daily', 'Backlog diario por estado', 'Últimos 30 días'],
-                ['weekly', 'Backlog semanal por estado', 'Últimas 12 semanas'],
+                ['daily', 'Backlog diario por estado', 'Un corte por día del periodo (máximo 90)'],
+                ['weekly', 'Backlog semanal por estado', 'Un corte cada 7 días hasta el final del periodo'],
                 ['dimension', 'Backlog semanal por producto', 'Evolución por producto o servicio'],
             ],
         },
@@ -127,7 +127,8 @@
                 const help = chart[3] || `${chart[2]}. Se calcula con el periodo y los filtros seleccionados.`;
                 return `<article class="tf-report-panel" data-chart-panel="${zone.key}:${chart[0]}">` +
                     `<div class="tf-report-panel-head"><div>${helpTitle(chart[1], help)}` +
-                    `<p class="tf-report-panel-note">${esc(chart[2])}</p></div></div>` +
+                    `<p class="tf-report-panel-note">${esc(chart[2])}</p>` +
+                    `<span class="tf-report-scope" id="scope-${zone.key}-${chart[0]}"></span></div></div>` +
                     `<div class="tf-report-canvas"><canvas id="chart-${zone.key}-${chart[0]}"></canvas></div></article>`;
             }).join('');
             const table = zone.table ? `<article class="tf-report-panel tf-report-panel--wide" ` +
@@ -326,9 +327,83 @@
         } });
     }
 
-    function alignedRows(seriesLists, xField) {
-        const labels = [...new Set(seriesLists.flatMap(rows => rows.map(row => row[xField])))].sort();
-        return labels;
+    // Eje completo del periodo. El servidor solo devuelve los días con datos, y
+    // sin rellenar los huecos un rango de 7 días podía pintarse como un único
+    // punto: no se apreciaba qué periodo cubría la gráfica.
+    function rangeDays(data) {
+        const days = [];
+        if (!data.range || !data.range.from || !data.range.to) return days;
+        const [y, m, d] = data.range.from.split('-').map(Number);
+        const cursor = new Date(Date.UTC(y, m - 1, d));
+        let day = cursor.toISOString().slice(0, 10);
+        while (day <= data.range.to && days.length < 400) {
+            days.push(day);
+            cursor.setUTCDate(cursor.getUTCDate() + 1);
+            day = cursor.toISOString().slice(0, 10);
+        }
+        return days;
+    }
+
+    function rangeMonths(data) {
+        return [...new Set(rangeDays(data).map(day => day.slice(0, 7)))];
+    }
+
+    // Reindexa una serie sobre el eje. `fill` es el valor de los huecos: 0 en
+    // recuentos y null en medianas o porcentajes, que no existen sin muestra.
+    function onAxis(axis, rows, keyField, field, fill) {
+        const byKey = new Map((rows || []).map(row => [row[keyField], row]));
+        return axis.map(key => {
+            const row = byKey.get(key);
+            return row && row[field] != null ? row[field] : fill;
+        });
+    }
+
+    function fillRows(axis, rows, keyField, blank) {
+        const byKey = new Map((rows || []).map(row => [row[keyField], row]));
+        return axis.map(key => byKey.get(key) || Object.assign({ [keyField]: key }, blank));
+    }
+
+    function fmtDay(value) {
+        if (!value) return '';
+        const [y, m, d] = value.split('-');
+        return d ? `${d}/${m}/${y}` : `${m}/${y}`;
+    }
+
+    // Gráficas que no cubren exactamente el periodo del filtro. Las demás no
+    // llevan etiqueta: el periodo ya se lee en la barra de filtros.
+    const CHART_SCOPES = {
+        'tickets:monthYear': 'history',
+        'unsolved:status': 'snapshot', 'unsolved:assignment': 'snapshot',
+        'unsolved:dimension': 'snapshot', 'unsolved:creationMonth': 'snapshot',
+        'backlog:daily': 'backlogDaily',
+    };
+
+    function renderScopes(section, data) {
+        const zone = ZONES.find(item => item.key === section);
+        if (!zone || !data.range) return;
+        zone.charts.forEach(chart => {
+            const holder = $(`scope-${section}-${chart[0]}`);
+            if (!holder) return;
+            const scope = CHART_SCOPES[`${section}:${chart[0]}`];
+            let text = '';
+            let modifier = '';
+            if (scope === 'snapshot') {
+                text = `Foto a ${fmtDay(data.snapshot_at || data.range.to)}`;
+                modifier = 'is-snapshot';
+            } else if (scope === 'history') {
+                const coverage = (data.charts.created_by_month_year || {}).coverage || {};
+                text = `Histórico ${fmtDay(coverage.from)} – ${fmtDay(coverage.to)} · no depende del periodo`;
+                modifier = 'is-history';
+            } else if (scope === 'backlogDaily') {
+                // Solo cuando el techo de 90 cortes recorta el periodo.
+                const coverage = data.charts.coverage || {};
+                if (coverage.daily_from && coverage.daily_from > data.range.from) {
+                    text = `Últimos 90 días: ${fmtDay(coverage.daily_from)} – ${fmtDay(data.range.to)}`;
+                }
+            }
+            holder.textContent = text;
+            holder.className = `tf-report-scope ${modifier}`.trim();
+        });
     }
 
     function renderExecutive(data) {
@@ -353,12 +428,10 @@
         const c = data.charts;
         bars('tickets', 'hour', c.created_by_hour.labels, [{ label: '% creados', data: c.created_by_hour.values, color: '#98c379' }]);
         bars('tickets', 'weekday', c.average_by_weekday.labels, [{ label: 'Promedio', data: c.average_by_weekday.values, color: '#d19a66' }]);
-        const dateLabels = alignedRows([c.created_by_date.created, c.created_by_date.solved], 'day');
-        const created = Object.fromEntries(c.created_by_date.created.map(row => [row.day, row.n]));
-        const solved = Object.fromEntries(c.created_by_date.solved.map(row => [row.day, row.n]));
-        lines('tickets', 'createdDate', dateLabels, [
-            { label: 'Creados', data: dateLabels.map(day => created[day] || 0), color: '#5b67ca', fill: true, backgroundColor: 'rgba(91,103,202,.10)' },
-            { label: 'Resueltos', data: dateLabels.map(day => solved[day] || 0), color: '#56b6c2' },
+        const days = rangeDays(data);
+        lines('tickets', 'createdDate', days, [
+            { label: 'Creados', data: onAxis(days, c.created_by_date.created, 'day', 'n', 0), color: '#5b67ca', fill: true, backgroundColor: 'rgba(91,103,202,.10)' },
+            { label: 'Resueltos', data: onAxis(days, c.created_by_date.solved, 'day', 'n', 0), color: '#56b6c2' },
         ]);
         let dim = c.dimensions.product;
         bars('tickets', 'dimensionSummary', dim.summary.map(row => row.label), [{
@@ -367,8 +440,9 @@
         }]);
         dim = c.dimensions.product;
         const dimLabels = [...new Set(dim.by_day.flatMap(row => Object.keys(row.values)))];
-        lines('tickets', 'dimensionDate', dim.by_day.map(row => row.day), dimLabels.map((label, index) => ({
-            label, data: dim.by_day.map(row => row.values[label] || 0), color: productColor(data, label),
+        const dimByDay = fillRows(days, dim.by_day, 'day', { values: {} });
+        lines('tickets', 'dimensionDate', days, dimLabels.map((label, index) => ({
+            label, data: dimByDay.map(row => row.values[label] || 0), color: productColor(data, label),
         })));
         const years = c.created_by_month_year.years;
         lines('tickets', 'monthYear', ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'],
@@ -379,21 +453,22 @@
         const c = data.charts;
         bars('efficiency', 'groupStations', c.group_stations_brackets.map(r => r.label), [{ label: 'Tickets', data: c.group_stations_brackets.map(r => r.n) }]);
         bars('efficiency', 'agentReplies', c.agent_replies_brackets.map(r => r.label), [{ label: 'Tickets', data: c.agent_replies_brackets.map(r => r.n), color: '#56b6c2' }]);
-        lines('efficiency', 'firstReply', c.first_reply_assignment_by_date.map(r => r.day), [
-            { label: 'Primera respuesta (h)', data: c.first_reply_assignment_by_date.map(r => r.first_reply) },
-            { label: 'Primera asignación (h)', data: c.first_reply_assignment_by_date.map(r => r.first_assignment), color: '#d19a66' },
+        const days = rangeDays(data);
+        lines('efficiency', 'firstReply', days, [
+            { label: 'Primera respuesta (h)', data: onAxis(days, c.first_reply_assignment_by_date, 'day', 'first_reply', null) },
+            { label: 'Primera asignación (h)', data: onAxis(days, c.first_reply_assignment_by_date, 'day', 'first_assignment', null), color: '#d19a66' },
         ]);
-        lines('efficiency', 'resolutionWait', c.resolution_wait_by_date.map(r => r.day), [
-            { label: 'Resolución completa (h)', data: c.resolution_wait_by_date.map(r => r.full_resolution) },
-            { label: 'Espera solicitante (h)', data: c.resolution_wait_by_date.map(r => r.requester_wait), color: '#e06c75' },
+        lines('efficiency', 'resolutionWait', days, [
+            { label: 'Resolución completa (h)', data: onAxis(days, c.resolution_wait_by_date, 'day', 'full_resolution', null) },
+            { label: 'Espera solicitante (h)', data: onAxis(days, c.resolution_wait_by_date, 'day', 'requester_wait', null), color: '#e06c75' },
         ]);
-        lines('efficiency', 'stationsDate', c.stations_by_date.map(r => r.day), [
-            { label: 'Asignado', data: c.stations_by_date.map(r => r.assignee) },
-            { label: 'Grupo', data: c.stations_by_date.map(r => r.group), color: '#98c379' },
+        lines('efficiency', 'stationsDate', days, [
+            { label: 'Asignado', data: onAxis(days, c.stations_by_date, 'day', 'assignee', null) },
+            { label: 'Grupo', data: onAxis(days, c.stations_by_date, 'day', 'group', null), color: '#98c379' },
         ]);
-        lines('efficiency', 'repliesSolved', c.replies_resolutions_by_date.map(r => r.day), [
-            { label: 'Respuestas', data: c.replies_resolutions_by_date.map(r => r.agent_replies) },
-            { label: 'Resueltos', data: c.replies_resolutions_by_date.map(r => r.solved), color: '#56b6c2' },
+        lines('efficiency', 'repliesSolved', days, [
+            { label: 'Respuestas', data: onAxis(days, c.replies_resolutions_by_date, 'day', 'agent_replies', null) },
+            { label: 'Resueltos', data: onAxis(days, c.replies_resolutions_by_date, 'day', 'solved', 0), color: '#56b6c2' },
         ]);
     }
 
@@ -401,9 +476,10 @@
         const c = data.charts;
         doughnut('assignee_activity', 'satisfaction', c.satisfaction);
         bars('assignee_activity', 'resolutionBrackets', c.resolution_brackets.map(r => r.label), [{ label: 'Tickets', data: c.resolution_brackets.map(r => r.n) }]);
-        lines('assignee_activity', 'satisfactionWait', c.satisfaction_wait_by_date.map(r => r.day), [
-            { label: 'CSAT (%)', data: c.satisfaction_wait_by_date.map(r => r.satisfaction_pct), yAxisID: 'y' },
-            { label: 'Espera (h)', data: c.satisfaction_wait_by_date.map(r => r.requester_wait_hours), color: '#d19a66', yAxisID: 'y1' },
+        const days = rangeDays(data);
+        lines('assignee_activity', 'satisfactionWait', days, [
+            { label: 'CSAT (%)', data: onAxis(days, c.satisfaction_wait_by_date, 'day', 'satisfaction_pct', null), yAxisID: 'y' },
+            { label: 'Espera (h)', data: onAxis(days, c.satisfaction_wait_by_date, 'day', 'requester_wait_hours', null), color: '#d19a66', yAxisID: 'y1' },
         ], dualAxisOptions('%', 'h'));
     }
 
@@ -418,15 +494,16 @@
 
     function renderUpdates(data) {
         const c = data.charts;
-        lines('agent_updates', 'commentAverages', c.comment_averages_by_date.map(r => r.day), [
-            { label: 'Comentarios', data: c.comment_averages_by_date.map(r => r.comments) },
-            { label: 'Públicos/ticket', data: c.comment_averages_by_date.map(r => r.public_per_ticket), color: '#56b6c2' },
-            { label: 'Internos/ticket', data: c.comment_averages_by_date.map(r => r.internal_per_ticket), color: '#d19a66' },
+        const days = rangeDays(data);
+        lines('agent_updates', 'commentAverages', days, [
+            { label: 'Comentarios', data: onAxis(days, c.comment_averages_by_date, 'day', 'comments', 0) },
+            { label: 'Públicos/ticket', data: onAxis(days, c.comment_averages_by_date, 'day', 'public_per_ticket', 0), color: '#56b6c2' },
+            { label: 'Internos/ticket', data: onAxis(days, c.comment_averages_by_date, 'day', 'internal_per_ticket', 0), color: '#d19a66' },
         ]);
-        lines('agent_updates', 'activityDate', c.activity_by_date.map(r => r.day), [
-            { label: 'Comentados', data: c.activity_by_date.map(r => r.commented) },
-            { label: 'Resueltos', data: c.activity_by_date.map(r => r.solved), color: '#98c379' },
-            { label: 'Creados', data: c.activity_by_date.map(r => r.created), color: '#d19a66' },
+        lines('agent_updates', 'activityDate', days, [
+            { label: 'Comentados', data: onAxis(days, c.activity_by_date, 'day', 'commented', 0) },
+            { label: 'Resueltos', data: onAxis(days, c.activity_by_date, 'day', 'solved', 0), color: '#98c379' },
+            { label: 'Creados', data: onAxis(days, c.activity_by_date, 'day', 'created', 0), color: '#d19a66' },
         ]);
     }
 
@@ -453,33 +530,36 @@
         const c = data.charts;
         bars('satisfaction', 'comments', c.good_bad_comments.map(r => r.label), [{ label: 'Valoraciones', data: c.good_bad_comments.map(r => r.n) }]);
         bars('satisfaction', 'funnel', c.funnel.map(r => r.label), [{ label: 'Tickets', data: c.funnel.map(r => r.n), color: '#56b6c2' }], { indexAxis: 'y' });
-        lines('satisfaction', 'daily', c.score_rated_by_date.map(r => r.day), [
-            { label: 'CSAT (%)', data: c.score_rated_by_date.map(r => r.score), yAxisID: 'y' },
-            { label: 'Valoraciones', data: c.score_rated_by_date.map(r => r.rated), color: '#d19a66', yAxisID: 'y1' },
+        const days = rangeDays(data);
+        const months = rangeMonths(data);
+        lines('satisfaction', 'daily', days, [
+            { label: 'CSAT (%)', data: onAxis(days, c.score_rated_by_date, 'day', 'score', null), yAxisID: 'y' },
+            { label: 'Valoraciones', data: onAxis(days, c.score_rated_by_date, 'day', 'rated', 0), color: '#d19a66', yAxisID: 'y1' },
         ], dualAxisOptions('%', ''));
         const dim = c.dimensions.product;
         stacked('satisfaction', 'dimension', dim.rows, 'label', [['good', 'Buenas', '#98c379'], ['bad', 'Malas', '#e06c75']]);
-        lines('satisfaction', 'monthly', c.score_rated_by_month.map(r => r.month), [
-            { label: 'CSAT (%)', data: c.score_rated_by_month.map(r => r.score), yAxisID: 'y' },
-            { label: 'Valoraciones', data: c.score_rated_by_month.map(r => r.rated), color: '#56b6c2', yAxisID: 'y1' },
+        lines('satisfaction', 'monthly', months, [
+            { label: 'CSAT (%)', data: onAxis(months, c.score_rated_by_month, 'month', 'score', null), yAxisID: 'y' },
+            { label: 'Valoraciones', data: onAxis(months, c.score_rated_by_month, 'month', 'rated', 0), color: '#56b6c2', yAxisID: 'y1' },
         ], dualAxisOptions('%', ''));
-        lines('satisfaction', 'ratedMonthly', c.rated_surveyed_by_month.map(r => r.month), [
-            { label: 'Participación (%)', data: c.rated_surveyed_by_month.map(r => r.rated_ratio), yAxisID: 'y' },
-            { label: 'Encuestados', data: c.rated_surveyed_by_month.map(r => r.surveyed), color: '#d19a66', yAxisID: 'y1' },
+        lines('satisfaction', 'ratedMonthly', months, [
+            { label: 'Participación (%)', data: onAxis(months, c.rated_surveyed_by_month, 'month', 'rated_ratio', null), yAxisID: 'y' },
+            { label: 'Encuestados', data: onAxis(months, c.rated_surveyed_by_month, 'month', 'surveyed', 0), color: '#d19a66', yAxisID: 'y1' },
         ], dualAxisOptions('%', ''));
     }
 
     function renderSla(data) {
         const c = data.charts;
-        stacked('sla', 'completed', c.completed_by_date, 'day', [['achieved', 'Cumplidos', '#98c379'], ['breached', 'Incumplidos', '#e06c75']]);
+        stacked('sla', 'completed', fillRows(rangeDays(data), c.completed_by_date, 'day', { achieved: 0, breached: 0 }), 'day', [['achieved', 'Cumplidos', '#98c379'], ['breached', 'Incumplidos', '#e06c75']]);
         const dim = c.dimensions.product;
         stacked('sla', 'dimension', dim.rows, 'label', [['achieved', 'Cumplidos', '#98c379'], ['breached', 'Incumplidos', '#e06c75']]);
         bars('sla', 'hour', c.breaches_by_hour.labels, [{ label: '% incumplimientos', data: c.breaches_by_hour.values, color: '#e06c75' }]);
         bars('sla', 'weekday', c.breaches_by_weekday.labels, [{ label: '% incumplimientos', data: c.breaches_by_weekday.values, color: '#e06c75' }]);
         stacked('sla', 'metric', c.by_metric, 'metric', [['achieved', 'Cumplidos', '#98c379'], ['breached', 'Incumplidos', '#e06c75']]);
         const metricNames = [...new Set(c.achievement_by_month.flatMap(r => Object.keys(r.metrics)))];
-        lines('sla', 'monthly', c.achievement_by_month.map(r => r.month), metricNames.map((metric, index) => ({
-            label: metric, data: c.achievement_by_month.map(r => r.metrics[metric]), color: theme().colors[index],
+        const months = fillRows(rangeMonths(data), c.achievement_by_month, 'month', { metrics: {} });
+        lines('sla', 'monthly', months.map(r => r.month), metricNames.map((metric, index) => ({
+            label: metric, data: months.map(r => r.metrics[metric] == null ? null : r.metrics[metric]), color: theme().colors[index],
         })));
     }
 
@@ -563,6 +643,7 @@
         if (insight) insight.textContent = data.insight || '';
         if (section === 'executive') renderMatrix(data);
         RENDERERS[section](data);
+        renderScopes(section, data);
         renderTable(section, data.tables);
     }
 
