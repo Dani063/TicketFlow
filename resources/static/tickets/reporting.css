@@ -58,10 +58,12 @@
 .tf-segment button:first-child { border-left: 0; }
 .tf-segment button.is-active { background: #5b67ca; color: #fff; }
 .tf-daterange { display: flex; align-items: flex-end; gap: 7px; }
-.tf-daterange label { display: flex; flex-direction: column; gap: 3px; }
+.tf-daterange label { display: flex; flex-direction: column; gap: 3px; margin-bottom: 0; }
 .tf-daterange input { height: 34px; max-width: 138px; }
-.tf-daterange > span { color: var(--color-text-muted, #64748b); padding-bottom: 7px; }
-.tf-report-range-mode { color: var(--color-text-muted, #64748b); font-size: .72rem; margin: 0 0 8px; }
+/* Flecha y texto del periodo en una caja de la altura del input: la fila alinea
+   por abajo, asi que quedan centrados con las fechas y no con su etiqueta. */
+.tf-daterange > span { align-items: center; color: var(--color-text-muted, #64748b); display: flex; height: 34px; line-height: 1; }
+.tf-report-range-mode { align-items: center; color: var(--color-text-muted, #64748b); display: flex; font-size: .72rem; height: 34px; margin: 0; }
 .tf-product-rail {
     align-items: center;
     background: color-mix(in srgb, var(--color-surface, #fff) 94%, transparent);
@@ -210,6 +212,11 @@
 }
 .tf-report-help-title:focus-visible { box-shadow: 0 0 0 2px rgba(91, 103, 202, .28); border-radius: 3px; }
 .tf-report-panel-note { color: var(--color-text-muted, #64748b); font-size: .7rem; margin: 3px 0 0; }
+/* Periodo que cubre cada grafica: distingue las del rango de las fotos y del historico. */
+.tf-report-scope { border: 1px solid var(--color-border, #e2e8f0); border-radius: 999px; color: var(--color-text-muted, #64748b); display: inline-block; font-size: .64rem; line-height: 1.5; margin-top: 5px; padding: 0 7px; }
+.tf-report-scope:empty { display: none; }
+.tf-report-scope.is-snapshot { border-color: color-mix(in srgb, #d19a66 55%, transparent); color: #b26b2a; }
+.tf-report-scope.is-history { border-color: color-mix(in srgb, #5b67ca 45%, transparent); color: #5b67ca; }
 .tf-report-dimension { height: 30px; max-width: 132px; min-width: 112px; }
 .tf-report-canvas { height: 270px; position: relative; }
 .tf-report-panel--wide .tf-report-canvas { height: 300px; }
@@ -262,7 +269,7 @@ body.tf-report-exporting .tf-report-table th { background: #fff !important; colo
     .tf-daterange { width: 100%; }
     .tf-daterange label { flex: 1; }
     .tf-daterange input { max-width: none; width: 100%; }
-    .tf-report-range-mode { width: 100%; }
+    .tf-report-range-mode { height: auto; width: 100%; }
 }
 @media (max-width: 480px) {
     .tf-report-filter-grid, .tf-report-kpis { grid-template-columns: 1fr; }

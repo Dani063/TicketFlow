@@ -393,9 +393,10 @@ class QueryBudgetTests(_FactFixture):
         # el reporting, es que ha vuelto a colarse una consulta por fila.
         # build_reporting_section calcula ademas el periodo anterior, de ahi que
         # casi todas doblen el coste de su builder; backlog no, porque no
-        # publica comparativa.
+        # publica comparativa. assignee_activity lee ademas la cola al cierre
+        # (_unsolved_at): consultas fijas por periodo, no por ticket.
         budgets = {
-            "executive": 25, "tickets": 18, "efficiency": 16, "assignee_activity": 15,
+            "executive": 25, "tickets": 18, "efficiency": 16, "assignee_activity": 17,
             "agent_updates": 14, "unsolved": 14, "backlog": 6, "satisfaction": 15,
             "sla": 9,
         }
@@ -419,3 +420,96 @@ class QueryBudgetTests(_FactFixture):
             grouped = reporting_metrics._agent_comments([self.simple.id])
             self.assertTrue(grouped[self.simple.id])
         self.assertEqual(len(ctx.captured_queries), 1)
+
+
+class ReportingRangeTests(_FactFixture):
+    """El selector de periodo tiene que mover de verdad lo que pinta cada zona."""
+
+    def _solved_ids(self, days):
+        _from, _to, start_dt, end_dt = self._range(days)
+        base = reporting_metrics.live_ticket_queryset(ReportFilters.from_params({}))
+        return {ticket.id for ticket in reporting_metrics._solved_tickets(base, start_dt, end_dt)}
+
+    def _auto_close(self, ticket, days_ago):
+        """Lo que hace una automatizacion de cierre: resuelto -> cerrado, hoy."""
+        self._event(ticket, "status", "resolved", "closed", days_ago=days_ago)
+        Ticket.objects.filter(id=ticket.id).update(
+            status="closed", closed_at=self.now - timedelta(days=days_ago),
+        )
+
+    def test_closing_an_already_resolved_ticket_is_not_a_new_resolution(self):
+        self._auto_close(self.simple, days_ago=1)
+        for with_facts in (False, True):
+            if with_facts:
+                rebuild_all_facts()
+            with self.subTest(with_facts=with_facts):
+                # Resuelto hace 5 dias: entra en la ultima semana, no en los ultimos 3.
+                self.assertNotIn(self.simple.id, self._solved_ids(3))
+                self.assertIn(self.simple.id, self._solved_ids(7))
+
+    def test_zendesk_closed_at_does_not_override_the_audited_resolution(self):
+        """El sync iguala closed_at al updated_at de Zendesk, que se mueve solo."""
+        Ticket.objects.filter(id=self.simple.id).update(
+            status="closed", resolved_at=None, closed_at=self.now - timedelta(days=1),
+        )
+        self.simple.refresh_from_db()
+        fact = _lifecycle_facts_from_source([self.simple], now=self.now)[self.simple.id]
+        self.assertEqual(
+            fact["full_resolution_at"].date(), (self.now - timedelta(days=5)).date()
+        )
+        self.assertNotIn(self.simple.id, self._solved_ids(3))
+
+    def test_closed_at_still_resolves_tickets_without_audit(self):
+        self.assertIn(self.imported.id, self._solved_ids(30))
+        self.assertNotIn(self.imported.id, self._solved_ids(7))
+
+    def test_a_ticket_resolved_after_its_facts_were_stored_is_reported(self):
+        rebuild_all_facts()
+        self._event(self.untouched, "status", "open", "resolved", days_ago=0)
+        Ticket.objects.filter(id=self.untouched.id).update(
+            status="resolved", resolved_at=self.now, updated_at=self.now + timedelta(seconds=1),
+        )
+        self.assertIn(self.untouched.id, self._solved_ids(1))
+
+    def test_backlog_samples_follow_the_selected_range(self):
+        rebuild_all_facts()
+        filters = ReportFilters.from_params({})
+        week = SECTION_BUILDERS["backlog"](filters, *self._range(7))
+        quarter = SECTION_BUILDERS["backlog"](filters, *self._range(90))
+        self.assertEqual(len(week["charts"]["daily_by_status"]), 7)
+        self.assertEqual(len(quarter["charts"]["daily_by_status"]), 90)
+        self.assertEqual(len(week["charts"]["weekly_by_status"]), 2)
+        self.assertEqual(len(quarter["charts"]["weekly_by_status"]), 13)
+        year = SECTION_BUILDERS["backlog"](filters, *self._range(365))
+        self.assertEqual(len(year["charts"]["daily_by_status"]), 90, "techo de cortes diarios")
+
+    def test_monthly_series_stay_inside_the_range(self):
+        rebuild_all_facts()
+        filters = ReportFilters.from_params({})
+        date_from, date_to, start_dt, end_dt = self._range(7)
+        months = {f"{date_from:%Y-%m}", f"{date_to:%Y-%m}"}
+        satisfaction = SECTION_BUILDERS["satisfaction"](filters, date_from, date_to, start_dt, end_dt)
+        for row in satisfaction["charts"]["score_rated_by_month"]:
+            self.assertIn(row["month"], months)
+        sla = SECTION_BUILDERS["sla"](filters, date_from, date_to, start_dt, end_dt)
+        for row in sla["charts"]["achievement_by_month"]:
+            self.assertIn(row["month"], months)
+
+    def test_assigned_unsolved_is_the_queue_at_the_end_of_the_range(self):
+        rebuild_all_facts()
+        filters = ReportFilters.from_params({})
+        today = SECTION_BUILDERS["assignee_activity"](filters, *self._range(7))
+        kpis = {row["key"]: row["value"] for row in today["kpis"]}
+        # reabierto + heredado + sin tocar + con SLA, todos con agente asignado
+        self.assertEqual(kpis["assigned_unsolved"], 4)
+        today_end = timezone.localdate()
+        past = today_end - timedelta(days=28)
+        past_payload = SECTION_BUILDERS["assignee_activity"](
+            filters, past - timedelta(days=6), past,
+            _aware(datetime.combine(past - timedelta(days=6), time.min)),
+            _aware(datetime.combine(past, time.max)),
+        )
+        past_kpis = {row["key"]: row["value"] for row in past_payload["kpis"]}
+        # Hace 28 dias solo existian el reabierto (no se resolvio hasta el dia
+        # -25) y el importado (cerrado el -18): ambos seguian en cola.
+        self.assertEqual(past_kpis["assigned_unsolved"], 2)
