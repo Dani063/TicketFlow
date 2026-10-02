@@ -6,13 +6,15 @@ buzon. Con isRead, DEV y STA leian el mismo buzon fisico y el primero que
 pasaba se llevaba el mensaje; el otro no volvia a verlo nunca.
 """
 
+from datetime import timedelta
 from unittest.mock import patch
 from urllib.parse import unquote
 
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from app import tasks
-from app.models import Brand, InboundEmailLog, MailboxSyncCursor, Role, Ticket, User
+from app.models import Brand, InboundEmailLog, MailboxSyncCursor, OperationalMetric, Role, Ticket, User
 from app.services.email_ingestion import EmailIngestionService, InvalidEmailSender
 
 
@@ -647,3 +649,111 @@ class EnvironmentIsolationTests(_SyncFixture):
             self.run_poll(graph)
 
         self.assertFalse(any('isRead' in url for url in graph.delta_urls))
+
+
+@override_settings(ENVIRONMENT_NAME='Staging')
+class RoundDiagnosticsTests(_SyncFixture):
+    """Los logs tienen que bastar para reconstruir una vuelta sin acceso a Graph.
+
+    El 01/10/2026 en PRO entraron correos nuevos en el recorrido sin llegar a
+    ingerirse, y la única pista era el recuento de mensajes vistos: la salida de
+    «ya ingerido» no dejaba rastro y todos los ids salían con el mismo prefijo.
+    """
+
+    MAILBOX = 'helpdesk@cloudwws.example'
+
+    def summary(self, logs):
+        lines = [line for line in logs.output if ': vuelta ' in line]
+        self.assertEqual(len(lines), 1, logs.output)
+        return lines[0]
+
+    def test_log_ids_keep_the_distinctive_tail(self):
+        shared = 'AAMkAGY1ODFkYzg1LTAwM2MtNGNkYy04OGU4'
+        self.assertEqual(tasks._log_id(shared + 'MESSAGE-ONE-0001'), '…MESSAGE-ONE-0001')
+        self.assertNotEqual(
+            tasks._log_id(shared + 'MESSAGE-ONE-0001'), tasks._log_id(shared + 'MESSAGE-TWO-0002'),
+        )
+
+    def test_summary_separates_new_mail_from_already_ingested(self):
+        graph = FakeGraph(
+            {self.MAILBOX: 'FOLDER-1'},
+            [
+                [page([graph_message('msg-old')], delta_link='https://graph.test/delta/1')],
+                [page([graph_message('msg-old'), graph_message('msg-new',
+                       receivedDateTime='2026-10-01T14:42:33Z')],
+                      delta_link='https://graph.test/delta/2')],
+            ],
+        )
+        self.run_poll(graph)
+        with self.assertLogs('app.tasks', level='DEBUG') as logs:
+            self.run_poll(graph)
+
+        line = self.summary(logs)
+        self.assertIn('INFO', line)
+        self.assertIn('vuelta completa desde enlace delta', line)
+        self.assertIn('2 vistos', line)
+        self.assertIn('skip_dup=1', line)
+        self.assertIn('ticket_created=1', line)
+        self.assertIn('cursor avanza', line)
+        # La salida silenciosa ya no lo es: queda el id del mensaje descartado.
+        self.assertTrue(any(
+            'DEBUG' in entry and tasks._log_id('msg-old') in entry and 'skip_dup' in entry
+            for entry in logs.output
+        ), logs.output)
+        self.assertTrue(any('recibido 2026-10-01T14:42:33Z' in entry for entry in logs.output))
+
+    def test_failed_round_says_where_it_stopped(self):
+        graph = FakeGraph(
+            {self.MAILBOX: 'FOLDER-1'},
+            [[page([graph_message('msg-ok'), graph_message('msg-boom',
+                    receivedDateTime='2026-09-29T10:34:22Z'), graph_message('msg-behind')],
+                   delta_link='https://graph.test/delta/1')]],
+        )
+        process = tasks._process_message
+
+        def fail(message, brand, attachments=None):
+            if message['id'] == 'msg-boom':
+                raise RuntimeError('Data too long')
+            return process(message, brand, attachments=attachments)
+
+        with patch.object(tasks, '_process_message', side_effect=fail), \
+                self.assertLogs('app.tasks', level='INFO') as logs:
+            self.run_poll(graph)
+
+        line = self.summary(logs)
+        self.assertIn('WARNING', line)
+        self.assertIn('vuelta fallida desde enlace inicial', line)
+        self.assertIn('detenida en la pág. 1 pos. 2', line)
+        self.assertIn(tasks._log_id('msg-boom'), line)
+        self.assertIn('recibido 2026-09-29T10:34:22Z', line)
+        self.assertIn('cursor NO avanza', line)
+        self.assertFalse(Ticket.objects.filter(email_message_id='msg-behind').exists())
+
+    def _stuck_round(self, minutes_since_sync):
+        graph = FakeGraph(
+            {self.MAILBOX: 'FOLDER-1'},
+            [[page([graph_message('msg-boom')], delta_link='https://graph.test/delta/1')]],
+            repeat=True,
+        )
+        with patch.object(tasks, '_process_message', side_effect=RuntimeError('Data too long')):
+            self.run_poll(graph)  # estrena el cursor, sin vuelta buena todavía
+        cursor = MailboxSyncCursor.objects.get(environment='Staging')
+        cursor.last_synced_at = timezone.now() - timedelta(minutes=minutes_since_sync)
+        cursor.save(update_fields=['last_synced_at'])
+        with patch.object(tasks, '_process_message', side_effect=RuntimeError('Data too long')), \
+                self.assertLogs('app.tasks', level='INFO') as logs:
+            self.run_poll(graph)
+        return logs
+
+    def test_stuck_cursor_raises_an_error_after_the_threshold(self):
+        logs = self._stuck_round(minutes_since_sync=45)
+        stale = [line for line in logs.output if 'el cursor no avanza desde' in line]
+        self.assertEqual(len(stale), 1, logs.output)
+        self.assertIn('ERROR', stale[0])
+        self.assertIn('(45 min)', stale[0])
+        self.assertIn('Data too long', stale[0])
+        self.assertTrue(OperationalMetric.objects.filter(name='email.inbound.cursor_stale').exists())
+
+    def test_recent_failure_does_not_raise_the_stale_alarm(self):
+        logs = self._stuck_round(minutes_since_sync=5)
+        self.assertFalse(any('el cursor no avanza desde' in line for line in logs.output))

@@ -570,6 +570,11 @@ INBOUND_DELTA_MAX_PAGES = int(os.getenv('INBOUND_DELTA_MAX_PAGES', '20'))
 # Debe quedar encendido en un único entorno (el "dueño" del buzón) y apagado en
 # el resto, para no ensuciar el estado de lectura de un buzón compartido.
 INBOUND_MARK_READ_ENABLED = os.getenv('INBOUND_MARK_READ_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
+# Minutos sin que el cursor avance a partir de los cuales cada vuelta fallida
+# avisa con ERROR. Una vuelta que falla repite el mismo recorrido y deja sin
+# procesar todo lo que va detrás del mensaje que falla: el 29/09/2026 un
+# remitente inválido lo tuvo así dos días sin más rastro que un error repetido.
+INBOUND_CURSOR_STALE_MINUTES = int(os.getenv('INBOUND_CURSOR_STALE_MINUTES', '30'))
 
 # === Email saliente (confirmaciones al cliente) ===
 # SES autentica con el rol IAM del pod (como SQS/SSM): sin credenciales SMTP.
