@@ -35,14 +35,28 @@ artefacto antes de arrancar Django.
 
 ## Identificadores y rutas
 
-| Elemento | DEV | STA |
-|---|---|---|
-| Pipeline CD | `972` (`DEV-CD-Kubernetes`) | `973` (`STA-CD-Kubernetes`) |
-| Aplicación ArgoCD | `dev-recordia-ticketflow.ui-manifests` | `sta-recordia-ticketflow.ui-manifests` |
-| Ruta GitOps | `DEV/Recordia/Manifests/TicketFlow.UI` | `STA/Recordia/Manifests/TicketFlow.UI` |
-| Configuración S3 | `DEV/TicketFlow.UI/.env` | `STA/TicketFlow.UI/.env` |
-| `SHORT_ENV` | `DEV` | `STA` |
-| `LONG_ENV` | `Development` | `Staging` |
+| Elemento | DEV | STA | PRO |
+|---|---|---|---|
+| Pipeline CD | `972` (`DEV-CD-Kubernetes`) | `973` (`STA-CD-Kubernetes`) | `1007` (`PRO-CD-Kubernetes`) |
+| Aplicación ArgoCD | `dev-recordia-ticketflow.ui-manifests` | `sta-recordia-ticketflow.ui-manifests` | `pro-recordia-ticketflow.ui-manifests-b` |
+| Ruta GitOps | `DEV/Recordia/Manifests/TicketFlow.UI` | `STA/Recordia/Manifests/TicketFlow.UI` | `PRO/Recordia/Manifests/TicketFlow.UI` |
+| Configuración S3 | `DEV/TicketFlow.UI/.env` | `STA/TicketFlow.UI/.env` | `PRO/TicketFlow.UI/.env` |
+| `SHORT_ENV` | `DEV` | `STA` | `PRO` |
+| `LONG_ENV` | `Development` | `Staging` | `Production` |
+
+Particularidades de PRO, comprobadas en el despliegue de la `2.2.31` (02/10/2026):
+
+- Solo admite tags estables contenidos en `develop`.
+- Además de las plantillas `feature/kubernetes` y `kubernetes-repo@develop`, la CD
+  usa `terragrunt-repo` (`Recordia-Terragrunt`, rama `develop`). El **preview falla**
+  con `Access denied ... template repository 'Recordia-Terragrunt'` si quien lo lanza no
+  tiene lectura en ese proyecto; la ejecución real sí funciona porque usa la identidad
+  de la pipeline.
+- **El paso `ArgoCD Flow Control` falla siempre** (`PermissionDenied`, código 20): la
+  plantilla compone el nombre `pro-recordia-ticketflow.ui-manifests`, sin el sufijo
+  `-b`. Es inocuo: `Upload New Manifest` ya ha hecho el commit GitOps y ArgoCD
+  sincroniza solo. Verificar a mano en la aplicación `-b` (Job de migración, imagen
+  y salud de los pods) en lugar de fiarse del resultado de la pipeline.
 
 La CI de TicketFlow es la pipeline `1108`, llamada `TicketFlow.UI`. Estos son
 los identificadores actuales; si Azure devuelve `404`, volver a resolverlos por
@@ -352,8 +366,8 @@ Buscar evidencia concreta, sin volcar todos los logs:
 
 - `Copying config files from s3://recordia-config/DEV/TicketFlow.UI`;
 - `Applying app.<migración>... OK`;
-- carga de `app.tasks.poll_m365_mailboxes` en worker/beat;
-- `Task app.tasks.poll_m365_mailboxes[...] succeeded`;
+- carga de `app.tasks.sweep_m365_mailboxes` en worker/beat;
+- `Task app.tasks.sweep_m365_mailboxes[...] succeeded` y la línea `inbound_sweep [buzón]: vuelta ok`;
 - ausencia de `OperationalError`, `InconsistentMigrationHistory`, errores de
   token y errores de delta.
 

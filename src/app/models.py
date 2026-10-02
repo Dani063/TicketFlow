@@ -575,6 +575,35 @@ class MailboxSyncCursor(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # --- Barrido por ventana (sustituye al delta) ---------------------------
+    # Todos los campos nuevos son nulos o tienen db_default: durante un rollout
+    # conviven pods con el código anterior, que no los conoce, y con
+    # STRICT_TRANS_TABLES un INSERT suyo fallaría si la columna exigiera valor.
+    MODE_SWEEP = 'sweep'
+    MODE_PAUSED = 'paused'
+    MODE_CHOICES = [(MODE_SWEEP, 'Barrido activo'), (MODE_PAUSED, 'En pausa')]
+    # Interruptor de operación. Las filas que ya existían al migrar quedan en
+    # pausa: se activan a mano cuando solo quedan pods del código nuevo, para
+    # que el delta antiguo y el barrido no ingieran a la vez.
+    ingest_mode = models.CharField(max_length=16, choices=MODE_CHOICES, db_default=MODE_PAUSED)
+    # Marca fija del buzón. Con alias, la atribución no puede depender de qué
+    # alias se resolvió primero en cada vuelta.
+    brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name='mailbox_cursors')
+    # Hasta dónde (receivedDateTime) está descubierto y registrado en BD.
+    swept_until = models.DateTimeField(null=True, blank=True)
+    # Punto de arranque del barrido: por debajo solo entra el backfill manual.
+    deep_floor = models.DateTimeField(null=True, blank=True)
+    last_sweep_ok_at = models.DateTimeField(null=True, blank=True)
+    last_deep_hourly_at = models.DateTimeField(null=True, blank=True)
+    last_deep_daily_at = models.DateTimeField(null=True, blank=True)
+    # Lease en la propia fila: una sola vuelta por cursor a la vez. No se usa
+    # GET_LOCK porque va ligado a la sesión de MySQL y se pierde (o se queda
+    # colgado) en silencio si cae la conexión o el nodo.
+    lease_owner = models.CharField(max_length=64, null=True, blank=True)
+    lease_until = models.DateTimeField(null=True, blank=True)
+    last_sweep_stats = models.JSONField(null=True, blank=True)
+
     class Meta:
         unique_together = [('environment', 'folder_key')]
         ordering = ['environment', 'mailbox']
@@ -588,12 +617,28 @@ class InboundEmailLog(models.Model):
     STATUS_PROCESSED = 'processed'
     STATUS_DUPLICATE = 'duplicate'
     STATUS_FAILED = 'failed'
+    # Estados del barrido: descubierto y pendiente, reclamado por un worker,
+    # descartado a propósito (backfill de correo automático, acción manual) y
+    # apartado tras agotar los reintentos.
+    STATUS_PENDING = 'pending'
+    STATUS_PROCESSING = 'processing'
+    STATUS_SKIPPED = 'skipped'
+    STATUS_QUARANTINED = 'quarantined'
     STATUS_CHOICES = [
         (STATUS_RECEIVED, 'Received'),
         (STATUS_PROCESSED, 'Processed'),
         (STATUS_DUPLICATE, 'Duplicate'),
         (STATUS_FAILED, 'Failed'),
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_PROCESSING, 'Processing'),
+        (STATUS_SKIPPED, 'Skipped'),
+        (STATUS_QUARANTINED, 'Quarantined'),
     ]
+    # Ya resueltos: el barrido no los vuelve a tocar.
+    TERMINAL_STATUSES = (STATUS_PROCESSED, STATUS_DUPLICATE, STATUS_SKIPPED, STATUS_QUARANTINED)
+
+    SOURCE_LIVE = 'live'
+    SOURCE_BACKFILL = 'backfill'
 
     brand = models.ForeignKey('Brand', on_delete=models.SET_NULL, null=True, blank=True, related_name='inbound_email_logs')
     ticket = models.ForeignKey(Ticket, on_delete=models.SET_NULL, null=True, blank=True, related_name='inbound_email_logs')
@@ -606,9 +651,36 @@ class InboundEmailLog(models.Model):
     received_at = models.DateTimeField(auto_now_add=True)
     processed_at = models.DateTimeField(null=True, blank=True)
 
+    # --- Barrido por ventana (nulos o con db_default; ver MailboxSyncCursor) --
+    folder_key = models.CharField(max_length=64, null=True, blank=True)
+    # sha256 del id de Graph. La unicidad va sobre él y no sobre message_id
+    # porque la columna tiene una colación que no distingue mayúsculas y los
+    # ids de Graph sí las distinguen.
+    message_key = models.CharField(max_length=64, null=True, blank=True)
+    graph_received_at = models.DateTimeField(null=True, blank=True)
+    internet_message_id = models.TextField(null=True, blank=True)
+    # El id de Graph cambia al mover un mensaje de carpeta; el Message-ID no.
+    internet_message_key = models.CharField(max_length=64, null=True, blank=True)
+    source = models.CharField(max_length=16, null=True, blank=True)
+    attempts = models.PositiveIntegerField(db_default=0)
+    next_attempt_at = models.DateTimeField(null=True, blank=True)
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    claim_token = models.CharField(max_length=64, null=True, blank=True)
+    automated_rule = models.CharField(max_length=64, null=True, blank=True)
+
     class Meta:
         unique_together = [('brand', 'message_id')]
         ordering = ['-received_at']
+        indexes = [
+            models.Index(fields=['status', 'next_attempt_at'], name='app_inbound_status_next_idx'),
+            models.Index(fields=['graph_received_at'], name='app_inbound_graph_recv_idx'),
+            models.Index(fields=['internet_message_key'], name='app_inbound_imsg_key_idx'),
+            models.Index(fields=['received_at'], name='app_inbound_received_idx'),
+        ]
+        constraints = [
+            # Las filas anteriores al barrido tienen folder_key NULL y no chocan.
+            models.UniqueConstraint(fields=['folder_key', 'message_key'], name='app_inbound_folder_msg_uniq'),
+        ]
 
     def __str__(self):
         return f"{self.message_id} ({self.status})"

@@ -26,12 +26,12 @@ Consulta de registros MX con `nslookup -type=MX <dominio>`:
 > direcciones M365 de la tabla (`helpdesk@cloudwws.com`, `helpdesk@comunycarse.com`,
 > `soporte2@comunycarse.com`, `helpdesk@ecomfax.com`) **no son cuatro buzones
 > independientes: son alias de un único buzón físico** (mismo id de carpeta Inbox,
-> mismo contador de elementos). Consecuencia: `poll_m365_mailboxes` itera marcas y
-> asigna `brand` según qué marca está consultando en ese momento, no según el
+> mismo contador de elementos). Consecuencia: el barrido agrupa las cuatro
+> direcciones en una sola carpeta (`mailbox_sweep.resolve_targets`) y asigna a todo
+> el correo la marca fijada en su `MailboxSyncCursor` (la primera por id), no la del
 > destinatario real del mensaje — la atribución de marca del correo entrante es hoy
-> arbitraria. `_mailbox_targets` agrupa las cuatro direcciones para no consultar la
-> misma carpeta cuatro veces, pero no resuelve la atribución. Es un defecto pendiente
-> de decisión de negocio, no un bug de este documento.
+> arbitraria. Es un defecto pendiente de decisión de negocio, no un bug de este
+> documento.
 
 ---
 

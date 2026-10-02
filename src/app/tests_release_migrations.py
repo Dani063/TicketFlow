@@ -18,7 +18,10 @@ class MigrateJobSmokeCheckTests(SimpleTestCase):
 
         self.assertEqual(migration.dependencies, [self.previous])
         self.assertEqual(migration.operations, [])
-        self.assertEqual(self.loader.graph.leaf_nodes("app"), [self.target])
+        # Sigue habiendo una sola hoja, y el smoke check forma parte de su historia.
+        leaves = self.loader.graph.leaf_nodes("app")
+        self.assertEqual(len(leaves), 1)
+        self.assertIn(self.target, self.loader.graph.forwards_plan(leaves[0]))
         self.assertFalse(self.loader.detect_conflicts())
 
     def test_smoke_check_does_not_change_the_model_state(self):

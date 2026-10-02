@@ -23,8 +23,7 @@ data:
   # El marcado como leído debe quedar encendido en un solo entorno: ensucia el
   # estado de lectura de un buzón que es compartido y que la gente también mira.
   INBOUND_MARK_READ_ENABLED: "false"
-  INBOUND_DELTA_LOOKBACK_MINUTES: "60"
-  INBOUND_DELTA_MAX_PAGES: "20"
+  INBOUND_SWEEP_INITIAL_LOOKBACK_MINUTES: "60"
   # DEV comparte buzón con STA: no debe enviar correo a clientes reales.
   OUTBOUND_EMAIL_ENABLED: "false"
   OUTBOUND_TICKET_CREATED_ENABLED: "false"
