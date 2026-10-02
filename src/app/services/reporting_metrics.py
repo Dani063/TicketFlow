@@ -206,6 +206,17 @@ def _status(value):
     return STATUS_ALIASES.get((value or "").strip().lower(), (value or "").strip().lower())
 
 
+def _is_resolution(old_value, new_value):
+    """¿Es este cambio de estado una resolución?
+
+    Resolver es *entrar* en resuelto desde un estado sin resolver. Pasar de
+    resuelto a cerrado no lo es: lo hacen en bloque las automatizaciones de
+    cierre (y Zendesk a los pocos días), y contarlo como resolución metía en
+    cada semana miles de tickets resueltos hace meses.
+    """
+    return _status(new_value) in SOLVED_STATUSES and _status(old_value) not in SOLVED_STATUSES
+
+
 def _event_kind(value):
     value = (value or "").strip().lower()
     if value in STATUS_EVENT_NAMES:
@@ -330,11 +341,14 @@ def _lifecycle_facts_from_source(tickets, now=None):
             first_reply_at = ticket.first_responded_at
 
         resolutions = [
-            e.created_at for e in status_events if _status(e.new_value) in SOLVED_STATUSES
+            e.created_at for e in status_events if _is_resolution(e.old_value, e.new_value)
         ]
         if ticket.resolved_at:
             resolutions.append(ticket.resolved_at)
-        if ticket.closed_at:
+        # closed_at solo es la resolución cuando no hay otra prueba: se sella al
+        # cerrar un ticket ya resuelto, y el sync de Zendesk lo iguala a su
+        # updated_at, que se mueve cada vez que se toca un ticket ya cerrado.
+        if ticket.closed_at and not resolutions:
             resolutions.append(ticket.closed_at)
         resolutions = sorted(set(resolutions))
         first_resolution_at = resolutions[0] if resolutions else None
@@ -542,14 +556,44 @@ def _lifecycle_facts(tickets, now=None):
     return facts
 
 
-def _solved_tickets(qs, start_dt, end_dt):
-    """Tickets resueltos dentro del rango.
+_SOLVED_EVENT_VALUES = ("resolved", "closed", "solved")
 
-    Antes era un ``DISTINCT`` sobre el ``JOIN`` con la auditoria arrastrando los
-    siete ``select_related`` de ``live_ticket_queryset``: MySQL tenia que
-    deduplicar filas enormes. Ahora se resuelven primero los ids — la consulta de
-    eventos va acotada por fecha y apoyada en ``app_evt_field_time`` — y solo
-    despues se materializan los tickets que de verdad entran en el informe.
+
+def _full_resolution_moments(qs, ticket_ids):
+    """``{ticket_id: full_resolution_at}`` para los candidatos indicados.
+
+    Se lee de ``TicketFact``. Los hechos que faltan o que se han quedado atras
+    respecto al ticket (resuelto entre dos pasadas del beat) se recalculan desde
+    la auditoria: son pocos, y sin esto un ticket recien resuelto no apareceria
+    en el informe hasta el siguiente refresco.
+    """
+    moments = {}
+    fresh = set()
+    for ticket_id, resolved_at, source_updated_at, updated_at in TicketFact.objects.filter(
+        ticket_id__in=ticket_ids
+    ).values_list("ticket_id", "full_resolution_at", "source_updated_at", "ticket__updated_at"):
+        if source_updated_at and updated_at and updated_at > source_updated_at:
+            continue
+        moments[ticket_id] = resolved_at
+        fresh.add(ticket_id)
+    pending = [ticket_id for ticket_id in ticket_ids if ticket_id not in fresh]
+    if pending:
+        for ticket_id, fact in _lifecycle_facts_from_source(list(qs.filter(id__in=pending))).items():
+            moments[ticket_id] = fact["full_resolution_at"]
+    return moments
+
+
+def _solved_tickets(qs, start_dt, end_dt):
+    """Tickets cuya resolución cae dentro del rango.
+
+    Un ticket cuenta en el periodo en que se resolvió por última vez
+    (``full_resolution_at``), que es tambien la fecha con la que las series
+    diarias lo reparten: así el KPI y las graficas no pueden divergir.
+
+    Las marcas y la auditoria solo sirven para preseleccionar candidatos con
+    consultas acotadas por fecha (``app_evt_field_time``); la decision la toma el
+    momento de resolucion. Antes cualquier paso a cerrado en el rango contaba,
+    y una automatizacion de cierre metia en una semana el historico entero.
     """
     ids = set(
         qs.filter(
@@ -560,13 +604,24 @@ def _solved_tickets(qs, start_dt, end_dt):
     ids.update(
         TicketEvent.objects.filter(
             field_name__in=STATUS_EVENT_NAMES,
-            new_value__in=("resolved", "closed", "solved"),
+            new_value__in=_SOLVED_EVENT_VALUES,
             created_at__range=(start_dt, end_dt),
-        ).values_list("ticket_id", flat=True)
+        )
+        # resuelto -> cerrado no es resolver; quitarlo aqui ya descarta casi
+        # todo el ruido antes de mirar los hechos.
+        .exclude(old_value__in=_SOLVED_EVENT_VALUES)
+        .values_list("ticket_id", flat=True)
     )
     if not ids:
         return []
-    return list(qs.filter(id__in=ids))
+    moments = _full_resolution_moments(qs, sorted(ids))
+    solved_ids = [
+        ticket_id for ticket_id, resolved_at in moments.items()
+        if resolved_at and start_dt <= resolved_at <= end_dt
+    ]
+    if not solved_ids:
+        return []
+    return list(qs.filter(id__in=solved_ids))
 
 
 def _kpi(key, label, value, unit="", note=""):
@@ -699,6 +754,8 @@ def build_tickets(filters, date_from, date_to, start_dt, end_dt):
         },
         "dimensions": dimensions,
         "created_by_month_year": {
+            # Unica serie que no sigue al selector: es una comparativa entre anos.
+            "coverage": {"from": str(date(first_year, 1, 1)), "to": str(current_month_start - timedelta(days=1))},
             "years": [
                 {"year": year, "values": [month_rows[year].get(month, 0) for month in range(1, 13)]}
                 for year in range(first_year, anchor.year + 1)
@@ -831,12 +888,17 @@ def build_assignee_activity(filters, date_from, date_to, start_dt, end_dt):
     one_touch = sum(1 for fact in fact_values if fact["agent_replies"] < 2)
     two_touch = sum(1 for fact in fact_values if fact["agent_replies"] == 2)
 
+    # Foto de la cola al cierre del rango, igual que la zona de pendientes. Con el
+    # estado actual del ticket el KPI no dependia del periodo y su comparativa
+    # con el anterior salia siempre a cero.
+    backlog, _states = _unsolved_at(base, end_dt)
+
     payload = _base_payload("assignee_activity", date_from, date_to)
     payload["kpis"] = [
         _kpi("solved", "Tickets resueltos", len(solved)),
-        _kpi("assigned_unsolved", "No resueltos asignados", base.filter(
-            status__in=UNSOLVED_STATUSES, assignee__isnull=False
-        ).count()),
+        _kpi("assigned_unsolved", "No resueltos asignados al cierre", sum(
+            1 for ticket in backlog if ticket.assignee_id
+        )),
         _kpi("assignment_to_resolution", "Asignacion a resolucion", _median(
             [fact["assignment_to_resolution_hours"] for fact in fact_values]
         ), "h"),
@@ -1064,6 +1126,7 @@ def build_unsolved(filters, date_from, date_to, start_dt, end_dt):
     unreplied = sum(1 for fact in facts.values() if fact["agent_replies"] < 1)
 
     payload = _base_payload("unsolved", date_from, date_to)
+    payload["snapshot_at"] = str(date_to)
     payload["kpis"] = [
         _kpi("unsolved", "Tickets no resueltos", len(tickets)),
         _kpi("new_open", "Tickets abiertos", sum(1 for ticket in tickets if states[ticket.id] == "open")),
@@ -1348,10 +1411,29 @@ def _backlog_samples(filters, days):
                 yield day, state, _dimension_value(ticket, "product"), 1
 
 
+_BACKLOG_MAX_DAILY_SAMPLES = 90
+_BACKLOG_MIN_WEEKLY_SAMPLES = 2
+
+
+def _backlog_days(date_from, date_to):
+    """Cortes diarios y semanales del backlog para el rango pedido.
+
+    Antes eran siempre 30 dias y 12 semanas hasta ``date_to``, asi que el
+    selector de periodo solo movia el ultimo punto. El diario cubre el rango con
+    un techo de cortes (cada corte es una pasada sobre los tramos en Python); el
+    semanal cuenta hacia atras desde ``date_to`` de 7 en 7 dentro del rango, con
+    un minimo de dos cortes para que haya evolucion que dibujar.
+    """
+    span = (date_to - date_from).days + 1
+    daily = [date_to - timedelta(days=offset) for offset in reversed(range(min(span, _BACKLOG_MAX_DAILY_SAMPLES)))]
+    weeks = max((span - 1) // 7 + 1, _BACKLOG_MIN_WEEKLY_SAMPLES)
+    weekly = [date_to - timedelta(days=7 * offset) for offset in reversed(range(weeks))]
+    return daily, weekly
+
+
 def build_backlog(filters, date_from, date_to, start_dt, end_dt):
     anchor = date_to
-    daily_days = [anchor - timedelta(days=offset) for offset in reversed(range(30))]
-    weekly_days = [anchor - timedelta(days=7 * offset) for offset in reversed(range(12))]
+    daily_days, weekly_days = _backlog_days(date_from, date_to)
     oldest = min(daily_days + weekly_days)
 
     daily_day_set = set(daily_days)
@@ -1398,7 +1480,7 @@ def build_backlog(filters, date_from, date_to, start_dt, end_dt):
             for day in weekly_days
         ],
         "dimensions": dimensions,
-        "coverage": {"from": str(oldest), "to": str(anchor)},
+        "coverage": {"from": str(oldest), "to": str(anchor), "daily_from": str(daily_days[0])},
     }
     return payload
 
@@ -1470,36 +1552,16 @@ def build_satisfaction(filters, date_from, date_to, start_dt, end_dt):
     for rating in ratings:
         daily[_local_day(rating.created_at)][rating.score] += 1
 
-    anchor = date_to
-    month_start = date(anchor.year, anchor.month, 1) - timedelta(days=366)
-    history_start = timezone.make_aware(
-        datetime.combine(month_start, time.min), timezone.get_current_timezone()
-    )
-    history_base = live_ticket_queryset(filters).filter(
-        Q(resolved_at__date__range=(month_start, anchor))
-        | Q(closed_at__date__range=(month_start, anchor))
-    )
-    # history_base solo servia para acotar las valoraciones, asi que se queda en
-    # subconsulta en vez de traerse un ano entero de tickets a memoria, y el
-    # recuento por mes lo hace la base de datos.
+    # Series mensuales sobre las mismas encuestas del periodo que el resto de la
+    # zona. Antes abarcaban siempre el ultimo ano y no reaccionaban al selector.
     monthly = defaultdict(lambda: {"good": 0, "bad": 0, "surveyed": 0})
-    history_ratings = SatisfactionRating.objects.filter(
-        ticket_id__in=history_base.values("id"),
-        created_at__gte=history_start,
-        created_at__lte=end_dt,
-        score__in=("offered", "good", "bad"),
-    )
-    for row in (
-        history_ratings.annotate(month=TruncMonth("created_at"))
-        .values("month", "score").annotate(n=Count("id"))
-    ):
-        day = _local_day(row["month"])
-        if not day:
+    for rating in surveyed:
+        month = _month_key(rating.created_at)
+        if not month:
             continue
-        month = f"{day.year:04d}-{day.month:02d}"
-        monthly[month]["surveyed"] += row["n"]
-        if row["score"] in ("good", "bad"):
-            monthly[month][row["score"]] += row["n"]
+        monthly[month]["surveyed"] += 1
+        if rating.score in ("good", "bad"):
+            monthly[month][rating.score] += 1
 
     payload["charts"] = {
         "good_bad_comments": [
@@ -1529,7 +1591,7 @@ def build_satisfaction(filters, date_from, date_to, start_dt, end_dt):
                 "rated": values["good"] + values["bad"],
             }
             for month, values in sorted(monthly.items())
-        ][-12:],
+        ],
         "rated_surveyed_by_month": [
             {
                 "month": month,
@@ -1537,14 +1599,9 @@ def build_satisfaction(filters, date_from, date_to, start_dt, end_dt):
                 "surveyed": values["surveyed"],
             }
             for month, values in sorted(monthly.items())
-        ][-12:],
+        ],
     }
     return payload
-
-
-# Ventana historica de las series mensuales de SLA. El grafico corta a 12 meses,
-# asi que con algo mas de un ano de margen no se pierde ningun punto visible.
-_SLA_HISTORY_DAYS = 400
 
 
 def _sla_candidates(base_qs, window_start, end_dt):
@@ -1557,9 +1614,8 @@ def _sla_candidates(base_qs, window_start, end_dt):
     (para no depender de la frescura del derivado) y las dos calculadas de
     ``TicketFact``, que las tiene indexadas.
 
-    La ventana la fija quien llama, porque no todas las zonas necesitan lo mismo:
-    ``build_sla`` dibuja una serie de doce meses y tiene que mirar mas atras,
-    mientras que la portada ejecutiva solo publica el rango seleccionado.
+    La ventana la fija quien llama; hoy todas las zonas pasan el rango
+    seleccionado.
     """
     computed = TicketFact.objects.filter(
         Q(first_reply_at__range=(window_start, end_dt))
@@ -1647,13 +1703,11 @@ def _sla_instances(tickets, now=None):
 
 
 def build_sla(filters, date_from, date_to, start_dt, end_dt):
-    # Esta zona publica ``achievement_by_month`` a doce meses, asi que necesita
-    # mirar mas atras que el rango seleccionado.
-    history_start = min(start_dt, end_dt - timedelta(days=_SLA_HISTORY_DAYS))
-    tickets = _sla_candidates(live_ticket_queryset(filters), history_start, end_dt)
-    all_instances = _sla_instances(tickets, now=end_dt)
+    # La serie mensual cubre el mismo rango que el resto de la zona. Antes miraba
+    # siempre 400 dias atras: no reaccionaba al selector y multiplicaba el coste.
+    tickets = _sla_candidates(live_ticket_queryset(filters), start_dt, end_dt)
     instances = [
-        row for row in all_instances
+        row for row in _sla_instances(tickets, now=end_dt)
         if row["updated_at"] and start_dt <= row["updated_at"] <= end_dt
     ]
     completed = [row for row in instances if row["status"] == "completed"]
@@ -1702,11 +1756,7 @@ def build_sla(filters, date_from, date_to, start_dt, end_dt):
         by_metric[row["metric"]][row["result"]] += 1
 
     monthly = defaultdict(lambda: defaultdict(lambda: {"achieved": 0, "breached": 0}))
-    for row in all_instances:
-        if row["status"] != "completed" or not row["updated_at"]:
-            continue
-        if row["updated_at"] > end_dt:
-            continue
+    for row in completed:
         month = _month_key(row["updated_at"])
         monthly[month][row["metric"]][row["result"]] += 1
 
@@ -1735,7 +1785,7 @@ def build_sla(filters, date_from, date_to, start_dt, end_dt):
                 },
             }
             for month, metrics in sorted(monthly.items())
-        ][-12:],
+        ],
     }
     return payload
 

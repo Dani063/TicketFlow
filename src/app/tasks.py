@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import os
+from collections import Counter
 from datetime import timedelta, timezone as dt_timezone
 from urllib.parse import quote
 
@@ -190,10 +191,27 @@ def _already_ingested(brand, message_id):
     ).exists()
 
 
+def _log_id(msg_id):
+    """Parte distintiva de un id de Graph para los logs.
+
+    Los ids de un mismo buzón comparten el prefijo (codifican el buzón y la
+    carpeta): cortarlos por delante hacía que todas las líneas mostraran el mismo
+    «AAMkAGY1ODFkYzg1…» y no había forma de seguir un mensaje concreto.
+    """
+    return f'…{msg_id[-16:]}' if msg_id else '-'
+
+
 def _ingest_message(msg, brand, mailbox, headers, mark_read):
     """Procesa un mensaje; un fallo impide avanzar el cursor de esta vuelta."""
     msg_id = msg['id']
+    received = msg.get('receivedDateTime') or '-'
     if _already_ingested(brand, msg_id):
+        # Es la única salida sin resultado propio: se registra para poder
+        # distinguir «ya estaba ingerido» de «no se llegó a procesar».
+        logger.debug(
+            'poll_m365 [%s] %s (recibido %s) → skip_dup', mailbox, _log_id(msg_id), received,
+            extra={'mailbox': mailbox, 'graph_message_id': msg_id, 'result': 'skip_dup'},
+        )
         return 'skip_dup'
 
     try:
@@ -203,9 +221,15 @@ def _ingest_message(msg, brand, mailbox, headers, mark_read):
             else []
         )
         result = _process_message(msg, brand, attachments=attachments)
-        logger.info('poll_m365 [%s] %s… → %s', mailbox, msg_id[:16], result)
+        logger.info(
+            'poll_m365 [%s] %s (recibido %s) → %s', mailbox, _log_id(msg_id), received, result,
+            extra={'mailbox': mailbox, 'graph_message_id': msg_id, 'result': result},
+        )
     except Exception as exc:
-        logger.error('poll_m365 [%s] %s… error: %s', mailbox, msg_id[:16], exc)
+        logger.error(
+            'poll_m365 [%s] %s (recibido %s) error: %s', mailbox, _log_id(msg_id), received, exc,
+            extra={'mailbox': mailbox, 'graph_message_id': msg_id, 'result': 'error'},
+        )
         # Con delta, avanzar tras un fallo perdería el mensaje para siempre:
         # ya no existe el filtro de no leídos que lo devolvía en otra pasada.
         raise
@@ -263,12 +287,26 @@ def _delta_round(url, target, headers, mark_read, max_pages, counter):
             raise _ResyncRequired(f'HTTP {response.status_code}')
         response.raise_for_status()
         page = response.json()
+        counter['pages'] += 1
         for msg in page.get('value', []):
             # Bajas y movimientos llegan como tombstones, sin cuerpo.
             if '@removed' in msg or not msg.get('id'):
                 continue
             counter['seen'] += 1
-            _ingest_message(msg, target['brand'], mailbox, headers, mark_read)
+            try:
+                result = _ingest_message(msg, target['brand'], mailbox, headers, mark_read)
+            except Exception:
+                # Todo lo que venga detrás en esta vuelta se queda sin procesar,
+                # y la siguiente vuelta repite el mismo recorrido: dejar dicho
+                # dónde se paró es lo que permite ver qué está bloqueando.
+                counter['stopped_at'] = {
+                    'page': counter['pages'], 'position': counter['seen'],
+                    'graph_message_id': msg['id'], 'received': msg.get('receivedDateTime'),
+                }
+                raise
+            counter['results'][result] += 1
+            if result != 'skip_dup' and msg.get('receivedDateTime'):
+                counter['new_received'].append(msg['receivedDateTime'])
 
         delta_link = page.get('@odata.deltaLink')
         if delta_link:
@@ -297,7 +335,10 @@ def _sync_mailbox(target, headers, environment):
     mailbox = target['mailbox']
     max_pages = getattr(settings, 'INBOUND_DELTA_MAX_PAGES', 20)
     mark_read = getattr(settings, 'INBOUND_MARK_READ_ENABLED', True)
-    counter = {'seen': 0}
+    counter = {
+        'seen': 0, 'pages': 0, 'results': Counter(), 'new_received': [], 'stopped_at': None,
+    }
+    start_kind = cursor.link_kind if cursor.delta_link else 'inicial'
 
     try:
         try:
@@ -324,6 +365,8 @@ def _sync_mailbox(target, headers, environment):
         cursor.save(update_fields=['last_result', 'last_error', 'updated_at'])
         record_metric('email.inbound.delta_failed',
                       labels={'mailbox': mailbox, 'environment': environment})
+        _log_round_summary(target, environment, start_kind, counter, advanced=False, error=exc)
+        _warn_if_cursor_stale(cursor, environment)
         return counter['seen']
 
     cursor.folder_id = target['folder_id']
@@ -336,7 +379,64 @@ def _sync_mailbox(target, headers, environment):
     cursor.last_error = None
     cursor.last_message_count = counter['seen']
     cursor.save()
+    _log_round_summary(target, environment, start_kind, counter, advanced=bool(link))
     return counter['seen']
+
+
+def _log_round_summary(target, environment, start_kind, counter, advanced, error=None):
+    """Una línea por vuelta y buzón con lo necesario para reconstruir qué pasó.
+
+    Distingue lo que el detalle por mensaje no deja ver: cuántos mensajes se
+    recorrieron y ya estaban ingeridos frente a cuántos entraron, desde qué
+    enlace se partió y si el cursor avanzó. Sin esto, una vuelta que recorre
+    correo nuevo sin ingerirlo era indistinguible de una vuelta sin novedades.
+    """
+    mailbox = target['mailbox']
+    results = counter['results']
+    received = sorted(counter['new_received'])
+    stopped = counter['stopped_at']
+    detail = ' '.join(f'{name}={n}' for name, n in sorted(results.items())) or 'sin resultados'
+    if stopped:
+        detail += (
+            f' · detenida en la pág. {stopped["page"]} pos. {stopped["position"]} '
+            f'({_log_id(stopped["graph_message_id"])}, recibido {stopped["received"] or "-"})'
+        )
+    logger.log(
+        logging.WARNING if error else logging.INFO,
+        'poll_m365 [%s]: vuelta %s desde enlace %s · %s págs. · %s vistos · %s · cursor %s',
+        mailbox, 'fallida' if error else 'completa', start_kind, counter['pages'],
+        counter['seen'], detail, 'avanza' if advanced else 'NO avanza',
+        extra={
+            'mailbox': mailbox, 'environment': environment, 'round_ok': error is None,
+            'start_link_kind': start_kind, 'pages': counter['pages'], 'seen': counter['seen'],
+            'results': dict(results), 'cursor_advanced': advanced,
+            'new_received_from': received[0] if received else None,
+            'new_received_to': received[-1] if received else None,
+            'stopped_at': stopped,
+        },
+    )
+
+
+def _warn_if_cursor_stale(cursor, environment):
+    """Avisa cuando un buzón lleva demasiado tiempo sin avanzar el cursor."""
+    threshold = getattr(settings, 'INBOUND_CURSOR_STALE_MINUTES', 30)
+    if not cursor.last_synced_at or threshold <= 0:
+        return
+    minutes = int((timezone.now() - cursor.last_synced_at).total_seconds() // 60)
+    if minutes < threshold:
+        return
+    logger.error(
+        'poll_m365 [%s]: el cursor no avanza desde %s (%s min); cada vuelta repite el mismo '
+        'recorrido y el correo que va detrás del fallo no se ingiere. Último error: %s',
+        cursor.mailbox, cursor.last_synced_at.isoformat(timespec='seconds'), minutes,
+        (cursor.last_error or '')[:300],
+        extra={
+            'mailbox': cursor.mailbox, 'environment': environment,
+            'cursor_stale_minutes': minutes, 'last_synced_at': cursor.last_synced_at,
+        },
+    )
+    record_metric('email.inbound.cursor_stale', minutes,
+                  labels={'mailbox': cursor.mailbox, 'environment': environment})
 
 
 # ---------------------------------------------------------------------------
