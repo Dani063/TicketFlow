@@ -24,7 +24,7 @@
 ```
 Beat (cada 120 s)
   │
-  ├─► SQS: publica mensaje "poll_m365_mailboxes"
+  ├─► SQS: publica mensaje "sweep_m365_mailboxes"
   │
 Worker (polling continuo)
   │
@@ -125,7 +125,7 @@ El worker usa **long polling**: cada petición a SQS espera hasta 20 segundos a 
 | `sqs:GetQueueAttributes` | web, worker, beat | `docker-entrypoint.sh` llama a `get_queue_attributes` antes de arrancar para verificar que la cola existe. Sin este permiso el pod no arranca. |
 | `sqs:ReceiveMessage` | worker | Celery worker hace long polling a SQS para recibir tareas encoladas. Es la operación central del worker. |
 | `sqs:DeleteMessage` | worker | Tras procesar una tarea, Celery elimina el mensaje de la cola para confirmarlo. Sin este permiso la tarea se reejecutaría al expirar el visibility timeout. |
-| `sqs:SendMessage` | beat, web | Beat encola `poll_m365_mailboxes` cada 120 s. Web lo necesitaría si en el futuro se encolan tareas desde vistas HTTP. |
+| `sqs:SendMessage` | beat, web | Beat encola `sweep_m365_mailboxes` cada 60 s. Web lo necesitaría si en el futuro se encolan tareas desde vistas HTTP. |
 | `sqs:ChangeMessageVisibility` | worker | Celery puede extender el visibility timeout de un mensaje si la tarea tarda más de lo previsto (configurado a 3600 s). Sin este permiso las tareas largas se reejecutarían en paralelo. |
 
 > El recurso a restringir es la ARN de la cola: `arn:aws:sqs:eu-west-1:{account_id}:DEV-Celery.fifo`

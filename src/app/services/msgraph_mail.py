@@ -1,0 +1,183 @@
+"""Acceso a los buzones M365 por Microsoft Graph para la ingesta de correo.
+
+Solo operaciones de lectura idempotentes (más el marcado como leído, que es
+cortesía). Nada aquí guarda estado en Graph: el barrido lista la carpeta por
+fecha de recepción y la verdad de qué se ha ingerido vive en la BD. Ver
+app/services/mailbox_sweep.py.
+"""
+
+import logging
+import os
+from datetime import timezone as dt_timezone
+from urllib.parse import quote
+
+import requests
+from django.conf import settings
+
+from app.services.msgraph import GRAPH_BASE
+
+logger = logging.getLogger(__name__)
+
+# Metadatos del listado: lo justo para deduplicar y clasificar. El cuerpo y las
+# cabeceras solo se piden para los mensajes que de verdad hay que ingerir.
+LIST_FIELDS = (
+    'id,receivedDateTime,lastModifiedDateTime,internetMessageId,subject,from,'
+    'conversationId,hasAttachments'
+)
+MESSAGE_FIELDS = (
+    'id,subject,from,body,receivedDateTime,lastModifiedDateTime,conversationId,'
+    'internetMessageId,internetMessageHeaders,hasAttachments'
+)
+
+
+class GraphThrottled(Exception):
+    """Graph ha pedido esperar (429/503/504). No es culpa del mensaje."""
+
+    def __init__(self, status, retry_after):
+        super().__init__(f'Graph HTTP {status}; reintentar en {retry_after}s')
+        self.status = status
+        self.retry_after = retry_after
+
+
+class GraphNotFound(Exception):
+    """El recurso ya no existe con ese id (borrado o movido de carpeta)."""
+
+
+def _user_path(mailbox):
+    return f'{GRAPH_BASE}/users/{quote(mailbox, safe="@")}'
+
+
+def _request(method, url, headers, timeout=30, **kwargs):
+    response = requests.request(method, url, headers=headers, timeout=timeout, **kwargs)
+    if response.status_code in (429, 503, 504):
+        try:
+            retry_after = int(response.headers.get('Retry-After') or 30)
+        except (TypeError, ValueError):
+            retry_after = 30
+        raise GraphThrottled(response.status_code, retry_after)
+    if response.status_code == 404:
+        raise GraphNotFound(url)
+    response.raise_for_status()
+    return response
+
+
+def graph_timestamp(value):
+    """Instante en el formato que espera $filter (UTC, al segundo, más inclusivo)."""
+    return value.astimezone(dt_timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def inbox_folder_id(mailbox, headers):
+    """Id de la carpeta Inbox *física* que hay detrás de una dirección (o alias)."""
+    response = _request('GET', f'{_user_path(mailbox)}/mailFolders/Inbox', headers,
+                        params={'$select': 'id'})
+    return response.json()['id']
+
+
+def list_window(mailbox, folder_id, since, until=None, headers=None, top=200, skip=0, fields=LIST_FIELDS):
+    """Una página de mensajes recibidos desde `since`, en orden ascendente.
+
+    El que llama pagina por *keyset* (repite con el último receivedDateTime) en
+    lugar de seguir el nextLink, que usa $skip: si se borra o mueve un mensaje
+    durante la lectura, un offset se salta otro y la marca de agua lo dejaría
+    atrás. `skip` solo se usa para desempatar una página entera con el mismo
+    segundo.
+    """
+    flt = f'receivedDateTime ge {graph_timestamp(since)}'
+    if until is not None:
+        flt += f' and receivedDateTime le {graph_timestamp(until)}'
+    params = {
+        '$filter': flt,
+        # La propiedad del $orderby tiene que estar también en el $filter;
+        # si no, Graph responde InefficientFilter.
+        '$orderby': 'receivedDateTime asc',
+        '$select': fields,
+        '$top': str(top),
+    }
+    if skip:
+        params['$skip'] = str(skip)
+    url = f'{_user_path(mailbox)}/mailFolders/{quote(folder_id, safe="")}/messages'
+    return _request('GET', url, headers, params=params).json().get('value', [])
+
+
+def get_message(mailbox, message_id, headers):
+    url = f'{_user_path(mailbox)}/messages/{quote(message_id, safe="")}'
+    return _request('GET', url, headers, params={'$select': MESSAGE_FIELDS}).json()
+
+
+def find_by_internet_message_id(mailbox, internet_message_id, headers):
+    """Busca un mensaje en todo el buzón por su Message-ID (sobrevive a moverlo)."""
+    if not internet_message_id:
+        return None
+    escaped = internet_message_id.replace("'", "''")
+    response = _request('GET', f'{_user_path(mailbox)}/messages', headers, params={
+        '$filter': f"internetMessageId eq '{escaped}'",
+        '$select': MESSAGE_FIELDS,
+        '$top': '1',
+    })
+    values = response.json().get('value', [])
+    return values[0] if values else None
+
+
+def fetch_attachments(mailbox, message_id, headers):
+    """Descarga adjuntos de archivo de Graph antes de procesar el mensaje.
+
+    Las imágenes inline suelen ser logotipos de firma y se omiten. Los tipos o
+    tamaños no admitidos tampoco bloquean la creación del ticket.
+    """
+    base = f'{_user_path(mailbox)}/messages/{quote(message_id, safe="")}/attachments'
+    response = _request('GET', base, headers, params={
+        '$select': 'id,name,contentType,size,isInline', '$top': '25',
+    })
+
+    max_files = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_FILES', 5)
+    max_bytes = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_BYTES', 15 * 1024 * 1024)
+    max_total = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES', 25 * 1024 * 1024)
+    allowed = getattr(settings, 'PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS', set())
+    accepted = []
+    total = 0
+    for item in response.json().get('value', []):
+        if item.get('isInline') or item.get('@odata.type') not in (
+            None, '#microsoft.graph.fileAttachment',
+        ):
+            continue
+        name = os.path.basename((item.get('name') or 'archivo').replace('\\', '/'))
+        extension = os.path.splitext(name)[1].lower().lstrip('.')
+        declared_size = int(item.get('size') or 0)
+        if (
+            len(accepted) >= max_files
+            or not extension
+            or extension not in allowed
+            or declared_size > max_bytes
+            or total + declared_size > max_total
+        ):
+            logger.warning(
+                'inbound attachment skipped by policy',
+                extra={'message_id': message_id, 'attachment_name': name, 'size': declared_size},
+            )
+            continue
+
+        content = _request(
+            'GET', f'{base}/{quote(item["id"], safe="")}/$value', headers, timeout=60,
+        ).content
+        if len(content) > max_bytes or total + len(content) > max_total:
+            logger.warning(
+                'inbound attachment skipped after download',
+                extra={'message_id': message_id, 'attachment_name': name, 'size': len(content)},
+            )
+            continue
+        accepted.append({
+            'name': name,
+            'content_type': item.get('contentType') or 'application/octet-stream',
+            'content': content,
+        })
+        total += len(content)
+    return accepted
+
+
+def mark_read(mailbox, message_id, headers):
+    """Cortesía para quien mire el buzón; nunca forma parte de la corrección."""
+    try:
+        _request('PATCH', f'{_user_path(mailbox)}/messages/{quote(message_id, safe="")}',
+                 headers, timeout=10, json={'isRead': True})
+    except Exception as exc:
+        logger.warning('inbound mark-read failed …%s: %s', message_id[-16:], exc)

@@ -112,7 +112,12 @@ class EmailIngestionService:
         return result
 
     @staticmethod
-    def _process_message(message, brand, attachments=None):
+    def _process_message(message, brand, attachments=None, suppress_confirmation=False):
+        """Ingiere un mensaje ya descargado. Idempotente por ``email_message_id``.
+
+        ``suppress_confirmation`` lo usa el backfill: un ticket recuperado días
+        después no debe enviar al cliente un «hemos recibido tu correo».
+        """
         msg_id = message["id"]
         conversation_id = message.get("conversationId") or ""
         subject = message.get("subject") or "(sin asunto)"
@@ -198,7 +203,9 @@ class EmailIngestionService:
                 "email_conversation_id": conversation_id or None,
                 "via_channel": "email",
                 "is_public": True,
-                "suppress_requester_email": EmailIngestionService.is_auto_generated(message),
+                "suppress_requester_email": (
+                    suppress_confirmation or EmailIngestionService.is_auto_generated(message)
+                ),
             },
         )
         comment = Comment.objects.filter(ticket=ticket, email_message_id=msg_id).first()

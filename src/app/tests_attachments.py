@@ -511,11 +511,11 @@ class AttachmentStorageTests(TestCase):
         PUBLIC_ATTACHMENT_MAX_BYTES=1024,
         PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES=2048,
     )
-    @patch("app.tasks.requests.get")
+    @patch("app.services.msgraph_mail.requests.request")
     def test_graph_fetch_ignores_inline_files(self, get):
-        from app.tasks import _fetch_m365_attachments
+        from app.services.msgraph_mail import fetch_attachments as _fetch_m365_attachments
 
-        listing = MagicMock()
+        listing = MagicMock(status_code=200)
         listing.json.return_value = {"value": [
             {
                 "@odata.type": "#microsoft.graph.fileAttachment",
@@ -528,7 +528,7 @@ class AttachmentStorageTests(TestCase):
                 "contentType": "text/plain", "isInline": False,
             },
         ]}
-        content = MagicMock(content=b"report")
+        content = MagicMock(content=b"report", status_code=200)
         get.side_effect = [listing, content]
 
         result = _fetch_m365_attachments(
@@ -537,4 +537,4 @@ class AttachmentStorageTests(TestCase):
 
         self.assertEqual(result[0]["content"], b"report")
         self.assertEqual(get.call_count, 2)
-        self.assertIn("file%2Fid/$value", get.call_args.args[0])
+        self.assertIn("file%2Fid/$value", get.call_args.args[1])
