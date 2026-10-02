@@ -10,8 +10,12 @@ from django.db import migrations, models
 
 
 def _limit_lock_wait(apps, schema_editor):
+    # Por un cursor normal y fuera de transacción (atomic=False abajo): en MySQL,
+    # schema_editor.execute() dentro del atomic de un RunPython lanza
+    # TransactionManagementError. Es la misma conexión que crea los índices.
     if schema_editor.connection.vendor == 'mysql':
-        schema_editor.execute('SET SESSION lock_wait_timeout = 10')
+        with schema_editor.connection.cursor() as cursor:
+            cursor.execute('SET SESSION lock_wait_timeout = 10')
 
 
 class Migration(migrations.Migration):
@@ -21,7 +25,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(_limit_lock_wait, migrations.RunPython.noop),
+        migrations.RunPython(_limit_lock_wait, migrations.RunPython.noop, atomic=False),
         migrations.AddIndex(
             model_name='inboundemaillog',
             index=models.Index(fields=['status', 'next_attempt_at'], name='app_inbound_status_next_idx'),
