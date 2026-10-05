@@ -255,6 +255,10 @@ class Comment(models.Model):
     is_public = models.BooleanField(default=True)
     email_message_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
 
+    @property
+    def is_inbound_email(self):
+        return self.via_channel == 'email' or bool(self.email_message_id)
+
     class Meta:
         indexes = [
             models.Index(fields=['ticket', 'created_at'], name='app_comment_ticket_created_idx'),

@@ -12,7 +12,7 @@ import re
 from django.conf import settings
 from django.db import transaction
 
-from app.models import Attachment, Brand, OutboundEmailLog
+from app.models import Attachment, Brand, Comment, OutboundEmailLog
 from app.services.attachments import AttachmentService
 from app.services.email_templates import ResponseTemplateService
 from app.services.metrics import record_metric
@@ -90,6 +90,12 @@ class OutboundEmailService:
         start_at = getattr(settings, "OUTBOUND_EMAIL_START_AT", None)
         if start_at and log.created_at < start_at:
             return "before_cutover"
+        if log.template_key == OutboundEmailService.TEMPLATE_AGENT_REPLY and log.dedup_key:
+            parts = log.dedup_key.split(':', 2)
+            if len(parts) == 3 and parts[0] == 'agent_reply' and parts[1].isdigit():
+                comment = Comment.objects.filter(pk=int(parts[1]), ticket_id=log.ticket_id).first()
+                if comment and comment.is_inbound_email:
+                    return "inbound_email"
         return (
             OutboundEmailService._delivery_block(log.brand, log.to_email)
             or OutboundEmailService._template_block(log.template_key)
@@ -138,6 +144,13 @@ class OutboundEmailService:
         La deduplicación usa el comentario: reintentar una petición o una entrega
         no puede generar dos correos, pero dos respuestas distintas sí.
         """
+        # El rol del remitente no convierte un correo recibido en una respuesta
+        # escrita desde TicketFlow. También protege las llamadas directas.
+        if comment.is_inbound_email:
+            brand, to_email = OutboundEmailService._recipient(ticket)
+            return OutboundEmailService._suppress(
+                ticket, brand, to_email, OutboundEmailService.TEMPLATE_AGENT_REPLY, "inbound_email",
+            )
         return OutboundEmailService._queue(
             ticket,
             OutboundEmailService.TEMPLATE_AGENT_REPLY,

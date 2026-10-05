@@ -564,6 +564,8 @@ class MailboxSweep:
             cursor = self.cursor
             since = max(cursor.deep_floor, (cursor.swept_until or cursor.deep_floor) - overlap)
             complete, max_received = self.discover(since)
+            if self.stats['not_registered']:
+                raise RuntimeError('Hay mensajes sin registrar; no se avanza el cursor del barrido')
             # Con el listado completo, todo lo recibido antes de empezar la
             # vuelta y ya visible está registrado: la marca avanza hasta ahí
             # aunque no haya llegado nada. Lo que aparezca después con fecha
@@ -609,6 +611,8 @@ class MailboxSweep:
         since = max(cursor.deep_floor, now - window)
         complete, _ = self.discover(since, gap_check=True, max_pages=100)
         self.stats['deep_sweeps'] += 1
+        if self.stats['not_registered']:
+            raise RuntimeError('Hay mensajes sin registrar en el barrido de seguridad')
         if not complete:
             return
         stamp = {'last_deep_hourly_at': now}
@@ -630,6 +634,7 @@ class MailboxSweep:
         oldest_minutes = int((now - oldest).total_seconds() // 60) if oldest else None
         stats = {
             'outcome': outcome, 'listed': self.stats['listed'], 'new': self.stats['new'],
+            'not_registered': self.stats['not_registered'],
             'known': self.stats['known'], 'skipped': self.stats['skipped'],
             'moved_duplicates': self.stats['duplicate'], 'pages': self.stats['pages'],
             'deep_sweeps': self.stats['deep_sweeps'], 'gaps': self.stats['gap'],
