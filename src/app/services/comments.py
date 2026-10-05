@@ -113,7 +113,7 @@ class CommentService:
 
         SLAService.record_first_response(ticket, actor, comment_is_public=final_is_public)
 
-        if send_requester_email and final_is_public and is_agent(actor):
+        if send_requester_email and final_is_public and is_agent(actor) and not comment.is_inbound_email:
             try:
                 from app.services.email_outbound import OutboundEmailService
 
