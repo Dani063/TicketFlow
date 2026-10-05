@@ -505,6 +505,18 @@ class SilentLossGuardTests(_SweepFixture):
             self.sweep()
         self.assertTrue(any('no se pudo registrar' in line for line in logs.output))
         self.assertTrue(OperationalMetric.objects.filter(name='email.inbound.not_registered').exists())
+        cursor = self.cursor()
+        self.assertEqual(cursor.last_result, 'sweep_error')
+        self.assertIsNone(cursor.last_sweep_ok_at)
+        self.assertIsNone(cursor.swept_until)
+        self.assertEqual(cursor.last_sweep_stats['not_registered'], 1)
+        self.assertIn('sin registrar', cursor.last_error)
+        # Al recuperar el INSERT, la misma ventana se reintenta y entra el correo.
+        self.clock.advance(minutes=1)
+        self.sweep()
+        cursor.refresh_from_db()
+        self.assertEqual(cursor.last_result, 'sweep_ok')
+        self.assertEqual(self.log(msg).status, InboundEmailLog.STATUS_PROCESSED)
 
 
 class SafetySweepTests(_SweepFixture):
