@@ -680,3 +680,30 @@ class InternalzTests(_SweepFixture):
             status = _inbound_status()
         self.assertTrue(status['ok'], status)
         self.assertEqual(status['mailboxes'][0]['pending'], 0)
+
+
+class CaseInsensitiveCollationTests(TestCase):
+    """En MySQL los ids de Graph se comparaban sin distinguir mayúsculas.
+
+    El 05/10/2026 un id nuevo (…8zOiAAA=) coincidía en BD con uno de dos días
+    antes (…8zOIAAA=) y el correo no entraba. SQLite sí distingue mayúsculas,
+    así que se simula la consulta de MySQL devolviendo el «gemelo».
+    """
+
+    class _CaseInsensitiveQuerySet:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def filter(self, **kwargs):
+            (field, value), = kwargs.items()
+            return [row for row in self.rows if getattr(row, field).lower() == value.lower()]
+
+    def test_a_twin_differing_only_in_case_is_not_a_match(self):
+        from types import SimpleNamespace
+
+        from app.services.email_ingestion import exact_match
+
+        twin = SimpleNamespace(email_message_id='AAMk-UCTdu17CAAfx8zOIAAA=')
+        rows = self._CaseInsensitiveQuerySet([twin])
+        self.assertIsNone(exact_match(rows, 'email_message_id', 'AAMk-UCTdu17CAAfx8zOiAAA='))
+        self.assertIs(exact_match(rows, 'email_message_id', 'AAMk-UCTdu17CAAfx8zOIAAA='), twin)

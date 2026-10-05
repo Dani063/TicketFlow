@@ -29,6 +29,24 @@ TICKET_TAG_RE = re.compile(r"\[ticket\s*#\d+\]", re.IGNORECASE)
 BODY_RE = re.compile(r"<body[^>]*>(.*?)</body>", re.DOTALL | re.IGNORECASE)
 
 
+def exact_match(queryset, field, value):
+    """Primer objeto cuyo ``field`` es exactamente ``value``.
+
+    Los ids de Graph distinguen mayúsculas, pero las columnas que los guardan en
+    MySQL usan una colación que no: un id nuevo coincidía en la consulta con otro
+    antiguo que solo difería en una letra (son base64 consecutivos, así que pasa
+    a menudo) y el correo se daba por duplicado sin dejar rastro. Así se perdió
+    correo en PRO el 01/10 y el 02/10/2026. La consulta acota; la igualdad se
+    comprueba aquí.
+    """
+    if not value:
+        return None
+    for obj in queryset.filter(**{field: value}):
+        if getattr(obj, field) == value:
+            return obj
+    return None
+
+
 class EmailIngestionService:
     @staticmethod
     def is_auto_generated(message):
@@ -147,10 +165,8 @@ class EmailIngestionService:
             return "skip_invalid_sender", None
 
         requester = EmailIngestionService.get_or_create_requester(sender_email, sender_name)
-        existing_comment = (
-            Comment.objects.select_related("ticket")
-            .filter(email_message_id=msg_id)
-            .first()
+        existing_comment = exact_match(
+            Comment.objects.select_related("ticket"), "email_message_id", msg_id,
         )
         if existing_comment:
             EmailIngestionService._store_attachments(
@@ -158,11 +174,11 @@ class EmailIngestionService:
             )
             return "skip_dup", existing_comment.ticket
 
-        existing_ticket = Ticket.objects.filter(email_message_id=msg_id).first()
+        existing_ticket = exact_match(Ticket.objects.all(), "email_message_id", msg_id)
         if existing_ticket:
-            comment = Comment.objects.filter(
-                ticket=existing_ticket, email_message_id=msg_id,
-            ).first()
+            comment = exact_match(
+                Comment.objects.filter(ticket=existing_ticket), "email_message_id", msg_id,
+            )
             if attachments and comment is None:
                 comment = EmailIngestionService._create_attachment_only_comment(
                     existing_ticket, requester, msg_id,
@@ -208,7 +224,7 @@ class EmailIngestionService:
                 ),
             },
         )
-        comment = Comment.objects.filter(ticket=ticket, email_message_id=msg_id).first()
+        comment = exact_match(Comment.objects.filter(ticket=ticket), "email_message_id", msg_id)
         if attachments and comment is None:
             comment = EmailIngestionService._create_attachment_only_comment(
                 ticket, requester, msg_id,
@@ -285,7 +301,9 @@ class EmailIngestionService:
     @staticmethod
     def find_ticket_for_message(subject, conversation_id, brand, requester=None):
         if conversation_id:
-            ticket = Ticket.objects.filter(email_conversation_id=conversation_id, brand=brand).first()
+            ticket = exact_match(
+                Ticket.objects.filter(brand=brand), "email_conversation_id", conversation_id,
+            )
             if ticket:
                 return ticket
 
