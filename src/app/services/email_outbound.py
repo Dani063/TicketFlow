@@ -10,6 +10,8 @@ import logging
 import re
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import transaction
 
 from app.models import Attachment, Brand, Comment, OutboundEmailLog
@@ -201,6 +203,10 @@ class OutboundEmailService:
             "body_text": rendered["body_text"],
             "language": language,
         }
+        if template_key == OutboundEmailService.TEMPLATE_AGENT_REPLY:
+            payload["cc_emails"] = OutboundEmailService._valid_cc_emails(
+                ticket.ccs.order_by("id").values_list("email", flat=True), to_email,
+            )
         payload.update(payload_extra or {})
         log, created = OutboundEmailLog.objects.get_or_create(
             dedup_key=dedup_key,
@@ -282,6 +288,33 @@ class OutboundEmailService:
         return result
 
     @staticmethod
+    def _valid_cc_emails(emails, to_email):
+        """Deduplica copias y aplica las protecciones anti-bucle también al entregar."""
+        excluded = OutboundEmailService._own_mailboxes() | {to_email.strip().lower()}
+        result = []
+        for value in emails:
+            if not isinstance(value, str):
+                continue
+            email = value.strip().lower()
+            try:
+                validate_email(email)
+            except ValidationError:
+                continue
+            if email in excluded or NO_REPLY_RE.search(email):
+                continue
+            excluded.add(email)
+            result.append(email)
+        return result
+
+    @staticmethod
+    def _cc_emails(log):
+        if log.template_key != OutboundEmailService.TEMPLATE_AGENT_REPLY:
+            return []
+        return OutboundEmailService._valid_cc_emails(
+            (log.payload or {}).get("cc_emails") or [], log.to_email,
+        )
+
+    @staticmethod
     def _send_via_ses(log):
         # SESv2 con boto3: autentica con el rol IAM del pod (como SQS/SSM),
         # sin credenciales SMTP que gestionar/rotar; devuelve MessageId y
@@ -308,6 +341,9 @@ class OutboundEmailService:
                 }
             },
         }
+        cc_emails = OutboundEmailService._cc_emails(log)
+        if cc_emails:
+            kwargs["Destination"]["CcAddresses"] = cc_emails
         attachments = OutboundEmailService._attachments(log)
         if attachments:
             kwargs["Content"]["Simple"]["Attachments"] = [
@@ -347,6 +383,9 @@ class OutboundEmailService:
                 {"name": "X-Auto-Response-Suppress", "value": "All"},
             ],
         }
+        cc_emails = OutboundEmailService._cc_emails(log)
+        if cc_emails:
+            message["ccRecipients"] = [{"emailAddress": {"address": email}} for email in cc_emails]
         attachments = OutboundEmailService._attachments(log)
         simple_limit = getattr(settings, "GRAPH_SIMPLE_ATTACHMENT_MAX_BYTES", 3 * 1024 * 1024)
         if attachments and sum(len(item["content"]) for item in attachments) > simple_limit:

@@ -26,7 +26,7 @@ LIST_FIELDS = (
 )
 MESSAGE_FIELDS = (
     'id,subject,from,body,receivedDateTime,lastModifiedDateTime,conversationId,'
-    'internetMessageId,internetMessageHeaders,hasAttachments'
+    'internetMessageId,internetMessageHeaders,hasAttachments,ccRecipients'
 )
 
 

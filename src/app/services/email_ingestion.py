@@ -191,6 +191,7 @@ class EmailIngestionService:
         ticket = EmailIngestionService.find_ticket_for_message(subject, conversation_id, brand, requester=requester)
 
         if ticket:
+            ticket.ccs.add(*EmailIngestionService.cc_users(message, ticket.requester))
             comment = EmailIngestionService._add_email_comment(
                 ticket=ticket,
                 actor=requester,
@@ -213,6 +214,7 @@ class EmailIngestionService:
                 "status": "open",
                 "priority": None,
                 "requester_id": requester.id,
+                "ccs_ids": [user.id for user in EmailIngestionService.cc_users(message, requester)],
                 "brand": brand,
                 "channel": "email",
                 "email_message_id": msg_id,
@@ -231,6 +233,38 @@ class EmailIngestionService:
             )
         EmailIngestionService._store_attachments(ticket, comment, requester, attachments)
         return "ticket_created", ticket
+
+    @staticmethod
+    def cc_users(message, requester):
+        """Recupera copias válidas sin incluir al solicitante ni buzones propios."""
+        from app.models import Brand
+
+        excluded = {
+            email.strip().lower()
+            for email in Brand.objects.exclude(support_email="").values_list("support_email", flat=True)
+        }
+        if requester:
+            excluded.add(requester.email.strip().lower())
+        users = []
+        for recipient in message.get("ccRecipients") or []:
+            if not isinstance(recipient, dict):
+                continue
+            address = recipient.get("emailAddress")
+            if not isinstance(address, dict) or not isinstance(address.get("address"), str):
+                continue
+            email = address["address"].strip().lower()
+            try:
+                User._meta.get_field("email").clean(email, None)
+            except ValidationError:
+                continue
+            if email in excluded:
+                continue
+            excluded.add(email)
+            name = address.get("name")
+            name = name.strip() if isinstance(name, str) else ""
+            name = name[:User._meta.get_field("name").max_length]
+            users.append(EmailIngestionService.get_or_create_requester(email, name))
+        return users
 
     @staticmethod
     def _create_attachment_only_comment(ticket, actor, email_message_id):
