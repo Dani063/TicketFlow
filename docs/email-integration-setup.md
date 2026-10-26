@@ -234,3 +234,23 @@ Implementadas como tareas periódicas de Celery Beat:
 | Triggers restantes (resuelto, asignación) | ⏳ Pendiente — el sistema de plantillas ya los soporta (añadir claves nuevas) |
 | Automations (Celery Beat: auto-cierre, CSAT, alerta 24h) | ⏳ Pendiente |
 | Horario laboral en BD | ⏳ Pendiente |
+
+
+## Destinatarios en copia (CC)
+
+La ingesta M365 solicita `ccRecipients` y añade los usuarios correspondientes a
+las copias del ticket, tanto al crearlo como al recibir respuestas posteriores.
+Las copias nuevas se acumulan sin borrar las anteriores. Se omiten direcciones
+inválidas, duplicados, el solicitante y los buzones de soporte de las marcas.
+Los usuarios nuevos se crean sin contraseña utilizable, igual que el remitente.
+
+Las respuestas públicas de agentes conservan en el log saliente una instantánea
+de las direcciones CC y las entregan como copias mediante Graph o SES. Se aplican
+las protecciones contra bucles también a esas direcciones. Las notas privadas,
+confirmaciones de creación y encuestas no se envían a los CC.
+
+Los cursores delta existentes conservan la selección de campos original. Cuando
+un mensaje no incluye `ccRecipients`, se consulta ese campo antes de procesarlo;
+un fallo mantiene el reintento del mensaje. No hace falta reiniciar los cursores.
+Esta corrección no recupera las copias de mensajes ya procesados ni modifica
+correos que estuvieran encolados antes del cambio.

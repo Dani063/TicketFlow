@@ -34,6 +34,7 @@ class _Response:
 def graph_message(msg_id, **extra):
     payload = {
         'id': msg_id,
+        'ccRecipients': [],
         'conversationId': f'conv-{msg_id}',
         'subject': f'Asunto {msg_id}',
         'from': {'emailAddress': {'address': 'cliente@example.com', 'name': 'Cliente'}},

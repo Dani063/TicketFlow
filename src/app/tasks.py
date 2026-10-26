@@ -169,7 +169,7 @@ def _initial_delta_url(target):
     return (
         f'{GRAPH_BASE}/users/{quote(target["mailbox"], safe="@")}'
         f'/mailFolders/{quote(target["folder_id"], safe="")}/messages/delta'
-        '?$select=id,subject,from,body,receivedDateTime,conversationId,internetMessageHeaders,hasAttachments'
+        '?$select=id,subject,from,body,receivedDateTime,conversationId,internetMessageHeaders,hasAttachments,ccRecipients'
         f'&$filter=receivedDateTime ge {since.strftime("%Y-%m-%dT%H:%M:%SZ")}'
     )
 
@@ -222,6 +222,17 @@ def _ingest_message(msg, brand, mailbox, headers, mark_read):
             # process_message guarda el rechazo antes de permitir continuar.
             # No descargamos adjuntos de un correo que no puede crear un usuario.
             invalid_sender = True
+        # Los cursores previos conservan el $select antiguo dentro del token.
+        # Completamos el campo sin reiniciar el cursor ni releer el histórico.
+        if 'ccRecipients' not in msg and not invalid_sender:
+            response = requests.get(
+                f'{GRAPH_BASE}/users/{quote(mailbox, safe="@")}/messages/{quote(msg_id, safe="")}'
+                '?$select=ccRecipients',
+                headers=headers,
+                timeout=30,
+            )
+            response.raise_for_status()
+            msg['ccRecipients'] = response.json()['ccRecipients']
         attachments = (
             _fetch_m365_attachments(mailbox, msg_id, headers)
             if msg.get('hasAttachments') and not invalid_sender
