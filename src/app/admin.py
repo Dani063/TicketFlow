@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import Brand, Comment, Group, HelpArticle, HelpArticleAsset, HelpArticleRevision, HelpCategory, HelpCenter, HelpSection, MailboxSyncCursor, OutboundEmailLog, ProductLine, ResponseTemplate, Role, SatisfactionRating, SatisfactionReason, SLAPolicy, Ticket, TicketAIAnalysis, User
+from .models import Brand, Comment, Group, HelpArticle, HelpArticleAsset, HelpArticleRevision, HelpCategory, HelpCenter, HelpSection, InboundEmailLog, MailboxSyncCursor, OutboundEmailLog, ProductLine, ResponseTemplate, Role, SatisfactionRating, SatisfactionReason, SLAPolicy, Ticket, TicketAIAnalysis, User
 
 # ====== Ticket ======
 
@@ -120,18 +120,66 @@ class OutboundEmailLogAdmin(admin.ModelAdmin):
 
 @admin.register(MailboxSyncCursor)
 class MailboxSyncCursorAdmin(admin.ModelAdmin):
-    """Solo lectura salvo el borrado, que es la palanca de operacion: borrar una
-    fila reinicia el cursor y la siguiente vuelta vuelve a partir de la ventana
-    de INBOUND_DELTA_LOOKBACK_MINUTES."""
+    """Estado del barrido de cada buzón. Todo es de solo lectura salvo
+    ``ingest_mode``, que es el interruptor de operación: ``paused`` detiene la
+    recogida en este entorno sin reiniciar pods, y al volver a ``sweep`` se
+    retoma desde la marca de agua (el barrido de seguridad cubre 48 h)."""
 
-    list_display = ("environment", "mailbox", "link_kind", "last_result",
-                    "last_message_count", "last_synced_at", "updated_at")
-    list_filter = ("environment", "last_result")
+    list_display = ("environment", "mailbox", "ingest_mode", "last_result", "last_sweep_ok_at",
+                    "swept_until", "lease_until", "updated_at")
+    list_filter = ("environment", "ingest_mode", "last_result")
     search_fields = ("mailbox", "environment")
-    readonly_fields = [f.name for f in MailboxSyncCursor._meta.fields]
+    readonly_fields = [f.name for f in MailboxSyncCursor._meta.fields if f.name != "ingest_mode"]
 
     def has_add_permission(self, request):
         return False
+
+
+@admin.register(InboundEmailLog)
+class InboundEmailLogAdmin(admin.ModelAdmin):
+    """Registro de cada correo descubierto en un buzón y de cómo terminó.
+
+    Es la fuente de verdad de la recogida: si un correo está en el buzón y no
+    aquí, es un hueco. Solo lectura; las dos acciones son las palancas para
+    mensajes en cuarentena o mal descartados.
+    """
+
+    list_display = ("id", "graph_received_at", "status", "result", "source", "automated_rule",
+                    "attempts", "ticket", "short_subject")
+    list_filter = ("status", "source", "automated_rule", "brand")
+    search_fields = ("message_id", "internet_message_id", "conversation_id")
+    date_hierarchy = "received_at"
+    readonly_fields = [f.name for f in InboundEmailLog._meta.fields]
+    actions = ("reprocess", "discard")
+
+    @admin.display(description="Asunto")
+    def short_subject(self, obj):
+        return ((obj.payload or {}).get("subject") or "")[:80]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @admin.action(description="Reprocesar (vuelve a pendiente, con los intentos a cero)")
+    def reprocess(self, request, queryset):
+        updated = queryset.exclude(folder_key__isnull=True).update(
+            status=InboundEmailLog.STATUS_PENDING, attempts=0, next_attempt_at=None,
+            claim_token=None, error=None,
+        )
+        self.message_user(request, f"{updated} mensaje(s) pendientes de reprocesar en la próxima vuelta.")
+
+    @admin.action(description="Descartar (no se ingerirá)")
+    def discard(self, request, queryset):
+        from django.utils import timezone
+
+        updated = queryset.exclude(status__in=(InboundEmailLog.STATUS_PROCESSED,
+                                               InboundEmailLog.STATUS_DUPLICATE)).update(
+            status=InboundEmailLog.STATUS_SKIPPED, result="skip_manual",
+            processed_at=timezone.now(), claim_token=None,
+        )
+        self.message_user(request, f"{updated} mensaje(s) descartados.")
 
 
 @admin.register(TicketAIAnalysis)

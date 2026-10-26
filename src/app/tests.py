@@ -1014,6 +1014,34 @@ class OutboundEmailTests(_BaseFixture):
         self.assertEqual(log.status, OutboundEmailLog.STATUS_SUPPRESSED)
         self.assertEqual(log.result, "disabled")
 
+    def test_cutover_suppresses_old_queued_email_but_allows_new_email(self):
+        from app.services.email_outbound import OutboundEmailService
+        from app.tasks import send_outbound_email
+
+        cutover = timezone.now() - timedelta(hours=1)
+        old = OutboundEmailLog.objects.create(
+            brand=self.brand_a, template_key="agent_reply", to_email=self.customer.email,
+            status=OutboundEmailLog.STATUS_QUEUED,
+        )
+        OutboundEmailLog.objects.filter(pk=old.pk).update(created_at=cutover - timedelta(seconds=1))
+        recent = OutboundEmailLog.objects.create(
+            brand=self.brand_a, template_key="agent_reply", to_email=self.customer.email,
+            status=OutboundEmailLog.STATUS_QUEUED,
+        )
+
+        with override_settings(OUTBOUND_EMAIL_START_AT=cutover), patch.object(
+            OutboundEmailService, "deliver", return_value=None,
+        ) as deliver:
+            self.assertEqual(send_outbound_email(old.pk), "suppressed")
+            deliver.assert_not_called()
+            self.assertEqual(send_outbound_email(recent.pk), "sent")
+            deliver.assert_called_once()
+
+        old.refresh_from_db()
+        recent.refresh_from_db()
+        self.assertEqual(old.result, "before_cutover")
+        self.assertEqual(recent.status, OutboundEmailLog.STATUS_SENT)
+
     def test_own_mailbox_and_noreply_recipients_are_suppressed(self):
         own = User.objects.create_user("helpdesk@ecomfax.example", "Other Brand Mailbox", "secret")
         ticket = self._create_ticket_via_service(requester_id=own.id)
@@ -1071,6 +1099,82 @@ class OutboundEmailTests(_BaseFixture):
         self.assertIn("La incidencia ha quedado resuelta.", log.payload["body_text"])
         self.assertIn(self.agent.name, log.payload["body_html"])
         self.assertIn(str(comment.id), log.dedup_key)
+
+    def test_inbound_email_from_staff_never_queues_an_agent_reply(self):
+        for sender in (self.agent, self.admin):
+            with self.subTest(role=sender.role.role_name):
+                message = {
+                    "id": f"staff-inbound-{sender.id}",
+                    "conversationId": f"staff-conversation-{sender.id}",
+                    "subject": "Ayuda por correo",
+                    "from": {"emailAddress": {"address": sender.email, "name": sender.name}},
+                    "body": {"contentType": "html", "content": "<p>Necesito ayuda.</p>"},
+                }
+                self.assertEqual(
+                    EmailIngestionService.process_message(message, self.brand_a), "ticket_created"
+                )
+                ticket = Ticket.objects.get(email_message_id=message["id"])
+                self.assertEqual(ticket.requester_id, sender.id)
+                self.assertFalse(
+                    OutboundEmailLog.objects.filter(ticket=ticket, template_key="agent_reply").exists()
+                )
+                self.assertEqual(
+                    OutboundEmailLog.objects.get(ticket=ticket).template_key, "ticket_created"
+                )
+
+                reply = {
+                    **message,
+                    "id": f"staff-reply-{sender.id}",
+                    "body": {"contentType": "html", "content": "<p>Gracias, añado información.</p>"},
+                }
+                self.assertEqual(
+                    EmailIngestionService.process_message(reply, self.brand_a), "comment_added"
+                )
+                self.assertTrue(Comment.objects.filter(ticket=ticket, email_message_id=reply["id"]).exists())
+                self.assertFalse(
+                    OutboundEmailLog.objects.filter(ticket=ticket, template_key="agent_reply").exists()
+                )
+
+    def test_imported_staff_comment_never_queues_an_agent_reply(self):
+        from app.services.comments import CommentService
+
+        for origin in ({"via_channel": "email"}, {"email_message_id": "legacy-inbound-id"}):
+            with self.subTest(origin=origin):
+                ticket = self.make_ticket(brand=self.brand_a)
+                comment, _ = CommentService.add_comment(ticket, self.admin, "Correo recibido", **origin)
+                self.assertEqual(comment.content, "Correo recibido")
+                self.assertFalse(
+                    OutboundEmailLog.objects.filter(ticket=ticket, template_key="agent_reply").exists()
+                )
+
+    def test_outbound_service_blocks_direct_inbound_agent_reply(self):
+        from app.services.email_outbound import OutboundEmailService
+
+        for origin in ({"via_channel": "email"}, {"email_message_id": "legacy-inbound-id"}):
+            with self.subTest(origin=origin):
+                ticket = self.make_ticket(brand=self.brand_a)
+                comment = Comment.objects.create(ticket=ticket, user=self.admin, content="Gracias", **origin)
+                log = OutboundEmailService.queue_agent_reply(ticket, comment)
+                self.assertEqual(log.status, OutboundEmailLog.STATUS_SUPPRESSED)
+                self.assertEqual(log.result, "inbound_email")
+
+    def test_previously_queued_inbound_agent_reply_is_suppressed_at_delivery(self):
+        from app.tasks import send_outbound_email
+        from app.services.email_outbound import OutboundEmailService
+
+        ticket = self.make_ticket(brand=self.brand_a)
+        comment = Comment.objects.create(
+            ticket=ticket, user=self.admin, content="Correo recibido", via_channel="email",
+        )
+        log = OutboundEmailLog.objects.create(
+            ticket=ticket, brand=self.brand_a, template_key="agent_reply",
+            to_email=self.customer.email, dedup_key=f"agent_reply:{comment.id}:{self.customer.email}",
+        )
+        with patch.object(OutboundEmailService, "deliver", return_value=None) as deliver:
+            self.assertEqual(send_outbound_email(log.pk), "suppressed")
+            deliver.assert_not_called()
+        log.refresh_from_db()
+        self.assertEqual(log.result, "inbound_email")
 
     def test_private_notes_and_customer_comments_never_email_the_requester(self):
         from app.services.comments import CommentService
@@ -1932,6 +2036,28 @@ class SatisfactionSurveyTests(_BaseFixture):
         self.assertIsNone(legacy.resolved_at)
         self.assertEqual(SatisfactionService.offer_pending_surveys(), 0)
         self.assertFalse(SatisfactionRating.objects.exists())
+
+    def test_cutover_surveys_only_new_terminal_transitions(self):
+        now = timezone.now()
+        cutover = now - timedelta(hours=36)
+        old_resolved = self._resolved_ticket(hours_ago=48)
+        old_closed = self._resolved_ticket(hours_ago=48)
+        Ticket.objects.filter(pk=old_closed.pk).update(
+            status="closed", closed_at=now - timedelta(hours=40),
+        )
+        new_resolved = self._resolved_ticket(hours_ago=30)
+        new_closed = self._resolved_ticket(hours_ago=48)
+        Ticket.objects.filter(pk=new_closed.pk).update(
+            status="closed", closed_at=now - timedelta(hours=30),
+        )
+
+        with override_settings(OUTBOUND_EMAIL_START_AT=cutover):
+            self.assertEqual(SatisfactionService.offer_pending_surveys(), 2)
+
+        offered_ids = set(SatisfactionRating.objects.values_list("ticket_id", flat=True))
+        self.assertEqual(offered_ids, {new_resolved.pk, new_closed.pk})
+        self.assertNotIn(old_resolved.pk, offered_ids)
+        self.assertNotIn(old_closed.pk, offered_ids)
 
     def test_merged_and_deleted_tickets_are_never_surveyed(self):
         target = self.make_ticket()

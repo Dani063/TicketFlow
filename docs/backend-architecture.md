@@ -223,42 +223,62 @@ que importa el SDK y mapea errores a `AIRetryableError`/`AIPermanentError`).
 - Histórico completo en `TicketAIAnalysis` (confianza por campo, razonamiento, versión de
   prompt/modelo, tokens, latencia) — base del feedback loop del Q3.
 
-### Cursor de sincronización de buzones — `MailboxSyncCursor`
+### Recogida de correo: barrido por ventana — `mailbox_sweep.py`
 
-El puntero de «qué me queda por leer» vive en la BBDD de **cada entorno**, no en el
-buzón. Antes era el flag `isRead` de Exchange, que es estado compartido: con DEV y
-STA leyendo el mismo buzón físico, el primero que pasaba marcaba el mensaje como
-leído y el otro ya no lo veía (no cumplía `$filter=isRead eq false`). El correo se
-perdía para el entorno perdedor sin dejar rastro.
+`app.tasks.sweep_m365_mailboxes` (beat, cada 60 s) llama a
+`app.services.mailbox_sweep.run_sweep`. Sustituye al *delta query* de Graph, que
+perdió correo en silencio del 29/09 al 02/10/2026: su estado vivía en Graph y no
+sobrevivía a vueltas concurrentes ni a un pod que moría entre pedir un enlace y
+guardarlo. Ahora **no hay estado en Graph**: la verdad de qué se ha recogido es
+`InboundEmailLog`, en la BBDD de cada entorno.
 
-`poll_m365_mailboxes` usa ahora **delta query** de Graph
-(`/users/{buzón}/mailFolders/{id}/messages/delta`). El `@odata.deltaLink` es un token
-de estado opaco por consumidor: cada entorno guarda el suyo en `MailboxSyncCursor` y
-avanza su propia secuencia sobre la misma carpeta, sin mutar nada.
+Cada vuelta, por buzón físico:
+
+1. **Lease** en la fila de `MailboxSyncCursor` (`lease_owner`, `lease_until`), con un
+   `UPDATE` condicional que se renueva en cada página y cada mensaje. Una sola vuelta
+   por buzón a la vez aunque haya varios workers. No se usa `GET_LOCK`: va ligado a la
+   sesión MySQL y se pierde o se queda colgado en silencio si cae la conexión.
+2. **Descubrir.** Lista la carpeta con `receivedDateTime ge (swept_until - solape)`,
+   ordenado ascendente, paginando por *keyset* (no por `nextLink`/`$skip`, que se salta
+   mensajes si otro se borra durante la lectura). Solo metadatos. Todo id desconocido
+   se registra como `InboundEmailLog(status=pending)` **antes** de descargar nada.
+3. **Barrido de seguridad**: 48 h cada hora y 14 días cada día, sin bajar de
+   `deep_floor`. Lo que encuentre sin registrar se ingiere y avisa: `late_arrival`
+   (WARNING, p. ej. movido desde Junk) o `gap` (ERROR, no debería pasar).
+4. **Procesar** (presupuesto de 40 s): reclama de forma atómica el siguiente
+   `pending` (primero el correo en vivo, luego el backfill), descarga cuerpo y
+   adjuntos con `GET /messages/{id}` y lo pasa a `EmailIngestionService._process_message`.
+   Un fallo deja la fila en `failed` con espera exponencial y **no frena al resto**.
+   Tras `INBOUND_SWEEP_MAX_ATTEMPTS` (8) pasa a `quarantined`, con ERROR.
+5. **Resumen** `inbound_sweep [buzón]: vuelta …` y estado en `last_sweep_stats`.
 
 Reglas al tocar esta zona:
 
 - **`ENVIRONMENT_NAME` es el espacio de nombres del cursor y dos entornos no pueden
-  compartirlo.** Por defecto se deriva de `AWS_SSM_PREFIX` (`/Recordia/Staging/…` →
-  `Staging`), que ya difiere entre DEV y STA.
-- La fila se identifica por la **carpeta física**, no por la dirección: las cuatro
-  direcciones de soporte son alias del mismo buzón y resuelven al mismo `folder_id`.
-  `_mailbox_targets` las agrupa para consultar la carpeta una sola vez — sin eso,
-  cada marca ingeriría el mismo mensaje y saldrían tantos tickets como marcas. Lo
-  tapaba `isRead`; ahora lo sostiene la agrupación.
-- **El primer delta se acota por fecha** (`INBOUND_DELTA_LOOKBACK_MINUTES`). Sin cota,
-  Graph devuelve la carpeta entera y se ingiere todo el histórico del buzón.
-- Si una vuelta falla, **el cursor no avanza**: se reintenta desde el último enlace
-  bueno. La reentrega es inocua porque `InboundEmailLog` con `unique(brand, message_id)`
-  ya la absorbe (contrato at-least-once, como SQS).
-- Marcar como leído (`INBOUND_MARK_READ_ENABLED`) ya **no es el cursor**, solo cortesía
-  para quien mire el buzón. Debe quedar encendido en un único entorno.
-- Borrar la fila del cursor en el admin reinicia la sincronización: la siguiente
-  vuelta arranca de nuevo desde la ventana de *lookback*.
+  compartirlo.** Se deriva de `AWS_SSM_PREFIX` (`/Recordia/Staging/…` -> `Staging`).
+- La fila se identifica por la **carpeta física** (las direcciones de soporte son alias
+  del mismo buzón) y la **marca queda fijada en el cursor**: no depende de qué alias
+  respondió en cada vuelta.
+- Deduplicación: `unique(folder_key, message_key)`, donde `message_key` es el sha256 del
+  id de Graph. No se usa `message_id` porque su colación no distingue mayúsculas y los
+  ids de Graph sí. Además, `internet_message_key` (sha256 del Message-ID) evita
+  duplicar un mensaje que cambia de id al moverlo de carpeta.
+- **Nada de lo anterior a `deep_floor` entra solo**: el cursor arranca una hora atrás
+  (`INBOUND_SWEEP_INITIAL_LOOKBACK_MINUTES`) y lo previo se recupera con
+  `python main.py reingest_mailbox --since ... [--dry-run]`, que descarta el correo
+  automático (`app/services/inbound_classifier.py`) y no envía confirmaciones.
+- `MailboxSyncCursor.ingest_mode` es el interruptor de operación (admin): `paused`
+  detiene la recogida sin reiniciar pods; al volver a `sweep` retoma desde la marca de
+  agua. Las filas que existían al migrar quedan en `paused` y se activan a mano.
+- Las columnas nuevas son nulas o tienen `db_default`: durante un rollout conviven pods
+  con el código anterior que insertan sin conocerlas.
+- Marcar como leído (`INBOUND_MARK_READ_ENABLED`, `false` por defecto) es solo cortesía.
+- Salud: `internalz` -> `checks.inbound` por buzón (antigüedad de la última vuelta buena,
+  pendientes, fallidos, cuarentena, pendiente más antiguo).
 
 ### `EmailIngestionService` — `email_ingestion.py`
 
-Convierte un mensaje de Graph API en ticket/comentario. Llamado por `tasks._process_message`.
+Convierte un mensaje de Graph API en ticket/comentario. Lo llama el barrido (`mailbox_sweep.MailboxSweep.process_row`).
 
 `process_message(message, brand)` envuelve el procesado con auditoría en `InboundEmailLog`
 (estado received→processed/duplicate/failed). El núcleo `_process_message`:
@@ -422,7 +442,7 @@ Piezas que conviene conocer antes de tocar nada:
 
 | Tarea | Frecuencia | Servicio |
 |---|---|---|
-| `poll_m365_mailboxes` | 120 s | `EmailIngestionService` (cursor por entorno en `MailboxSyncCursor`) |
+| `sweep_m365_mailboxes` | 60 s | Barrido por ventana de los buzones M365 (`mailbox_sweep.run_sweep`) |
 | `auto_assign_unassigned_tickets` | 300 s | `AssignmentService.auto_assign_unassigned` |
 | `mark_sla_breaches` | 300 s | `SLAService.mark_breaches` |
 | `notify_sla_at_risk` | 300 s | `SLAService.notify_at_risk` (aviso 60 min antes del vencimiento) |

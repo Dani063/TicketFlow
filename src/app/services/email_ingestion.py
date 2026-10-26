@@ -4,8 +4,9 @@ import re
 from collections import Counter
 from datetime import timedelta
 
-from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db import transaction
 from django.utils import timezone
 from django.utils.html import strip_tags
@@ -28,60 +29,25 @@ TICKET_TAG_RE = re.compile(r"\[ticket\s*#\d+\]", re.IGNORECASE)
 BODY_RE = re.compile(r"<body[^>]*>(.*?)</body>", re.DOTALL | re.IGNORECASE)
 
 
-class InvalidEmailSender(ValueError):
-    """Remitente no procesable: se conserva el mensaje sin bloquear el cursor."""
+def exact_match(queryset, field, value):
+    """Primer objeto cuyo ``field`` es exactamente ``value``.
 
-    def __init__(self, code, message):
-        self.code = code
-        super().__init__(f"{code}: {message}")
+    Los ids de Graph distinguen mayúsculas, pero las columnas que los guardan en
+    MySQL usan una colación que no: un id nuevo coincidía en la consulta con otro
+    antiguo que solo difería en una letra (son base64 consecutivos, así que pasa
+    a menudo) y el correo se daba por duplicado sin dejar rastro. Así se perdió
+    correo en PRO el 01/10 y el 02/10/2026. La consulta acota; la igualdad se
+    comprueba aquí.
+    """
+    if not value:
+        return None
+    for obj in queryset.filter(**{field: value}):
+        if getattr(obj, field) == value:
+            return obj
+    return None
 
 
 class EmailIngestionService:
-    REJECTED_SENDER_RESULT = "reject_invalid_sender"
-
-    @staticmethod
-    def validate_sender(email, name):
-        """Valida antes de escribir; los errores no incluyen datos del remitente."""
-        if not isinstance(email, str):
-            raise InvalidEmailSender("sender_email_invalid", "El correo del remitente no es texto.")
-        email = email.strip().lower()
-        email_field = User._meta.get_field("email")
-        if len(email) > email_field.max_length:
-            raise InvalidEmailSender(
-                "sender_email_too_long",
-                f"El correo del remitente tiene {len(email)} caracteres; el máximo es {email_field.max_length}.",
-            )
-        try:
-            email_field.clean(email, None)
-        except ValidationError:
-            raise InvalidEmailSender("sender_email_invalid", "El correo del remitente no tiene un formato válido.") from None
-
-        if name is None:
-            name = ""
-        if not isinstance(name, str):
-            raise InvalidEmailSender("sender_name_invalid", "El nombre del remitente no es texto.")
-        name = name.strip() or email.split("@")[0]
-        name_limit = User._meta.get_field("name").max_length
-        if len(name) > name_limit:
-            raise InvalidEmailSender(
-                "sender_name_too_long",
-                f"El nombre del remitente tiene {len(name)} caracteres; el máximo es {name_limit}.",
-            )
-        return email, name
-
-    @staticmethod
-    def message_sender(message):
-        sender = message.get("from") or {}
-        if not isinstance(sender, dict):
-            raise InvalidEmailSender("sender_email_invalid", "El remitente no tiene un formato válido.")
-        sender = sender.get("emailAddress") or {}
-        if not isinstance(sender, dict):
-            raise InvalidEmailSender("sender_email_invalid", "El remitente no tiene un formato válido.")
-        email = sender.get("address")
-        if email is None or (isinstance(email, str) and not email.strip()):
-            return "", ""  # Se mantiene el tratamiento previo de mensajes sin remitente.
-        return EmailIngestionService.validate_sender(email, sender.get("name"))
-
     @staticmethod
     def is_auto_generated(message):
         """Detecta auto-respuestas/correo automatizado por cabeceras RFC 3834 y
@@ -137,24 +103,12 @@ class EmailIngestionService:
         log.conversation_id = conversation_id
         log.payload = message
         log.error = None
-        log.result = None
-        log.save(update_fields=["status", "conversation_id", "payload", "error", "result"])
+        log.save(update_fields=["status", "conversation_id", "payload", "error"])
 
         try:
             result, ticket = EmailIngestionService._process_message(
                 message, brand, attachments=attachments,
             )
-        except InvalidEmailSender as exc:
-            # El payload original queda para revisión. Solo este fallo permanente
-            # permite avanzar el cursor; los demás errores conservan sus reintentos.
-            log.status = InboundEmailLog.STATUS_FAILED
-            log.result = EmailIngestionService.REJECTED_SENDER_RESULT
-            log.error = str(exc)
-            log.processed_at = timezone.now()
-            log.save(update_fields=["status", "result", "error", "processed_at"])
-            record_metric("email.rejected", labels={"brand_id": brand.id if brand else None, "reason": exc.code})
-            logger.warning("inbound_email_rejected", extra={"log_id": log.id, "reason": exc.code})
-            return log.result
         except Exception as exc:
             log.status = InboundEmailLog.STATUS_FAILED
             log.error = str(exc)
@@ -176,11 +130,18 @@ class EmailIngestionService:
         return result
 
     @staticmethod
-    def _process_message(message, brand, attachments=None):
+    def _process_message(message, brand, attachments=None, suppress_confirmation=False):
+        """Ingiere un mensaje ya descargado. Idempotente por ``email_message_id``.
+
+        ``suppress_confirmation`` lo usa el backfill: un ticket recuperado días
+        después no debe enviar al cliente un «hemos recibido tu correo».
+        """
         msg_id = message["id"]
         conversation_id = message.get("conversationId") or ""
         subject = message.get("subject") or "(sin asunto)"
-        sender_email, sender_name = EmailIngestionService.message_sender(message)
+        sender = message.get("from", {}).get("emailAddress", {})
+        sender_email = sender.get("address", "").strip().lower()
+        sender_name = sender.get("name", "")
         text_body, html_body = EmailIngestionService.extract_body(message)
         if html_body:
             html_body = sanitize_email_html(html_body)
@@ -188,11 +149,24 @@ class EmailIngestionService:
         if not sender_email:
             return "skip_no_sender", None
 
+        # Graph can expose malformed From addresses (including URL fragments).
+        # Retrying one of those forever would hold the mailbox delta cursor and
+        # prevent later, valid replies from reaching their tickets.
+        try:
+            if len(sender_email) > User._meta.get_field("email").max_length:
+                raise ValidationError("sender exceeds user email field")
+            validate_email(sender_email)
+        except ValidationError:
+            logger.warning(
+                "inbound_invalid_sender",
+                extra={"message_id": msg_id, "sender_length": len(sender_email)},
+            )
+            record_metric("email.inbound.invalid_sender", labels={"brand_id": brand.id if brand else None})
+            return "skip_invalid_sender", None
+
         requester = EmailIngestionService.get_or_create_requester(sender_email, sender_name)
-        existing_comment = (
-            Comment.objects.select_related("ticket")
-            .filter(email_message_id=msg_id)
-            .first()
+        existing_comment = exact_match(
+            Comment.objects.select_related("ticket"), "email_message_id", msg_id,
         )
         if existing_comment:
             EmailIngestionService._store_attachments(
@@ -200,11 +174,11 @@ class EmailIngestionService:
             )
             return "skip_dup", existing_comment.ticket
 
-        existing_ticket = Ticket.objects.filter(email_message_id=msg_id).first()
+        existing_ticket = exact_match(Ticket.objects.all(), "email_message_id", msg_id)
         if existing_ticket:
-            comment = Comment.objects.filter(
-                ticket=existing_ticket, email_message_id=msg_id,
-            ).first()
+            comment = exact_match(
+                Comment.objects.filter(ticket=existing_ticket), "email_message_id", msg_id,
+            )
             if attachments and comment is None:
                 comment = EmailIngestionService._create_attachment_only_comment(
                     existing_ticket, requester, msg_id,
@@ -247,10 +221,12 @@ class EmailIngestionService:
                 "email_conversation_id": conversation_id or None,
                 "via_channel": "email",
                 "is_public": True,
-                "suppress_requester_email": EmailIngestionService.is_auto_generated(message),
+                "suppress_requester_email": (
+                    suppress_confirmation or EmailIngestionService.is_auto_generated(message)
+                ),
             },
         )
-        comment = Comment.objects.filter(ticket=ticket, email_message_id=msg_id).first()
+        comment = exact_match(Comment.objects.filter(ticket=ticket), "email_message_id", msg_id)
         if attachments and comment is None:
             comment = EmailIngestionService._create_attachment_only_comment(
                 ticket, requester, msg_id,
@@ -267,23 +243,26 @@ class EmailIngestionService:
             email.strip().lower()
             for email in Brand.objects.exclude(support_email="").values_list("support_email", flat=True)
         }
-        excluded.add(requester.email.strip().lower())
+        if requester:
+            excluded.add(requester.email.strip().lower())
         users = []
         for recipient in message.get("ccRecipients") or []:
             if not isinstance(recipient, dict):
                 continue
             address = recipient.get("emailAddress")
-            if not isinstance(address, dict):
+            if not isinstance(address, dict) or not isinstance(address.get("address"), str):
                 continue
+            email = address["address"].strip().lower()
             try:
-                email, name = EmailIngestionService.validate_sender(
-                    address.get("address"), address.get("name"),
-                )
-            except InvalidEmailSender:
+                User._meta.get_field("email").clean(email, None)
+            except ValidationError:
                 continue
             if email in excluded:
                 continue
             excluded.add(email)
+            name = address.get("name")
+            name = name.strip() if isinstance(name, str) else ""
+            name = name[:User._meta.get_field("name").max_length]
             users.append(EmailIngestionService.get_or_create_requester(email, name))
         return users
 
@@ -338,10 +317,10 @@ class EmailIngestionService:
 
     @staticmethod
     def get_or_create_requester(email, name):
-        email, name = EmailIngestionService.validate_sender(email, name)
+        email = email.strip().lower()
         user, created = User.objects.get_or_create(
             email=email,
-            defaults={"name": name},
+            defaults={"name": name.strip() if name else email.split("@")[0]},
         )
         if created:
             user.set_unusable_password()
@@ -356,7 +335,9 @@ class EmailIngestionService:
     @staticmethod
     def find_ticket_for_message(subject, conversation_id, brand, requester=None):
         if conversation_id:
-            ticket = Ticket.objects.filter(email_conversation_id=conversation_id, brand=brand).first()
+            ticket = exact_match(
+                Ticket.objects.filter(brand=brand), "email_conversation_id", conversation_id,
+            )
             if ticket:
                 return ticket
 

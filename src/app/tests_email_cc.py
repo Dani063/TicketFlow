@@ -69,20 +69,11 @@ class EmailCCTests(_BaseFixture):
         log.template_key = "satisfaction_survey"
         self.assertEqual(OutboundEmailService._cc_emails(log), [])
 
-    def test_existing_delta_cursor_fetches_missing_cc_field(self):
-        from app.tasks import _ingest_message
+    def test_sweep_message_fetch_requests_cc_field(self):
+        from app.services import msgraph_mail
 
-        message = {
-            "id": "old-cursor", "subject": "Copias",
-            "from": {"emailAddress": {"address": self.customer.email}},
-            "body": {"contentType": "text", "content": "Ayuda"},
-        }
-        with patch("app.tasks.requests.get") as get:
-            get.return_value.json.return_value = {
-                "ccRecipients": [{"emailAddress": {"address": "copy@example.com"}}],
-            }
-            self.assertEqual(_ingest_message(message, self.brand_a, self.brand_a.support_email, {}, False),
-                             "ticket_created")
-        self.assertIn("?$select=ccRecipients", get.call_args.args[0])
-        ticket = Ticket.objects.get(email_message_id="old-cursor")
-        self.assertEqual(list(ticket.ccs.values_list("email", flat=True)), ["copy@example.com"])
+        with patch("app.services.msgraph_mail.requests.request") as request:
+            request.return_value.status_code = 200
+            request.return_value.json.return_value = {"id": "message", "ccRecipients": []}
+            msgraph_mail.get_message(self.brand_a.support_email, "message", {})
+        self.assertIn("ccRecipients", request.call_args.kwargs["params"]["$select"].split(","))

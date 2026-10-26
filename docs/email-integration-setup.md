@@ -26,12 +26,12 @@ Consulta de registros MX con `nslookup -type=MX <dominio>`:
 > direcciones M365 de la tabla (`helpdesk@cloudwws.com`, `helpdesk@comunycarse.com`,
 > `soporte2@comunycarse.com`, `helpdesk@ecomfax.com`) **no son cuatro buzones
 > independientes: son alias de un único buzón físico** (mismo id de carpeta Inbox,
-> mismo contador de elementos). Consecuencia: `poll_m365_mailboxes` itera marcas y
-> asigna `brand` según qué marca está consultando en ese momento, no según el
+> mismo contador de elementos). Consecuencia: el barrido agrupa las cuatro
+> direcciones en una sola carpeta (`mailbox_sweep.resolve_targets`) y asigna a todo
+> el correo la marca fijada en su `MailboxSyncCursor` (la primera por id), no la del
 > destinatario real del mensaje — la atribución de marca del correo entrante es hoy
-> arbitraria. `_mailbox_targets` agrupa las cuatro direcciones para no consultar la
-> misma carpeta cuatro veces, pero no resuelve la atribución. Es un defecto pendiente
-> de decisión de negocio, no un bug de este documento.
+> arbitraria. Es un defecto pendiente de decisión de negocio, no un bug de este
+> documento.
 
 ---
 
@@ -249,8 +249,7 @@ de las direcciones CC y las entregan como copias mediante Graph o SES. Se aplica
 las protecciones contra bucles también a esas direcciones. Las notas privadas,
 confirmaciones de creación y encuestas no se envían a los CC.
 
-Los cursores delta existentes conservan la selección de campos original. Cuando
-un mensaje no incluye `ccRecipients`, se consulta ese campo antes de procesarlo;
-un fallo mantiene el reintento del mensaje. No hace falta reiniciar los cursores.
-Esta corrección no recupera las copias de mensajes ya procesados ni modifica
-correos que estuvieran encolados antes del cambio.
+El barrido pide `ccRecipients` al recuperar el mensaje completo, también para
+correos recuperados por Message-ID tras moverse de carpeta. La deduplicación y
+las migraciones son las de la versión 2.2.35 de PRO. Esta corrección no modifica
+los correos ya encolados antes del cambio.

@@ -153,32 +153,43 @@ Todas vienen del ConfigMap `ticketflow-config` y el Secret `ticketflow-secrets`.
 | `OUTBOUND_EMAIL_ATTACHMENT_MAX_BYTES` | ConfigMap | Límite de tamaño de adjuntos en email saliente |
 | `PUBLIC_CLIENT_IP_HEADER` | ConfigMap | Cabecera de la que se lee la IP del cliente; el ingress debe sanear/añadir `X-Forwarded-For` |
 
-### Ingesta de correo: un cursor por entorno
+### Recogida de correo: barrido por ventana
 
 | Variable | Defecto | Descripción |
 |---|---|---|
 | `ENVIRONMENT_NAME` | derivado de `AWS_SSM_PREFIX` | Espacio de nombres del cursor de buzones. **Dos entornos no pueden compartirlo** |
-| `INBOUND_MARK_READ_ENABLED` | `true` | Marca los mensajes como leídos tras ingerirlos. Debe quedar en `true` en **un solo entorno** |
-| `INBOUND_DELTA_LOOKBACK_MINUTES` | `60` | Ventana que se ingiere al estrenar o reiniciar un cursor |
-| `INBOUND_DELTA_MAX_PAGES` | `20` | Tope de páginas de delta por vuelta; el resto continúa en la siguiente |
+| `INBOUND_MARK_READ_ENABLED` | `false` | Marca como leído tras ingerir. Solo cortesía; como mucho en **un** entorno |
+| `INBOUND_SWEEP_OVERLAP_MINUTES` | `20` | Solape de cada vuelta con lo ya barrido |
+| `INBOUND_SWEEP_INITIAL_LOOKBACK_MINUTES` | `60` | Ventana con la que arranca un cursor; lo anterior va por backfill |
+| `INBOUND_SWEEP_PAGE_SIZE` / `INBOUND_SWEEP_MAX_PAGES` | `200` / `25` | Tamaño de página y tope de páginas por vuelta |
+| `INBOUND_SWEEP_PROCESS_BUDGET_SECONDS` | `40` | Tiempo de proceso por vuelta (el beat es de 60 s) |
+| `INBOUND_SWEEP_LEASE_SECONDS` / `INBOUND_SWEEP_RECLAIM_MINUTES` | `180` / `10` | Lease del buzón y caducidad del reclamo de un mensaje |
+| `INBOUND_SWEEP_MAX_ATTEMPTS` | `8` | Intentos antes de la cuarentena |
+| `INBOUND_SWEEP_DEEP_HOURLY_HOURS` / `INBOUND_SWEEP_DEEP_DAILY_DAYS` | `48` / `14` | Ventanas de los barridos de seguridad |
+| `INBOUND_CURSOR_STALE_MINUTES` / `INBOUND_SWEEP_PENDING_ALERT_MINUTES` | `5` / `10` | Umbrales de ERROR: sin vuelta buena / pendiente demasiado antiguo |
+| `INBOUND_AUTOMATED_SENDER_PATTERNS` / `INBOUND_AUTOMATED_SUBJECT_PATTERNS` | vacío | Regex extra (separadas por tres barras verticales) para el clasificador del backfill |
 
-El puntero de lectura vive en `MailboxSyncCursor`, en la BBDD de cada entorno, y no
-en el flag `isRead` del buzón. Eso es lo que permite que DEV y STA lean el mismo
-buzón físico sin quitarse el correo: antes el primero que pasaba marcaba el mensaje
-como leído y el otro ya no lo veía.
+La recogida no guarda estado en Graph: lista la carpeta por fecha de recepción y la
+verdad de qué se ha recogido es `InboundEmailLog`. Ver `docs/backend-architecture.md`.
 
-Al desplegar por primera vez, **cada entorno arranca ingiriendo la última hora** del
-buzón (`INBOUND_DELTA_LOOKBACK_MINUTES`). Es deliberado: sin esa cota, el primer
-delta devolvería la carpeta entera y se crearían tickets de todo el histórico.
+Al activarse en un entorno, **el cursor arranca una hora atrás**. Lo anterior se
+recupera a mano:
 
-Borrar la fila del cursor en `/django-admin/app/mailboxsynccursor/` reinicia la
-sincronización de ese buzón. Es también la vía para forzar un rearranque si el
-cursor se queda en `last_result=error`.
+```bash
+python main.py reingest_mailbox --since 2026-09-29T10:00:00Z --dry-run   # informe por grupos
+python main.py reingest_mailbox --since 2026-09-29T10:00:00Z             # registra lo que falta
+```
 
-En DEV deben fijarse explícitamente `OUTBOUND_EMAIL_ENABLED=false` e
-`INBOUND_MARK_READ_ENABLED=false`, tanto en `DEV/TicketFlow.UI/.env` del bucket
-`recordia-config` como en los ConfigMaps de sus procesos. DEV puede ingerir todo
-el correo compartido sin enviar respuestas ni cambiar el estado de lectura.
+El interruptor es `ingest_mode` en `/django-admin/app/mailboxsynccursor/`: `paused`
+detiene la recogida de ese entorno sin reiniciar pods. Tras desplegar esta versión
+por primera vez, el cursor existente queda en `paused` hasta activarlo a mano (para
+que el delta antiguo de los pods viejos y el barrido no se solapen).
+
+DEV, STA y PRO leen el mismo buzón físico. En DEV y STA deben fijarse
+`OUTBOUND_EMAIL_ENABLED=false` e `INBOUND_MARK_READ_ENABLED=false` en su `.env` del
+bucket `recordia-config`: pueden ingerir el correo compartido sin enviar respuestas a
+clientes reales ni cambiar el estado de lectura.
+
 El orden del historial es `0059_merge_sta_dev` → `0061_mailboxsynccursor` →
 `0062_reporting_fact_tables`. La numeración salta el 0060 a propósito: las
 tablas de hechos se escribieron antes, pero `0061` ya estaba aplicada en DEV
@@ -193,7 +204,7 @@ Definidas en `settings.py` bajo `CELERY_BEAT_SCHEDULE`:
 
 | Tarea | Intervalo | Descripción |
 |---|---|---|
-| `app.tasks.poll_m365_mailboxes` | 120 s | Ingesta incremental de buzones M365 (delta query, cursor por entorno) |
+| `app.tasks.sweep_m365_mailboxes` | 60 s | Recogida de correo M365 (barrido por ventana, lease por buzón) |
 | `app.tasks.refresh_reporting_facts` | 300 s | Recalcula las tablas de hechos de `/reporting/` (ver abajo) |
 
 ---

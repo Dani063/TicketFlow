@@ -72,6 +72,64 @@ def readyz(request):
     return JsonResponse(body, status=503)
 
 
+def _inbound_status():
+    """Salud de la recogida de correo por buzón, para vigilarla desde fuera.
+
+    ``ok`` es falso si un cursor activo lleva más de INBOUND_CURSOR_STALE_MINUTES
+    sin una vuelta buena, si hay mensajes en cuarentena o si un pendiente supera
+    INBOUND_SWEEP_PENDING_ALERT_MINUTES. No cambia el código HTTP: internalz no
+    debe sacar el pod de servicio por un problema del buzón.
+    """
+    from django.db.models import Count, Min
+    from django.utils import timezone
+
+    try:
+        from app.models import InboundEmailLog, MailboxSyncCursor
+
+        now = timezone.now()
+        stale_minutes = getattr(settings, "INBOUND_CURSOR_STALE_MINUTES", 5)
+        pending_alert = getattr(settings, "INBOUND_SWEEP_PENDING_ALERT_MINUTES", 10)
+        open_statuses = (InboundEmailLog.STATUS_PENDING, InboundEmailLog.STATUS_PROCESSING,
+                         InboundEmailLog.STATUS_FAILED)
+        mailboxes = []
+        healthy = True
+        for cursor in MailboxSyncCursor.objects.filter(environment=getattr(settings, "ENVIRONMENT_NAME", "local")):
+            counts = dict(
+                InboundEmailLog.objects.filter(folder_key=cursor.folder_key)
+                .filter(status__in=open_statuses + (InboundEmailLog.STATUS_QUARANTINED,))
+                .values_list("status").annotate(n=Count("id"))
+            )
+            oldest = (
+                InboundEmailLog.objects.filter(folder_key=cursor.folder_key, status__in=open_statuses)
+                .aggregate(oldest=Min("graph_received_at"))["oldest"]
+            )
+            age = int((now - cursor.last_sweep_ok_at).total_seconds()) if cursor.last_sweep_ok_at else None
+            oldest_minutes = int((now - oldest).total_seconds() // 60) if oldest else None
+            active = cursor.ingest_mode == MailboxSyncCursor.MODE_SWEEP
+            ok = (
+                active
+                and age is not None and age < stale_minutes * 60
+                and not counts.get(InboundEmailLog.STATUS_QUARANTINED)
+                and (oldest_minutes is None or oldest_minutes < pending_alert)
+            )
+            healthy = healthy and ok
+            mailboxes.append({
+                "mailbox": cursor.mailbox,
+                "mode": cursor.ingest_mode,
+                "ok": ok,
+                "last_sweep_ok_age_seconds": age,
+                "swept_until": cursor.swept_until.isoformat() if cursor.swept_until else None,
+                "pending": counts.get(InboundEmailLog.STATUS_PENDING, 0),
+                "processing": counts.get(InboundEmailLog.STATUS_PROCESSING, 0),
+                "failed": counts.get(InboundEmailLog.STATUS_FAILED, 0),
+                "quarantined": counts.get(InboundEmailLog.STATUS_QUARANTINED, 0),
+                "oldest_pending_minutes": oldest_minutes,
+            })
+        return {"ok": healthy and bool(mailboxes), "mailboxes": mailboxes}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 def internalz(request):
     checks = {}
     status = 200
@@ -108,5 +166,7 @@ def internalz(request):
         }
     except Exception as exc:
         checks["operations"] = {"ok": False, "error": str(exc)}
+
+    checks["inbound"] = _inbound_status()
 
     return JsonResponse({"status": "ok" if status == 200 else "degraded", "checks": checks}, status=status)

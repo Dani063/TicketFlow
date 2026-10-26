@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/2.1/ref/settings/
 import os
 import posixpath
 import logging as _logging
+from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 from TicketFlow.attachment_config import attachment_storage_config
@@ -440,26 +441,34 @@ CELERY_WORKER_HIJACK_ROOT_LOGGER = False
 # Los resultados de tareas no se usan — se descartan para no necesitar result backend
 CELERY_TASK_IGNORE_RESULT = True
 CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'cache+memory://')
+# Cada tarea periódica caduca antes de la siguiente: con SQS (visibilidad de
+# 3600 s) un mensaje reservado por un pod que muere reaparece hasta una hora
+# después, y sin `expires` se acumularían ejecuciones atrasadas.
 CELERY_BEAT_SCHEDULE = {
-    'poll-m365-mailboxes': {
-        'task': 'app.tasks.poll_m365_mailboxes',
-        'schedule': 120.0,
+    'sweep-m365-mailboxes': {
+        'task': 'app.tasks.sweep_m365_mailboxes',
+        'schedule': 60.0,
+        'options': {'expires': 55},
     },
     'auto-assign-unassigned-tickets': {
         'task': 'app.tasks.auto_assign_unassigned_tickets',
         'schedule': 300.0,  # Cada 5 minutos
+        'options': {'expires': 290},
     },
     'mark-sla-breaches': {
         'task': 'app.tasks.mark_sla_breaches',
         'schedule': 300.0,
+        'options': {'expires': 290},
     },
     'notify-sla-at-risk': {
         'task': 'app.tasks.notify_sla_at_risk',
         'schedule': 300.0,
+        'options': {'expires': 290},
     },
     'offer-satisfaction-surveys': {
         'task': 'app.tasks.offer_satisfaction_surveys',
         'schedule': 900.0,  # Cada 15 min; el retardo real lo fija SATISFACTION_SURVEY_DELAY_HOURS
+        'options': {'expires': 890},
     },
     'refresh-reporting-facts': {
         'task': 'app.tasks.refresh_reporting_facts',
@@ -468,10 +477,12 @@ CELERY_BEAT_SCHEDULE = {
         # tiempo real. El coste es proporcional a los tickets tocados, no al
         # histórico, así que una pasada en vacío es prácticamente gratis.
         'schedule': 300.0,
+        'options': {'expires': 290},
     },
     'cleanup-orphan-attachments': {
         'task': 'app.tasks.cleanup_orphan_attachments',
         'schedule': 3600.0,
+        'options': {'expires': 3590},
     },
 }
 
@@ -549,7 +560,7 @@ AI_SIMILAR_TICKETS_K = int(os.getenv('AI_SIMILAR_TICKETS_K', '3'))
 AI_MAX_BODY_CHARS = int(os.getenv('AI_MAX_BODY_CHARS', '6000'))
 AI_REQUEST_TIMEOUT_SECONDS = int(os.getenv('AI_REQUEST_TIMEOUT_SECONDS', '30'))
 
-# === Email entrante (poll de buzones M365) ===
+# === Email entrante (barrido de buzones M365) ===
 # Nombre del entorno: es el espacio de nombres del cursor de sincronización, así
 # que DOS ENTORNOS NO DEBEN COMPARTIRLO. Se deriva del prefijo de SSM
 # (/Recordia/Staging/Ticketflow -> 'Staging') para no exigir una variable nueva
@@ -560,26 +571,57 @@ if _ssm_prefix:
     if len(_ssm_parts) >= 2:
         _ssm_environment = _ssm_parts[1]
 ENVIRONMENT_NAME = os.getenv('ENVIRONMENT_NAME') or _ssm_environment or 'local'
-# Ventana que se ingiere al estrenar cursor (o al reiniciarlo). Acota el primer
-# delta: sin ella Graph devolvería la carpeta entera y se ingeriría el histórico.
-INBOUND_DELTA_LOOKBACK_MINUTES = int(os.getenv('INBOUND_DELTA_LOOKBACK_MINUTES', '60'))
-# Tope de páginas por vuelta. Al alcanzarlo se guarda el nextLink y se continúa
-# en la siguiente pasada del beat: acota el trabajo por tick, no lo pierde.
-INBOUND_DELTA_MAX_PAGES = int(os.getenv('INBOUND_DELTA_MAX_PAGES', '20'))
-# Marcar como leído ya NO es el cursor, solo cortesía para quien mire el buzón.
-# Debe quedar encendido en un único entorno (el "dueño" del buzón) y apagado en
-# el resto, para no ensuciar el estado de lectura de un buzón compartido.
-INBOUND_MARK_READ_ENABLED = os.getenv('INBOUND_MARK_READ_ENABLED', 'true').lower() in ('1', 'true', 'yes', 'on')
-# Minutos sin que el cursor avance a partir de los cuales cada vuelta fallida
-# avisa con ERROR. Una vuelta que falla repite el mismo recorrido y deja sin
-# procesar todo lo que va detrás del mensaje que falla: el 29/09/2026 un
-# remitente inválido lo tuvo así dos días sin más rastro que un error repetido.
-INBOUND_CURSOR_STALE_MINUTES = int(os.getenv('INBOUND_CURSOR_STALE_MINUTES', '30'))
+# --- Barrido por ventana del buzón ---------------------------------------
+# La ingesta lista la carpeta por receivedDateTime y deduplica en BD; no guarda
+# estado en Graph. Ver app/services/mailbox_sweep.py.
+# Solape con lo ya barrido: cubre los retrasos de entrega y los empates de
+# receivedDateTime en el borde de la ventana.
+INBOUND_SWEEP_OVERLAP_MINUTES = int(os.getenv('INBOUND_SWEEP_OVERLAP_MINUTES', '20'))
+# Ventana con la que arranca un cursor nuevo. Lo anterior (deep_floor) solo
+# entra con el backfill manual (manage.py reingest_mailbox).
+INBOUND_SWEEP_INITIAL_LOOKBACK_MINUTES = int(os.getenv('INBOUND_SWEEP_INITIAL_LOOKBACK_MINUTES', '60'))
+INBOUND_SWEEP_PAGE_SIZE = int(os.getenv('INBOUND_SWEEP_PAGE_SIZE', '200'))
+# Tope de páginas de descubrimiento por vuelta; lo que no quepa sigue en la
+# siguiente sin perderse, porque la marca de agua solo avanza sobre lo guardado.
+INBOUND_SWEEP_MAX_PAGES = int(os.getenv('INBOUND_SWEEP_MAX_PAGES', '25'))
+# Segundos de cada vuelta dedicados a procesar pendientes; el beat es de 60 s.
+INBOUND_SWEEP_PROCESS_BUDGET_SECONDS = int(os.getenv('INBOUND_SWEEP_PROCESS_BUDGET_SECONDS', '40'))
+INBOUND_SWEEP_LEASE_SECONDS = int(os.getenv('INBOUND_SWEEP_LEASE_SECONDS', '180'))
+# Un mensaje reclamado que no termina (pod muerto) vuelve a estar disponible.
+INBOUND_SWEEP_RECLAIM_MINUTES = int(os.getenv('INBOUND_SWEEP_RECLAIM_MINUTES', '10'))
+# Intentos antes de apartar un mensaje en cuarentena (con alerta).
+INBOUND_SWEEP_MAX_ATTEMPTS = int(os.getenv('INBOUND_SWEEP_MAX_ATTEMPTS', '8'))
+# Barridos de seguridad: buscan huecos en ventanas largas sin descargar cuerpos.
+INBOUND_SWEEP_DEEP_HOURLY_HOURS = int(os.getenv('INBOUND_SWEEP_DEEP_HOURLY_HOURS', '48'))
+INBOUND_SWEEP_DEEP_DAILY_DAYS = int(os.getenv('INBOUND_SWEEP_DEEP_DAILY_DAYS', '14'))
+# Un pendiente más antiguo que esto en una vuelta sana es una alerta.
+INBOUND_SWEEP_PENDING_ALERT_MINUTES = int(os.getenv('INBOUND_SWEEP_PENDING_ALERT_MINUTES', '10'))
+# Patrones extra (regex, separados por "|||") para el clasificador de correo
+# automático que usa el backfill. Ver app/services/inbound_classifier.py.
+INBOUND_AUTOMATED_SENDER_PATTERNS = [p for p in os.getenv('INBOUND_AUTOMATED_SENDER_PATTERNS', '').split('|||') if p]
+INBOUND_AUTOMATED_SUBJECT_PATTERNS = [p for p in os.getenv('INBOUND_AUTOMATED_SUBJECT_PATTERNS', '').split('|||') if p]
+# Marcar como leído es solo cortesía para quien mire el buzón: DEV, STA y PRO
+# leen el mismo buzón físico y solo uno debe tocar su estado. Apagado salvo que
+# el entorno lo encienda explícitamente.
+INBOUND_MARK_READ_ENABLED = os.getenv('INBOUND_MARK_READ_ENABLED', 'false').lower() in ('1', 'true', 'yes', 'on')
+# Minutos sin una vuelta de barrido buena a partir de los cuales se avisa con
+# ERROR. El 29/09/2026 un fallo repetido tuvo la ingesta parada dos días.
+INBOUND_CURSOR_STALE_MINUTES = int(os.getenv('INBOUND_CURSOR_STALE_MINUTES', '5'))
 
 # === Email saliente (confirmaciones al cliente) ===
 # SES autentica con el rol IAM del pod (como SQS/SSM): sin credenciales SMTP.
 # Kill switch global; en local conviene dejarlo a false (BBDD compartida).
 OUTBOUND_EMAIL_ENABLED = os.getenv('OUTBOUND_EMAIL_ENABLED', 'false').lower() in ('1', 'true', 'yes', 'on')
+# Corte de activación: las entregas anteriores nunca deben salir al encender PRO.
+_outbound_start_raw = os.getenv('OUTBOUND_EMAIL_START_AT', '').strip()
+OUTBOUND_EMAIL_START_AT = None
+if _outbound_start_raw:
+    try:
+        OUTBOUND_EMAIL_START_AT = datetime.fromisoformat(_outbound_start_raw.replace('Z', '+00:00'))
+    except ValueError as exc:
+        raise RuntimeError('OUTBOUND_EMAIL_START_AT debe ser una fecha ISO 8601 con zona horaria') from exc
+    if OUTBOUND_EMAIL_START_AT.tzinfo is None or OUTBOUND_EMAIL_START_AT.utcoffset() is None:
+        raise RuntimeError('OUTBOUND_EMAIL_START_AT debe incluir zona horaria')
 # Interruptores por tipo de mensaje. Son opt-in para que activar el transporte no
 # habilite accidentalmente automatizaciones que el entorno no quiere usar.
 OUTBOUND_TICKET_CREATED_ENABLED = os.getenv(
