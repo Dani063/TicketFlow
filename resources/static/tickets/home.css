@@ -974,6 +974,7 @@
     background: rgba(255,255,255,0.18);
     color: #fff;
 }
+.tab-action-btn[hidden] { display: none; }
 
 .tab-action-btn--danger {
     color: #fca5a5;
