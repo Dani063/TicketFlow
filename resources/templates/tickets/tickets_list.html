@@ -52,6 +52,9 @@
         <button class="tab-action-btn tab-action-btn--danger" id="actionDelete" title="Eliminar seleccionados">
             <i class="fas fa-trash"></i> Eliminar
         </button>
+        <button class="tab-action-btn" id="actionRestore" title="Restaurar seleccionados" hidden>
+            <i class="fas fa-trash-restore"></i> Restaurar
+        </button>
     </div>
 </div>
 {% endif %}
@@ -186,6 +189,10 @@
                 <button type="button" class="filter-section-toggle" aria-expanded="true">
                     <span>Histórico y otras vistas</span><i class="fas fa-chevron-down" aria-hidden="true"></i>
                 </button>
+            </li>
+            <li data-view="trash">
+                <span class="filter-name"><i class="fas fa-trash"></i> Tickets eliminados</span>
+                <span class="filter-count">–</span>
             </li>
             <li data-view="closed">
                 <span class="filter-name">Tickets en estado closed</span>
@@ -352,5 +359,5 @@
 <script>
 window.__ticketsData = { createTicketUrl: "{% url 'create_ticket' %}" };
 </script>
-<script src="{% static 'tickets/tickets_list.js' %}?v=s6.8"></script>
+<script src="{% static 'tickets/tickets_list.js' %}?v=s6.9"></script>
 {% endblock %}

@@ -205,6 +205,10 @@ class Ticket(models.Model):
     email_message_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     email_conversation_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    deleted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='deleted_tickets',
+    )
 
     class Meta:
         indexes = [
