@@ -4,7 +4,7 @@
 {% block title %}TicketFlow – Tickets{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'tickets/tickets_list.css' %}?v=s6.7">
+<link rel="stylesheet" href="{% static 'tickets/tickets_list.css' %}?v=s6.8">
 {% endblock %}
 
 {% block content %}
@@ -285,15 +285,16 @@
             <div class="tf-filter">
                 <span class="tf-filter-label"><i class="far fa-calendar"></i> Rango</span>
                 <div class="tf-segment tf-ticket-presets" role="group" aria-label="Rango predefinido">
+                    <button type="button" data-date-mode="all" aria-pressed="false">Todo</button>
                     <button type="button" data-days="7" aria-pressed="false">7d</button>
-                    <button type="button" data-days="30" class="is-active" aria-pressed="true">30d</button>
+                    <button type="button" data-days="30" aria-pressed="false">30d</button>
                     <button type="button" data-days="90" aria-pressed="false">90d</button>
                     <button type="button" data-days="365" aria-pressed="false">1a</button>
                 </div>
             </div>
 
             <div class="tf-filter">
-                <span class="tf-filter-label">Fechas</span>
+                <span class="tf-filter-label">Fecha de creación</span>
                 <div class="tf-daterange">
                     <input type="date" class="tf-input tf-report-date" id="ticketsFrom" aria-label="Desde">
                     <span class="tf-daterange-sep">→</span>
@@ -359,5 +360,5 @@
 <script>
 window.__ticketsData = { createTicketUrl: "{% url 'create_ticket' %}" };
 </script>
-<script src="{% static 'tickets/tickets_list.js' %}?v=s6.9"></script>
+<script src="{% static 'tickets/tickets_list.js' %}?v=s6.10"></script>
 {% endblock %}

@@ -215,7 +215,9 @@
     max-height: calc(100vh - 360px);
 }
 
-@media (max-width: 1280px) {
+/* Con cinco opciones de rango, pasar a dos filas antes de que se recorten
+   las fechas o los botones de exportación junto al panel lateral. */
+@media (max-width: 1600px) {
     .tf-tickets-toolbar {
         grid-template-columns: minmax(0, 1fr) max-content;
     }
@@ -227,6 +229,10 @@
 
     .tf-tickets-toolbar .tf-toolbar-grow {
         display: none;
+    }
+
+    .tickets-list-content .with-pagination .tabla {
+        max-height: calc(100vh - 426px);
     }
 }
 

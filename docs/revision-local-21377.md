@@ -100,10 +100,16 @@ del ejemplo, el usuario y lo que has observado.
 5. Abre «Todos los tickets no resueltos (sin tareas)»: incluye el 03 en
    «Sin asignar», el 04 y los tickets personales de A.
 6. Exporta esa vista a CSV y compara IDs y número de filas con la lista.
-7. Abre una vista histórica y cambia el rango: ahí sí debe aplicarse la fecha.
+7. Comprueba que «Todo» está activo y las fechas vacías. Pulsa «30d»: el
+   ejemplo 02 desaparece. Cambia las fechas manualmente para incluirlo y compara
+   filas, contador, CSV y PDF. El filtro usa la fecha de creación del ticket.
+8. Pulsa «Todo» para recuperar los tickets de cualquier antigüedad. Recarga el
+   navegador: debe conservar la selección. Repite también en una vista histórica.
 
 **Resultado:** la home y la cola personal coinciden; lista, contador y CSV usan
-el mismo conjunto. Las colas activas indican «Sin límite de fecha». On-hold
+el mismo conjunto. Las colas activas empiezan en «Todo / Sin límite de fecha»;
+al elegir un rango se aplica también en estas colas. Los históricos empiezan
+con 30 días y permiten quitar ese límite con «Todo». On-hold
 tiene su vista de espera y queda fuera de las colas no resueltas según el
 criterio de esta feature; eso no lo convierte al estado Resolved.
 
@@ -124,7 +130,7 @@ orden, y cada acción ocurre una vez. Si el orden coloca el ticket nuevo en otra
 página, búscalo allí: actualizar conserva la página actual.
 
 El cambio de día de los rangos relativos está cubierto por la prueba de navegador;
-en una vista histórica puedes comprobar manualmente que un rango personalizado
+puedes comprobar manualmente que un rango personalizado
 no se sustituya por uno relativo.
 
 ### 03 · Cambiar estado sin comentario — Claude, #21393
@@ -328,6 +334,12 @@ Comprobaciones realizadas sobre la rama conjunta el 27/10/2026:
   pestaña, restauración desde ficha, presencia y escritura entre dos agentes.
 - Los tests de On-hold incluyen conservación del reloj con notas/ediciones,
   respuesta del cliente que reabre y primera respuesta dentro de un SLA pausado.
+
+Tras corregir los controles de fechas: 33 tests de vistas, exportaciones,
+papelera, filtros de empresa y paginación correctos. Chrome verifica rangos
+rápidos y manuales, «Todo», persistencia al recargar, contadores, CSV real y
+descarte de respuestas antiguas al cambiar rápido de rango. Los controles y la
+paginación siguen accesibles en los anchos de escritorio comprobados.
 
 Logs de esta comprobación, fuera de Git:
 `C:\repo\.codex-tmp\21377-review-full.log` y

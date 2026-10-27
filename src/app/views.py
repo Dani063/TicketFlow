@@ -364,12 +364,12 @@ def _balanced_agent_page(agent_counts, page, page_size):
     return page, total_pages, total, target_offsets, target_allocations
 
 
-def _ticket_filter_counts_cache_key(user, brand_id=None, date_from=None, date_to=None):
+def _ticket_filter_counts_cache_key(user, brand_id=None, date_from=None, date_to=None, date_mode=None):
     role_name = (getattr(getattr(user, 'role', None), 'role_name', '') or '').lower()
     return (
-        f"tickets:filter-counts:v4:user:{user.id}:"
+        f"tickets:filter-counts:v5:user:{user.id}:"
         f"role:{role_name}:group:{user.group_id or 0}:brand:{brand_id or 0}:"
-        f"from:{date_from}:to:{date_to}"
+        f"from:{date_from}:to:{date_to}:mode:{date_mode or 'default'}"
     )
 
 
@@ -395,7 +395,12 @@ def _parse_filter_date_range(params, default_days=30, max_days=366):
     return date_from, date_to, start_dt, end_dt
 
 
-def _view_uses_date_range(view):
+def _view_uses_date_range(view, params=None):
+    # Las colas incluyen todo por defecto; el usuario puede acotar cualquier
+    # vista explícitamente, o quitar el límite de un histórico.
+    mode = (params or {}).get('date_mode')
+    if mode in ('all', 'range'):
+        return mode == 'range'
     return not (view in _TICKET_QUEUE_VIEWS or (view or '').startswith('home_'))
 
 
@@ -410,19 +415,19 @@ def _ticket_listing_queryset(request, *, view=None):
     date_from, date_to, start_dt, end_dt = _parse_filter_date_range(request.GET)
     if brand_id:
         base_qs = base_qs.filter(brand_id=brand_id)
-    if _view_uses_date_range(view):
+    if _view_uses_date_range(view, request.GET):
         base_qs = base_qs.filter(created_at__range=(start_dt, end_dt))
     return base_qs, brand_id, date_from, date_to
 
 
-def _ticket_filter_payload(brand_id, date_from, date_to, view=None):
+def _ticket_filter_payload(brand_id, date_from, date_to, view=None, params=None):
     return {
         'brand_id': brand_id,
         'from': str(date_from),
         'to': str(date_to),
         'view': view or '',
         'view_label': _TICKET_VIEW_LABELS.get(view, 'Todos los tickets'),
-        'date_range_applied': _view_uses_date_range(view),
+        'date_range_applied': _view_uses_date_range(view, params),
     }
 
 
@@ -673,7 +678,7 @@ def filter_tickets(request):
     # Empresa y fechas se aplican al queryset base para que vistas, contadores,
     # totales, paginación y exportaciones partan del mismo conjunto exacto.
     base_qs, brand_id, date_from, date_to = _ticket_listing_queryset(request)
-    applied_filters = _ticket_filter_payload(brand_id, date_from, date_to, view)
+    applied_filters = _ticket_filter_payload(brand_id, date_from, date_to, view, request.GET)
 
     if total_only:
         total = _tickets_for_view(base_qs, view, request.user).count()
@@ -694,7 +699,7 @@ def filter_tickets(request):
     _counts_loaded_from_cache = False
     if compute_counts:
         _counts_cache_key = _ticket_filter_counts_cache_key(
-            request.user, brand_id, date_from, date_to
+            request.user, brand_id, date_from, date_to, request.GET.get('date_mode')
         )
         if not force_counts:
             cached_filtros = cache.get(_counts_cache_key)
@@ -706,11 +711,11 @@ def filter_tickets(request):
     if compute_counts:
         _now = timezone.now()
         # El lateral mezcla colas e históricos. Sus contadores son independientes
-        # de la vista activa: solo los históricos se acotan por creación.
+        # de la vista activa. Un rango explícito se aplica a todas las vistas.
         queue_qs = _ticket_listing_queryset(request, view='unassigned')[0]
         ranged_qs = _ticket_listing_queryset(request, view='mis_tickets')[0]
         _, _, start_dt, end_dt = _parse_filter_date_range(request.GET)
-        in_range = Q(created_at__range=(start_dt, end_dt))
+        in_range = Q(created_at__range=(start_dt, end_dt)) if _view_uses_date_range('mis_tickets', request.GET) else Q()
         mine = Q(assignee=request.user) if _is_agent(request.user) else Q()
 
         # Query 1: aggregate condicional — una sola pasada sobre la tabla base
@@ -1115,7 +1120,7 @@ def _ticket_export_queryset(request):
     if brand_token and brand_token not in view_token:
         name_parts.append(brand_token)
     name_parts.append(view_token)
-    dated = _view_uses_date_range(view)
+    dated = _view_uses_date_range(view, request.GET)
     suffix = f'_{date_from:%Y%m%d}-{date_to:%Y%m%d}' if dated else '_sin_limite_de_fecha'
     filename_base = '_'.join(name_parts) + suffix
 

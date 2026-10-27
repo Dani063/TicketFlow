@@ -25,11 +25,14 @@
     let _fromDate    = '';
     let _toDate      = '';
     let _relativeDays = null;
+    let _dateMode = null;
     let _dateRangeApplied = true;
     let _lastExactTotal = null;
     let _selectedIds = new Set();
     let _lastRenderedCount = 0;
     let _totalRequestSeq = 0;
+    let _loadRequestSeq = 0;
+    let _countsRequestSeq = 0;
 
     const COLSPAN = 10;
 
@@ -76,9 +79,31 @@
         }
     }
 
+    function syncDateControls(applied) {
+        _dateRangeApplied = applied.date_range_applied !== false;
+        _fromDate = _dateRangeApplied ? applied.from : '';
+        _toDate = _dateRangeApplied ? applied.to : '';
+        document.getElementById('ticketsFrom').value = _fromDate;
+        document.getElementById('ticketsTo').value = _toDate;
+        const parse = value => {
+            const [year, month, day] = value.split('-').map(Number);
+            return Date.UTC(year, month - 1, day);
+        };
+        const days = _dateRangeApplied ? Math.round((parse(_toDate) - parse(_fromDate)) / 86400000) : null;
+        _relativeDays = _toDate === fmtDate(new Date()) && [7, 30, 90, 365].includes(days) ? days : null;
+        document.querySelectorAll('.tf-ticket-presets button').forEach(button => {
+            const active = button.dataset.dateMode === 'all'
+                ? !_dateRangeApplied
+                : _relativeDays !== null && Number(button.dataset.days) === _relativeDays;
+            button.classList.toggle('is-active', active);
+            button.setAttribute('aria-pressed', String(active));
+        });
+    }
+
     function filterParams() {
         const p = new URLSearchParams();
         if (_brandId) p.set('brand_id', _brandId);
+        if (_dateMode) p.set('date_mode', _dateMode);
         if (_fromDate) p.set('from', _fromDate);
         if (_toDate) p.set('to', _toDate);
         const query = p.toString();
@@ -89,6 +114,7 @@
         const p = new URLSearchParams();
         p.set('view', _currentView || 'mis_tickets');
         if (_brandId) p.set('brand_id', _brandId);
+        if (_dateMode) p.set('date_mode', _dateMode);
         if (_fromDate) p.set('from', _fromDate);
         if (_toDate) p.set('to', _toDate);
         if (_sortBy) {
@@ -305,11 +331,14 @@
 
     async function refreshFilterCounts(force) {
         const refreshIcon = document.getElementById("refreshIcon");
+        const seq = ++_countsRequestSeq;
+        const params = filterParams();
         try {
             refreshIcon.classList.add("spin-once");
             const forceParam = force === true ? '&force_counts=1' : '';
-            const response = await fetch(`/tickets/filter/?counts=1&counts_only=1&page_size=${_pageSize}${forceParam}${filterParams()}`);
+            const response = await fetch(`/tickets/filter/?counts=1&counts_only=1&page_size=${_pageSize}${forceParam}${params}`);
             const json = await response.json();
+            if (seq !== _countsRequestSeq || params !== filterParams()) return;
             if (json.filtros) {
                 for (const [key, value] of Object.entries(json.filtros)) {
                     const span = document.querySelector(`#filters li[data-view="${key}"] .filter-count`);
@@ -343,6 +372,7 @@
         _currentView = view;
         _currentPage = page;
         _totalRequestSeq++;
+        const seq = ++_loadRequestSeq;
 
         const spinner = document.getElementById("loadingSpinner");
         const tbody   = document.getElementById("ticketsTableBody");
@@ -356,10 +386,8 @@
             if (_sortBy) url += `&sort_by=${_sortBy}&sort_dir=${_sortDir}`;
             const response = await fetch(url);
             const json = await response.json();
-            _dateRangeApplied = json.applied_filters?.date_range_applied !== false;
-            document.querySelectorAll('.tf-ticket-presets button, #ticketsFrom, #ticketsTo').forEach(el => {
-                el.disabled = !_dateRangeApplied;
-            });
+            if (seq !== _loadRequestSeq) return;
+            syncDateControls(json.applied_filters);
             _lastRenderedCount = Array.isArray(json.tickets) ? json.tickets.length : 0;
 
             if (!json.tickets || json.tickets.length === 0) {
@@ -468,6 +496,8 @@
                 else { u.searchParams.delete("sort_by"); u.searchParams.delete("sort_dir"); }
                 if (_brandId) u.searchParams.set("brand_id", _brandId);
                 else u.searchParams.delete("brand_id");
+                if (_dateMode) u.searchParams.set('date_mode', _dateMode);
+                else u.searchParams.delete('date_mode');
                 if (_fromDate) u.searchParams.set("from", _fromDate);
                 else u.searchParams.delete("from");
                 if (_toDate) u.searchParams.set("to", _toDate);
@@ -475,10 +505,11 @@
                 window.history.replaceState({}, "", u);
             }
         } catch (err) {
+            if (seq !== _loadRequestSeq) return;
             console.error("Error cargando tickets:", err);
             tbody.innerHTML = emptyRow(COLSPAN, 'Error al cargar tickets.', 'var(--color-danger)');
         } finally {
-            spinner.style.display = "none";
+            if (seq === _loadRequestSeq) spinner.style.display = "none";
         }
     }
     window.loadTickets = loadTickets;
@@ -663,32 +694,24 @@
         const savedSort = getUrlParam("sort_by");
         if (savedSort) { _sortBy = savedSort; _sortDir = getUrlParam("sort_dir") || 'asc'; }
 
+        const savedDateMode = getUrlParam('date_mode');
+        _dateMode = ['all', 'range'].includes(savedDateMode) ? savedDateMode : null;
         setPreset(30);
         _fromDate = getUrlParam('from') || _fromDate;
         _toDate = getUrlParam('to') || _toDate;
+        if (_dateMode === 'all') _fromDate = _toDate = '';
         normalizeRange();
         document.getElementById('ticketsFrom').value = _fromDate;
         document.getElementById('ticketsTo').value = _toDate;
 
         const presetButtons = document.querySelectorAll('.tf-ticket-presets button');
-        function setActivePreset(days) {
-            _relativeDays = days;
-            presetButtons.forEach(button => {
-                const active = days !== null && parseInt(button.dataset.days, 10) === days;
-                button.classList.toggle('is-active', active);
-                button.setAttribute('aria-pressed', active ? 'true' : 'false');
-            });
+        async function applyDateFilter() {
+            normalizeRange();
+            _lastExactTotal = null;
+            clearSelection();
+            await loadTickets(_currentView, 1);
+            await refreshFilterCounts(true);
         }
-        function syncPresetFromRange() {
-            const today = fmtDate(new Date());
-            const parse = (value) => {
-                const [year, month, day] = value.split('-').map(Number);
-                return Date.UTC(year, month - 1, day);
-            };
-            const days = Math.round((parse(_toDate) - parse(_fromDate)) / 86400000);
-            setActivePreset(_toDate === today && [7, 30, 90, 365].includes(days) ? days : null);
-        }
-        syncPresetFromRange();
 
         const brandSel = document.getElementById('brandFilter');
         const savedBrand = getUrlParam('brand_id');
@@ -706,13 +729,14 @@
 
         presetButtons.forEach(button => {
             button.addEventListener('click', () => {
-                const days = parseInt(button.dataset.days, 10);
-                setPreset(days);
-                setActivePreset(days);
-                _lastExactTotal = null;
-                clearSelection();
-                loadTickets(_currentView, 1);
-                refreshFilterCounts(true);
+                _dateMode = button.dataset.dateMode === 'all' ? 'all' : 'range';
+                if (_dateMode === 'all') {
+                    _fromDate = _toDate = '';
+                    _relativeDays = null;
+                } else {
+                    setPreset(parseInt(button.dataset.days, 10));
+                }
+                applyDateFilter();
             });
         });
 
@@ -720,13 +744,16 @@
             input.addEventListener('change', () => {
                 _fromDate = document.getElementById('ticketsFrom').value;
                 _toDate = document.getElementById('ticketsTo').value;
-                if (!_fromDate || !_toDate) setPreset(30);
-                normalizeRange();
-                syncPresetFromRange();
-                _lastExactTotal = null;
-                clearSelection();
-                loadTickets(_currentView, 1);
-                refreshFilterCounts(true);
+                _dateMode = _fromDate || _toDate ? 'range' : 'all';
+                if (_dateMode === 'range') {
+                    if (!_toDate) _toDate = fmtDate(new Date());
+                    if (!_fromDate) {
+                        const from = new Date(_toDate + 'T12:00:00');
+                        from.setDate(from.getDate() - 30);
+                        _fromDate = fmtDate(from);
+                    }
+                }
+                applyDateFilter();
             });
         });
 
