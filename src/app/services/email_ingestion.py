@@ -14,7 +14,7 @@ from django.utils.html import strip_tags
 from app.api import APIValidationError
 from app.models import Attachment, Comment, InboundEmailLog, Role, Ticket, TicketEvent, User
 from app.permissions import is_agent
-from app.sanitizers import sanitize_email_html
+from app.sanitizers import resolve_inline_cids, sanitize_email_html
 from app.services.attachments import AttachmentService
 from app.services.metrics import record_metric
 from app.services.notifications import NotificationService
@@ -144,6 +144,7 @@ class EmailIngestionService:
         sender_email = sender.get("address", "").strip().lower()
         sender_name = sender.get("name", "")
         text_body, html_body = EmailIngestionService.extract_body(message)
+        inline_html_body = html_body
         if html_body:
             html_body = sanitize_email_html(html_body)
 
@@ -172,6 +173,7 @@ class EmailIngestionService:
         if existing_comment:
             EmailIngestionService._store_attachments(
                 existing_comment.ticket, existing_comment, requester, attachments,
+                html_body=inline_html_body,
             )
             return "skip_dup", existing_comment.ticket
 
@@ -186,6 +188,7 @@ class EmailIngestionService:
                 )
             EmailIngestionService._store_attachments(
                 existing_ticket, comment, requester, attachments,
+                html_body=inline_html_body,
             )
             return "skip_dup", existing_ticket
 
@@ -202,6 +205,7 @@ class EmailIngestionService:
             )
             EmailIngestionService._store_attachments(
                 ticket, comment, requester, attachments,
+                html_body=inline_html_body,
             )
             return "comment_added", ticket
 
@@ -232,7 +236,7 @@ class EmailIngestionService:
             comment = EmailIngestionService._create_attachment_only_comment(
                 ticket, requester, msg_id,
             )
-        EmailIngestionService._store_attachments(ticket, comment, requester, attachments)
+        EmailIngestionService._store_attachments(ticket, comment, requester, attachments, html_body=inline_html_body)
         return "ticket_created", ticket
 
     @staticmethod
@@ -280,13 +284,13 @@ class EmailIngestionService:
         )
 
     @staticmethod
-    def _store_attachments(ticket, comment, actor, attachments):
+    def _store_attachments(ticket, comment, actor, attachments, *, html_body=None):
         """Guarda adjuntos descargados y permite reanudar sin duplicarlos."""
         if not attachments or comment is None:
             return []
 
         existing = Counter(
-            Attachment.objects.filter(comment=comment).values_list("original_name", "size")
+            Attachment.objects.filter(comment=comment, ticket=ticket).values_list("original_name", "size", "content_id", "is_inline")
         )
         encountered = Counter()
         stored = []
@@ -296,12 +300,18 @@ class EmailIngestionService:
                 item.get("content") or b"",
                 content_type=item.get("content_type") or "application/octet-stream",
             )
-            key = (AttachmentService.safe_name(uploaded.name), uploaded.size)
+            content_id = str(item.get('content_id') or '').strip().strip('<>')
+            is_inline = bool(item.get('is_inline'))
+            key = (AttachmentService.original_filename(uploaded.name), uploaded.size, content_id, is_inline)
             encountered[key] += 1
             if existing[key] >= encountered[key]:
                 continue
             try:
-                stored.append(AttachmentService.save(uploaded, ticket, actor, comment=comment))
+                attachment = AttachmentService.save(uploaded, ticket, actor, comment=comment)
+                attachment.content_id = content_id
+                attachment.is_inline = is_inline
+                attachment.save(update_fields=['content_id', 'is_inline'])
+                stored.append(attachment)
             except APIValidationError as exc:
                 if exc.status >= 500:
                     raise
@@ -314,6 +324,16 @@ class EmailIngestionService:
                         "error_code": exc.code,
                     },
                 )
+        if html_body:
+            previews = {
+                attachment.content_id: preview
+                for attachment in Attachment.objects.filter(comment=comment, ticket=ticket, is_inline=True).exclude(content_id='')
+                if (preview := AttachmentService.metadata(attachment)['preview_url'])
+            }
+            rendered = resolve_inline_cids(html_body, previews)
+            if rendered != comment.html_body:
+                comment.html_body = rendered
+                comment.save(update_fields=['html_body'])
         return stored
 
     @staticmethod

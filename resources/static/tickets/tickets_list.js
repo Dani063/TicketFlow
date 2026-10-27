@@ -24,6 +24,8 @@
     let _brandId     = '';
     let _fromDate    = '';
     let _toDate      = '';
+    let _relativeDays = null;
+    let _dateRangeApplied = true;
     let _lastExactTotal = null;
     let _selectedIds = new Set();
     let _lastRenderedCount = 0;
@@ -36,6 +38,7 @@
         twitter: 'Twitter', twitter_dm: 'Twitter DM', twitter_like: 'Twitter Like', internal: 'Interno',
     };
     function channelLabel(c) { return CHANNEL_LABELS[c] || c || '-'; }
+    const STATUS_LABELS = { open: 'Open', pending: 'Pending', on_hold: 'On-hold', resolved: 'Resolved', closed: 'Closed' };
 
     function slaBadge(sla) {
         if (!sla) return '-';
@@ -107,7 +110,8 @@
         const totalLabel = Number.isFinite(_lastExactTotal)
             ? `${_lastExactTotal} ticket${_lastExactTotal === 1 ? '' : 's'}`
             : 'Calculando tickets';
-        summary.textContent = `${totalLabel} · ${brandLabel} · ${viewLabel} · ${_fromDate} → ${_toDate}`;
+        const dates = _dateRangeApplied ? `${_fromDate} → ${_toDate}` : 'Sin límite de fecha';
+        summary.textContent = `${totalLabel} · ${brandLabel} · ${viewLabel} · ${dates}`;
     }
 
     function getUrlParam(name) {
@@ -332,6 +336,10 @@
         if (page === undefined) page = 1;
         if (updateUrl === undefined) updateUrl = true;
 
+        if (view === 'trash' && _currentView !== view) {
+            _sortBy = '';
+            _sortDir = 'desc';
+        }
         _currentView = view;
         _currentPage = page;
         _totalRequestSeq++;
@@ -348,6 +356,10 @@
             if (_sortBy) url += `&sort_by=${_sortBy}&sort_dir=${_sortDir}`;
             const response = await fetch(url);
             const json = await response.json();
+            _dateRangeApplied = json.applied_filters?.date_range_applied !== false;
+            document.querySelectorAll('.tf-ticket-presets button, #ticketsFrom, #ticketsTo').forEach(el => {
+                el.disabled = !_dateRangeApplied;
+            });
             _lastRenderedCount = Array.isArray(json.tickets) ? json.tickets.length : 0;
 
             if (!json.tickets || json.tickets.length === 0) {
@@ -374,7 +386,7 @@
                         fragment.appendChild(headerRow);
                         _prevGroup = t.group_value;
                     }
-                    const isClosed = (t.status === 'closed');
+                    const isClosed = t.status === 'closed' && view !== 'trash';
                     const row = document.createElement("tr");
                     row.dataset.ticketId = t.id;
                     row.dataset.status = t.status;
@@ -419,7 +431,7 @@
 
                     row.innerHTML = `
                       <td>${t.id}</td>
-                      <td><span class="status-dot status-${t.status}"></span></td>
+                      <td><span class="status-dot status-${t.status}" title="${STATUS_LABELS[t.status] || t.status}"></span></td>
                       <td>${t.requester}</td>
                       <td>${t.updated_at}</td>
                       <td>${t.service}</td>
@@ -430,6 +442,12 @@
                     `;
                     row.insertBefore(cbCell, row.firstChild);
                     row.cells[2].appendChild(subjectSpan);
+                    if (view === 'trash') {
+                        const audit = document.createElement('small');
+                        audit.className = 'tf-trash-meta';
+                        audit.textContent = `Eliminado: ${t.deleted_at || 'fecha no registrada'} · Por: ${t.deleted_by || 'usuario no registrado'}`;
+                        row.cells[2].appendChild(audit);
+                    }
                     fragment.appendChild(row);
                 });
                 tbody.appendChild(fragment);
@@ -466,7 +484,12 @@
     window.loadTickets = loadTickets;
 
     function init() {
-        document.getElementById("refreshFilters").addEventListener("click", () => refreshFilterCounts(true));
+        document.getElementById("refreshFilters").addEventListener("click", async () => {
+            if (_relativeDays !== null) setPreset(_relativeDays);
+            _lastExactTotal = null;
+            await loadTickets(_currentView, _currentPage);
+            await refreshFilterCounts(true);
+        });
 
         const viewFilters = document.querySelectorAll("#filters li[data-view]");
         const filterSections = Array.from(document.querySelectorAll(
@@ -649,6 +672,7 @@
 
         const presetButtons = document.querySelectorAll('.tf-ticket-presets button');
         function setActivePreset(days) {
+            _relativeDays = days;
             presetButtons.forEach(button => {
                 const active = days !== null && parseInt(button.dataset.days, 10) === days;
                 button.classList.toggle('is-active', active);
@@ -803,7 +827,7 @@
                     loadTickets(_currentView, _currentPage);
                     refreshFilterCounts(true);
                 } else {
-                    window.toast.error(json.error || 'Error al eliminar');
+                    window.toast.error(json.detail || json.error?.message || 'Error al eliminar');
                 }
             } catch (e) { window.toast.error('Error de red'); }
         });
@@ -812,6 +836,24 @@
         if (_elActionMerge) _elActionMerge.addEventListener('click', () => {
             if (_selectedIds.size === 0) return;
             openBulkMergeModal();
+        });
+
+        document.getElementById('actionRestore')?.addEventListener('click', async () => {
+            if (_currentView !== 'trash' || !_selectedIds.size) return;
+            try {
+                const response = await fetch('/tickets/bulk_restore/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+                    body: JSON.stringify({ids: [..._selectedIds]}),
+                });
+                const json = await response.json();
+                if (!response.ok || !json.ok) throw new Error(json.detail || 'No se pudieron restaurar los tickets.');
+                window.toast.success(`${json.restored} ticket(s) restaurado(s)`);
+                await loadTickets(_currentView, _currentPage);
+                await refreshFilterCounts(true);
+            } catch (error) {
+                window.toast.error(error.message || 'Error de red al restaurar.');
+            }
         });
 
         const _elBmmClose = document.getElementById('bmmClose');
@@ -867,6 +909,13 @@
     }
 
     function updateActionBar() {
+        const trash = _currentView === 'trash';
+        for (const id of ['actionMerge', 'actionDelete']) {
+            const button = document.getElementById(id);
+            if (button) button.hidden = trash;
+        }
+        const restore = document.getElementById('actionRestore');
+        if (restore) restore.hidden = !trash;
         const count = _selectedIds.size;
         const countEl = document.getElementById('tabActionCount');
         if (countEl) countEl.textContent = count;
@@ -999,10 +1048,19 @@
     // ---- Subject hover preview ----
     const _card = document.getElementById("ticket-preview-card");
     let _hoverTimer = null;
+    // La SPA vuelve a ejecutar este fichero al regresar a Vistas. Retirar los
+    // listeners y el temporizador anteriores evita conservar nodos ya desmontados.
+    if (window.__tfTicketListHoverDispose) window.__tfTicketListHoverDispose();
+    const hoverController = new AbortController();
+    window.__tfTicketListHoverDispose = () => {
+        hoverController.abort();
+        clearTimeout(_hoverTimer);
+        if (_card) _card.style.display = 'none';
+    };
 
     function _showCard(span, e) {
         const s = span.dataset;
-        _card.querySelector(".tpc-status").textContent = s.status;
+        _card.querySelector(".tpc-status").textContent = STATUS_LABELS[s.status] || s.status;
         _card.querySelector(".tpc-status").className = "tpc-status status-" + s.status;
         _card.querySelector(".tpc-subject").textContent = s.subject;
         _card.querySelector(".tpc-priority").textContent = s.priority ? "(" + s.priority + ")" : "";
@@ -1036,21 +1094,23 @@
 
     document.addEventListener("mouseover", function(e) {
         const span = e.target.closest(".subject-text");
-        if (!span) return;
+        if (!span || !span.closest('#ticketsTableBody') || !_card?.isConnected) return;
         clearTimeout(_hoverTimer);
-        _hoverTimer = setTimeout(() => _showCard(span, e), 250);
-    });
+        _hoverTimer = setTimeout(() => {
+            if (span.isConnected && _card.isConnected) _showCard(span, e);
+        }, 250);
+    }, { signal: hoverController.signal });
 
     document.addEventListener("mouseout", function(e) {
         const span = e.target.closest(".subject-text");
-        if (!span) return;
+        if (!span || !span.closest('#ticketsTableBody') || !_card?.isConnected) return;
         clearTimeout(_hoverTimer);
         _card.style.display = "none";
-    });
+    }, { signal: hoverController.signal });
 
     document.addEventListener("mousemove", function(e) {
-        if (_card.style.display === "block") _positionCard(e);
-    });
+        if (_card?.isConnected && _card.style.display === "block") _positionCard(e);
+    }, { signal: hoverController.signal });
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);

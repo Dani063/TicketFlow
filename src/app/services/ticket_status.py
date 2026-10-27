@@ -3,8 +3,9 @@
 Estados: open, pending, resolved, on_hold y closed (#21384).
 
 - ``on_hold`` es el cierre que ponen los agentes. Cuenta como resuelto y pausa
-  el SLA. Si nadie toca el ticket en TICKET_ON_HOLD_CLOSE_HOURS, el sistema lo
-  pasa a ``closed``; cualquier comentario o edición antes lo devuelve a open.
+  el SLA. Tras TICKET_ON_HOLD_CLOSE_HOURS en ese estado, el sistema lo pasa
+  a ``closed``; una respuesta del cliente antes lo devuelve a open.
+  Las notas internas y los cambios de campos mantienen la espera y su reloj.
 - ``closed`` solo lo pone el sistema (o una fusión) y ya no admite cambios: si
   el cliente vuelve a escribir, la ingesta abre un ticket nuevo.
 
@@ -124,7 +125,7 @@ def apply_status(ticket, actor, new_status, now):
 
 
 def interrupt_on_hold(ticket, actor, now):
-    """Comentar o editar un ticket en on_hold lo devuelve a open."""
+    """Reabre on_hold por respuesta del cliente; un agente cambia el estado explícitamente."""
     if ticket.status != "on_hold":
         return False
     return transition(ticket, actor, "open", now)

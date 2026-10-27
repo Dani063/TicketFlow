@@ -202,13 +202,22 @@ def find_by_internet_message_id(mailbox, internet_message_id, headers):
 def fetch_attachments(mailbox, message_id, headers):
     """Descarga adjuntos de archivo de Graph antes de procesar el mensaje.
 
-    Las imágenes inline suelen ser logotipos de firma y se omiten. Los tipos o
-    tamaños no admitidos tampoco bloquean la creación del ticket.
+    Las imágenes inline conservan su Content-ID y no consumen el cupo de
+    archivos de la galería. Los tipos o tamaños no admitidos no bloquean el correo.
     """
     base = f'{_user_path(mailbox)}/messages/{quote(message_id, safe="")}/attachments'
+    # contentId pertenece al tipo derivado, no a attachment.
     response = _request('GET', base, headers, params={
-        '$select': 'id,name,contentType,size,isInline', '$top': '25',
+        '$select': 'id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId', '$top': '25',
     })
+    items = []
+    while True:
+        listing = response.json()
+        items.extend(listing.get('value', []))
+        next_link = listing.get('@odata.nextLink')
+        if not next_link:
+            break
+        response = _request('GET', next_link, headers)
 
     max_files = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_FILES', 5)
     max_bytes = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_BYTES', 15 * 1024 * 1024)
@@ -216,16 +225,18 @@ def fetch_attachments(mailbox, message_id, headers):
     allowed = getattr(settings, 'PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS', set())
     accepted = []
     total = 0
-    for item in response.json().get('value', []):
-        if item.get('isInline') or item.get('@odata.type') not in (
+    regular_count = 0
+    for item in items:
+        if item.get('@odata.type') not in (
             None, '#microsoft.graph.fileAttachment',
         ):
             continue
         name = os.path.basename((item.get('name') or 'archivo').replace('\\', '/'))
         extension = os.path.splitext(name)[1].lower().lstrip('.')
         declared_size = int(item.get('size') or 0)
+        is_inline = bool(item.get('isInline'))
         if (
-            len(accepted) >= max_files
+            (not is_inline and regular_count >= max_files)
             or not extension
             or extension not in allowed
             or declared_size > max_bytes
@@ -250,8 +261,12 @@ def fetch_attachments(mailbox, message_id, headers):
             'name': name,
             'content_type': item.get('contentType') or 'application/octet-stream',
             'content': content,
+            'is_inline': is_inline,
+            'content_id': str(item.get('contentId') or '').strip().strip('<>'),
         })
         total += len(content)
+        if not is_inline:
+            regular_count += 1
     return accepted
 
 

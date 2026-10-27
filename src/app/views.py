@@ -4,6 +4,7 @@ Definition of views.
 # -*- coding: utf-8 -*-
 from django.db import transaction
 from django.db.models import Q, OuterRef, Subquery, Count, Max, Case, When, IntegerField, F
+from django.db.models.functions import Coalesce
 from django.utils.dateparse import parse_datetime
 from datetime import datetime, timedelta
 from collections import deque
@@ -42,6 +43,9 @@ from .services.notifications import NotificationService
 from .services.satisfaction import SatisfactionService
 from .services.sla import SLAService
 from .services.tickets import TicketService
+from .services.ticket_status import SOLVED_STATUSES
+from .services.ticket_trash import TicketTrashService
+from .services.presence import heartbeat as ticket_presence_heartbeat
 from .services.user_admin import UserAdminService
 
 logger = logging.getLogger('app.views')
@@ -70,6 +74,14 @@ def _cached_all_users():
 _DEFAULT_PAGE_SIZE = 50
 _ALLOWED_PAGE_SIZES = {10, 20, 50, 100, 150}
 _TICKET_FILTER_COUNTS_TTL = 15
+
+# Las colas muestran trabajo vivo aunque el ticket se crease hace meses.
+_TICKET_QUEUE_VIEWS = {
+    'unsolved_no_tareas', 'all_unsolved_no_tareas', 'unassigned', 'pendientes',
+    'unsolved_groups', 'internos_comuny', 'abiertos_ecomfax', 'recordia_sgsd',
+    'sus_pendientes', 'espera', 'abiertos', 'sus_no_cerrados', 'no_resueltos',
+    'new_in_groups', 'open', 'no_update_48h', 'sla_breached', 'sla_at_risk', 'trash',
+}
 
 _TICKET_SORT_FIELDS = {
     'id':         'id',
@@ -120,6 +132,7 @@ _TICKET_GROUP_BY = {
 }
 
 _TICKET_VIEW_LABELS = {
+    'trash': 'Tickets eliminados',
     'mis_tickets': 'Todos tus tickets',
     'telefonica_mes': 'Tickets Telefónica último mes',
     'unsolved_no_tareas': 'Tus tickets no resueltos (sin tareas)',
@@ -172,9 +185,9 @@ _CUSTOMER_SORT_FIELDS = {
 
 _PROFILE_STATUS_FILTERS = {
     'all':     None,
-    'open':    {'exclude': ['closed', 'resolved']},
+    'open':    {'exclude': SOLVED_STATUSES},
     'pending': {'filter': ['pending']},
-    'solved':  {'filter': ['closed', 'resolved']},
+    'solved':  {'filter': SOLVED_STATUSES},
 }
 
 
@@ -303,31 +316,13 @@ def _parse_page_size(raw):
         return _DEFAULT_PAGE_SIZE
 
 
-def _active_assignment_agents():
-    """Agentes seleccionados en miembros activos de reglas de reparto activas."""
-    return list(
-        AssignmentService.agent_queryset()
-        .filter(
-            assignment_rule_memberships__active=True,
-            assignment_rule_memberships__rule__active=True,
-        )
-        .distinct()
-        .order_by('name', 'id')
-        .values('id', 'name', 'email')
-    )
-
-
-def _active_assignment_agent_ids():
-    return (
-        AssignmentService.agent_queryset()
-        .filter(
-            assignment_rule_memberships__active=True,
-            assignment_rule_memberships__rule__active=True,
-        )
-        .order_by()
-        .values_list('id', flat=True)
-        .distinct()
-    )
+def _listing_assignees(tickets):
+    """Todos los asignados presentes en la cola, incluidas las filas sin asignar."""
+    rows = tickets.order_by().values('assignee_id', 'assignee__name', 'assignee__email').annotate(
+        total=Count('id'),
+    ).order_by(F('assignee__name').asc(nulls_last=True), 'assignee_id')
+    return [{'id': row['assignee_id'], 'name': row['assignee__name'] or row['assignee__email'] or 'Sin asignar',
+             'email': row['assignee__email'] or '', 'total': row['total']} for row in rows]
 
 
 def _balanced_agent_page(agent_counts, page, page_size):
@@ -400,19 +395,22 @@ def _parse_filter_date_range(params, default_days=30, max_days=366):
     return date_from, date_to, start_dt, end_dt
 
 
-def _ticket_listing_queryset(request):
+def _view_uses_date_range(view):
+    return not (view in _TICKET_QUEUE_VIEWS or (view or '').startswith('home_'))
+
+
+def _ticket_listing_queryset(request, *, view=None):
     """Query base de /tickets con empresa y fechas aplicadas una sola vez."""
-    base_qs = _base_tickets_queryset(request.user)
+    view = (request.GET.get('view') or '') if view is None else view
+    if view == 'trash':
+        base_qs = Ticket.objects.filter(is_deleted=True, merged_into__isnull=True) if _is_agent(request.user) else Ticket.objects.none()
+    else:
+        base_qs = _base_tickets_queryset(request.user)
     brand_id = _as_int_or_none(request.GET.get('brand_id'))
     date_from, date_to, start_dt, end_dt = _parse_filter_date_range(request.GET)
     if brand_id:
         base_qs = base_qs.filter(brand_id=brand_id)
-    # La home no tiene selector de fechas y sus contadores no llevan rango:
-    # con el de 30 días por defecto, un ticket abierto creado hace meses
-    # contaba en «Tú» pero no salía en la tabla. Las vistas home_* ya acotan
-    # por su cuenta lo que tiene cota temporal (las de los últimos 60 días).
-    view = request.GET.get('view') or ''
-    if not view.startswith('home_'):
+    if _view_uses_date_range(view):
         base_qs = base_qs.filter(created_at__range=(start_dt, end_dt))
     return base_qs, brand_id, date_from, date_to
 
@@ -424,6 +422,7 @@ def _ticket_filter_payload(brand_id, date_from, date_to, view=None):
         'to': str(date_to),
         'view': view or '',
         'view_label': _TICKET_VIEW_LABELS.get(view, 'Todos los tickets'),
+        'date_range_applied': _view_uses_date_range(view),
     }
 
 
@@ -441,8 +440,18 @@ def _base_tickets_queryset(user):
     return qs.filter(Q(requester=user) | Q(ccs=user)).distinct().order_by('-updated_at')
 
 
+def _my_tickets_queryset(base_qs, user):
+    if _is_agent(user):
+        return base_qs.filter(assignee=user)
+    return base_qs.filter(Q(requester=user) | Q(ccs=user)).distinct()
+
+
 def _tickets_for_view(base_qs, view, user):
     now = timezone.now()
+    if view == 'trash':
+        return base_qs.filter(is_deleted=True).annotate(
+            trash_date=Coalesce('deleted_at', 'updated_at'),
+        ).order_by('-trash_date', '-id')
 
     # --- Vistas del dashboard (home) -------------------------------------
     # Siempre acotadas al usuario: _base_tickets_queryset devuelve TODOS los
@@ -451,9 +460,7 @@ def _tickets_for_view(base_qs, view, user):
     # botón correspondiente en home(), para que el número del botón y las
     # filas que salen al pulsarlo coincidan.
     if view and view.startswith("home_"):
-        mine = base_qs.filter(
-            Q(requester=user) | Q(assignee=user) | Q(ccs=user)
-        ).distinct()
+        mine = _my_tickets_queryset(base_qs, user)
         cutoff_60 = now - timedelta(days=60)
         if view == "home_you":
             return mine.filter(status="open")
@@ -479,10 +486,10 @@ def _tickets_for_view(base_qs, view, user):
             ).distinct()
         if view == "home_solventado":
             return mine.filter(
-                status__in=["closed", "resolved"], updated_at__gte=cutoff_60
+                status__in=SOLVED_STATUSES, updated_at__gte=cutoff_60
             )
-        # home_all: lo que requiere atención (todo lo mío sin cerrar).
-        return mine.exclude(status__in=["closed", "resolved"])
+        # home_all replica «Tus tickets no resueltos (sin tareas)».
+        return mine.exclude(status__in=SOLVED_STATUSES).exclude(type='task')
 
     if view == "mis_tickets":
         return base_qs
@@ -492,14 +499,13 @@ def _tickets_for_view(base_qs, view, user):
             created_at__gte=now - timedelta(days=30),
         )
     if view == "unsolved_no_tareas":
-        return base_qs.filter(~Q(status__in=["closed", "resolved"]), ~Q(type="task"))
+        return _my_tickets_queryset(base_qs, user).filter(~Q(status__in=SOLVED_STATUSES), ~Q(type="task"))
     if view == "unassigned":
         return base_qs.filter(assignee__isnull=True)
     if view == "all_unsolved_no_tareas":
         return base_qs.filter(
-            ~Q(status__in=["closed", "resolved"]),
+            ~Q(status__in=SOLVED_STATUSES),
             ~Q(type="task"),
-            assignee_id__in=_active_assignment_agent_ids(),
         )
     if view == "recently_updated":
         return base_qs.filter(updated_at__gte=now - timedelta(hours=24))
@@ -510,7 +516,7 @@ def _tickets_for_view(base_qs, view, user):
     if view == "tareas":
         return base_qs.filter(type="task")
     if view == "unsolved_groups":
-        return base_qs.filter(~Q(status__in=["closed", "resolved"]), assignee__group=user.group)
+        return base_qs.filter(~Q(status__in=SOLVED_STATUSES), assignee__group=user.group)
     if view == "rated_last7":
         since = now - timedelta(days=7)
         rated_ids = SatisfactionRating.objects.filter(
@@ -528,7 +534,7 @@ def _tickets_for_view(base_qs, view, user):
     if view == "sus_pendientes":
         return base_qs.filter(requester=user, status="pending")
     if view == "espera":
-        return base_qs.filter(status="espera") if hasattr(Ticket, "espera") else base_qs.none()
+        return base_qs.filter(status="on_hold")
     if view == "abiertos":
         return base_qs.filter(status="open")
     if view == "sus_no_cerrados":
@@ -538,7 +544,7 @@ def _tickets_for_view(base_qs, view, user):
     if view == "ultimos_cerrados":
         return base_qs.filter(status="closed")
     if view == "no_resueltos":
-        return base_qs.exclude(status="resolved")
+        return base_qs.exclude(status__in=SOLVED_STATUSES)
     if view == "twitter":
         return base_qs.filter(channel="twitter")
     if view == "twitter_dm":
@@ -556,10 +562,10 @@ def _tickets_for_view(base_qs, view, user):
     if view == "no_update_48h":
         return base_qs.filter(updated_at__lte=now - timedelta(hours=48))
     if view == "sla_breached":
-        return base_qs.filter(sla_breached_at__isnull=False).exclude(status__in=["closed", "resolved"])
+        return base_qs.filter(sla_breached_at__isnull=False).exclude(status__in=SOLVED_STATUSES)
     if view == "sla_at_risk":
         return SLAService.annotate_urgency(
-            base_qs.filter(sla_breached_at__isnull=True).exclude(status__in=["closed", "resolved"])
+            base_qs.filter(sla_breached_at__isnull=True).exclude(status__in=SOLVED_STATUSES)
         ).filter(
             sla_next_due__gt=now,
             sla_next_due__lte=now + timedelta(minutes=SLA_AT_RISK_WINDOW_MINUTES),
@@ -571,9 +577,7 @@ def _home_stats(user):
     # Mismo universo que la tabla (_base_tickets_queryset): sin fusionados ni
     # eliminados, o el número del botón no cuadra con las filas al pulsarlo.
     live = Ticket.objects.filter(merged_into__isnull=True, is_deleted=False)
-    tickets_qs = live.filter(
-        Q(requester=user) | Q(assignee=user) | Q(ccs=user)
-    ).distinct()
+    tickets_qs = _my_tickets_queryset(_base_tickets_queryset(user), user)
 
     # --- Tickets Abiertos ---
     abiertos_you = tickets_qs.filter(status="open").count()
@@ -585,7 +589,7 @@ def _home_stats(user):
 
     cutoff_60  = timezone.now() - timedelta(days=60)
     solventado = tickets_qs.filter(
-        status__in=["closed", "resolved"],
+        status__in=SOLVED_STATUSES,
         updated_at__gte=cutoff_60,
     ).count()
 
@@ -593,7 +597,7 @@ def _home_stats(user):
     # /tickets/filter/?view=home_* con paginación y orden, igual que /tickets/.
     # Aquí solo hace falta el total para el encabezado, y el propio JS lo
     # refresca con el que devuelve la API en cada carga.
-    pendientes_count = tickets_qs.exclude(status__in=['closed', 'resolved']).count()
+    pendientes_count = tickets_qs.exclude(status__in=SOLVED_STATUSES).exclude(type='task').count()
 
     # Personal bien/mal: tickets del usuario, últimos 60 días
     user_ratings_60 = SatisfactionRating.objects.filter(
@@ -604,14 +608,8 @@ def _home_stats(user):
     bien = user_ratings_60.filter(score='good').count()
     mal  = user_ratings_60.filter(score='bad').count()
 
-    # Satisfacción global (todos los agentes, últimos 60 días)
-    global_60   = SatisfactionRating.objects.filter(
-        created_at__gte=cutoff_60, score__in=['good', 'bad']
-    )
-    bien_g      = global_60.filter(score='good').count()
-    mal_g       = global_60.filter(score='bad').count()
-    total_rated = bien_g + mal_g
-    satisfaccion_pct = round((bien_g / total_rated) * 100) if total_rated > 0 else None
+    total_rated = bien + mal
+    satisfaccion_pct = round((bien / total_rated) * 100) if total_rated > 0 else None
 
     return {
         "pendientes_count": pendientes_count,
@@ -657,6 +655,8 @@ def filter_tickets(request):
     Parámetros: view, page (1-based), counts=1 (opcional, activa el cálculo de contadores).
     """
     view = request.GET.get("view")
+    if view == 'trash' and not _is_agent(request.user):
+        return json_error('forbidden', 'Solo agentes pueden ver la papelera.', status=403)
     compute_counts = request.GET.get("counts", "0") == "1"
     counts_only = request.GET.get("counts_only", "0") == "1"
     force_counts = request.GET.get("force_counts", "0") == "1"
@@ -705,58 +705,67 @@ def filter_tickets(request):
 
     if compute_counts:
         _now = timezone.now()
+        # El lateral mezcla colas e históricos. Sus contadores son independientes
+        # de la vista activa: solo los históricos se acotan por creación.
+        queue_qs = _ticket_listing_queryset(request, view='unassigned')[0]
+        ranged_qs = _ticket_listing_queryset(request, view='mis_tickets')[0]
+        _, _, start_dt, end_dt = _parse_filter_date_range(request.GET)
+        in_range = Q(created_at__range=(start_dt, end_dt))
+        mine = Q(assignee=request.user) if _is_agent(request.user) else Q()
 
         # Query 1: aggregate condicional — una sola pasada sobre la tabla base
         # cubre todos los contadores basados en status/type/channel/service/assignee.
         _user_group = request.user.group
-        _agg = base_qs.aggregate(
-            mis_tickets      = Count('id'),
+        _agg = queue_qs.aggregate(
+            mis_tickets      = Count('id', filter=in_range),
             n_open           = Count(Case(When(status='open',     then=1), output_field=IntegerField())),
             n_pending        = Count(Case(When(status='pending',  then=1), output_field=IntegerField())),
-            n_closed         = Count(Case(When(status='closed',   then=1), output_field=IntegerField())),
-            n_resolved       = Count(Case(When(status='resolved', then=1), output_field=IntegerField())),
-            n_tarea          = Count(Case(When(type='task',       then=1), output_field=IntegerField())),
-            n_twitter        = Count(Case(When(channel='twitter',      then=1), output_field=IntegerField())),
-            n_twitter_dm     = Count(Case(When(channel='twitter_dm',   then=1), output_field=IntegerField())),
-            n_twitter_like   = Count(Case(When(channel='twitter_like', then=1), output_field=IntegerField())),
+            n_closed         = Count('id', filter=in_range & Q(status='closed')),
+            n_resolved       = Count('id', filter=in_range & Q(status='resolved')),
+            n_tarea          = Count('id', filter=in_range & Q(type='task')),
+            n_twitter        = Count('id', filter=in_range & Q(channel='twitter')),
+            n_twitter_dm     = Count('id', filter=in_range & Q(channel='twitter_dm')),
+            n_twitter_like   = Count('id', filter=in_range & Q(channel='twitter_like')),
+            n_on_hold        = Count('id', filter=Q(status='on_hold')),
+            n_mine_unsolved  = Count('id', filter=mine & ~Q(status__in=SOLVED_STATUSES) & ~Q(type='task')),
             n_comuny         = Count(Case(When(service='internocomuny',  status='open', then=1), output_field=IntegerField())),
             n_ecomfax        = Count(Case(When(service='ecomfax',        status='open', then=1), output_field=IntegerField())),
             n_recordia       = Count(Case(When(service='recordia',       status='open', then=1), output_field=IntegerField())),
             n_unassigned     = Count(Case(When(assignee__isnull=True,    then=1), output_field=IntegerField())),
             n_unsolved_notarea = Count(Case(
-                When(~Q(status__in=['closed', 'resolved']) & ~Q(type='task'), then=1),
+                When(~Q(status__in=SOLVED_STATUSES) & ~Q(type='task'), then=1),
                 output_field=IntegerField()
             )),
-            n_no_resueltos   = Count(Case(When(~Q(status='resolved'), then=1), output_field=IntegerField())),
+            n_no_resueltos   = Count('id', filter=~Q(status__in=SOLVED_STATUSES)),
             n_sla_breached   = Count(Case(
-                When(Q(sla_breached_at__isnull=False) & ~Q(status__in=['closed', 'resolved']), then=1),
+                When(Q(sla_breached_at__isnull=False) & ~Q(status__in=SOLVED_STATUSES), then=1),
                 output_field=IntegerField()
             )),
         )
 
         # SLA en riesgo requiere la anotación sla_next_due — query propia pequeña.
         n_sla_at_risk = _ensure_urgency(
-            base_qs.filter(sla_breached_at__isnull=True).exclude(status__in=['closed', 'resolved'])
+            queue_qs.filter(sla_breached_at__isnull=True).exclude(status__in=SOLVED_STATUSES)
         ).filter(
             sla_next_due__gt=_now,
             sla_next_due__lte=_now + timedelta(minutes=SLA_AT_RISK_WINDOW_MINUTES),
         ).count()
 
         # Query 2: contadores dependientes del usuario actual (requester/group)
-        _user_agg = base_qs.filter(requester=request.user).aggregate(
+        _user_agg = queue_qs.filter(requester=request.user).aggregate(
             sus_pendientes = Count(Case(When(status='pending', then=1), output_field=IntegerField())),
-            sus_tareas     = Count(Case(When(type='task',      then=1), output_field=IntegerField())),
+            sus_tareas     = Count('id', filter=in_range & Q(type='task')),
             sus_no_cerrados_agent = Count(Case(When(~Q(status='closed'), then=1), output_field=IntegerField())),
         )
 
         # Query 3: filtros de tiempo (updated_at / created_at ranges)
-        _time_agg = base_qs.aggregate(
-            recently_updated = Count(Case(When(updated_at__gte=_now - timedelta(hours=24), then=1), output_field=IntegerField())),
+        _time_agg = queue_qs.aggregate(
+            recently_updated = Count('id', filter=in_range & Q(updated_at__gte=_now - timedelta(hours=24))),
             no_update_48h    = Count(Case(When(updated_at__lte=_now - timedelta(hours=48), then=1), output_field=IntegerField())),
         )
 
         # Query 4: Telefónica (JOIN a organization — no se puede incluir en aggregate base)
-        n_telefonica = base_qs.filter(
+        n_telefonica = ranged_qs.filter(
             requester__organization__name="Telefonica",
             created_at__gte=_now - timedelta(days=30),
         ).count()
@@ -765,24 +774,24 @@ def filter_tickets(request):
         n_unsolved_groups = 0
         n_new_in_groups   = 0
         if _user_group:
-            n_unsolved_groups = base_qs.filter(
-                ~Q(status__in=['closed', 'resolved']),
+            n_unsolved_groups = queue_qs.filter(
+                ~Q(status__in=SOLVED_STATUSES),
                 assignee__group=_user_group,
             ).count()
-            n_new_in_groups = base_qs.filter(
+            n_new_in_groups = queue_qs.filter(
                 assignee__group=_user_group,
                 created_at__gte=_now - timedelta(days=7),
             ).count()
 
         sus_no_cerrados_count = (
-            (base_qs.exclude(status='closed').count() if not _is_agent(request.user)
+            (queue_qs.exclude(status='closed').count() if not _is_agent(request.user)
              else _user_agg['sus_no_cerrados_agent'])
         )
 
         filtros = {
             "mis_tickets":        _agg['mis_tickets'],
             "telefonica_mes":     n_telefonica,
-            "unsolved_no_tareas": _agg['n_unsolved_notarea'],
+            "unsolved_no_tareas": _agg['n_mine_unsolved'],
             "unassigned":         _agg['n_unassigned'],
             "all_unsolved_no_tareas": _agg['n_unsolved_notarea'],
             "recently_updated":   _time_agg['recently_updated'],
@@ -796,7 +805,7 @@ def filter_tickets(request):
             "recordia_sgsd":      _agg['n_recordia'],
             "closed":             _agg['n_closed'],
             "sus_pendientes":     _user_agg['sus_pendientes'],
-            "espera":             0,
+            "espera":             _agg['n_on_hold'],
             "abiertos":           _agg['n_open'],
             "sus_no_cerrados":    sus_no_cerrados_count,
             "ultimos_cerrados":   _agg['n_closed'],
@@ -813,15 +822,9 @@ def filter_tickets(request):
             "sla_at_risk":        n_sla_at_risk,
         }
 
-    # Este contador depende de la selección viva del panel de Asignación, no
-    # del conjunto global de tickets no resueltos. Se recalcula incluso cuando
-    # el resto de contadores procede de la caché (TTL 15 s) para que activar o
-    # desactivar una regla/agente se refleje de inmediato.
-    if filtros:
-        filtros = dict(filtros)
-        filtros['all_unsolved_no_tareas'] = _tickets_for_view(
-            base_qs, 'all_unsolved_no_tareas', request.user
-        ).count()
+    if filtros and _is_agent(request.user):
+        trash_qs = _ticket_listing_queryset(request, view='trash')[0]
+        filtros = {**filtros, 'trash': trash_qs.count()}
 
     if _counts_cache_key and filtros and not _counts_loaded_from_cache:
         cache.set(_counts_cache_key, filtros, _TICKET_FILTER_COUNTS_TTL)
@@ -843,6 +846,9 @@ def filter_tickets(request):
     # Si el usuario ha pedido ordenar por una columna, desactivamos la agrupación
     # para mostrar la tabla plana ordenada por su criterio en el resto de vistas.
     elif db_sort_signed:
+        group_by = None
+        group_sort = None
+    elif view == 'trash':
         group_by = None
         group_sort = None
     elif fast_pagination:
@@ -868,6 +874,8 @@ def filter_tickets(request):
 
     offset = (page - 1) * page_size
     page_qs = tickets.select_related('requester', 'assignee', 'assigned_group', 'brand')
+    if view == 'trash':
+        page_qs = page_qs.select_related('deleted_by')
 
     # La columna "Val." solo existe en la tabla de la home. Se anota únicamente
     # para esas vistas para no meter una subconsulta por fila en /tickets/.
@@ -888,13 +896,8 @@ def filter_tickets(request):
     balanced_distribution = None
 
     if balanced_assignment_view:
-        assignment_agents = _active_assignment_agents()
-        ticket_counts = dict(
-            tickets.order_by()
-            .values('assignee_id')
-            .annotate(total=Count('id'))
-            .values_list('assignee_id', 'total')
-        )
+        assignment_agents = _listing_assignees(tickets)
+        ticket_counts = {agent['id']: agent['total'] for agent in assignment_agents}
         agent_counts = [
             (agent['id'], ticket_counts[agent['id']])
             for agent in assignment_agents
@@ -997,9 +1000,9 @@ def filter_tickets(request):
         if not group_by:
             return None
         if group_by == 'assignee':
-            return t.assignee.name if t.assignee else '— Sin asignar —'
+            return (t.assignee.name or t.assignee.email) if t.assignee else 'Sin asignar'
         if group_by == 'status':
-            return (t.status or '—').capitalize()
+            return 'On-hold' if t.status == 'on_hold' else (t.status or '—').capitalize()
         if group_by == 'group':
             return t.assigned_group.group_name if t.assigned_group else '— Sin grupo —'
         if group_by == 'requester':
@@ -1012,10 +1015,10 @@ def filter_tickets(request):
     def _sla_payload(t):
         dues = [d for d in (t.first_response_due_at, t.resolution_due_at) if d]
         next_due = min(dues) if dues else None
-        breached = bool(t.sla_breached_at) and t.status not in ('closed', 'resolved')
+        breached = bool(t.sla_breached_at) and t.status not in SOLVED_STATUSES
         at_risk = bool(
             next_due and not breached
-            and t.status not in ('closed', 'resolved')
+            and t.status not in SOLVED_STATUSES
             and _payload_now < next_due <= _payload_now + _risk_window
         )
         return {
@@ -1042,6 +1045,8 @@ def filter_tickets(request):
             "sla": _sla_payload(t),
             "satisfaction": getattr(t, 'satisfaction_score', None) or "",
             "description": (t.description or "")[:200],
+            "deleted_at": timezone.localtime(t.deleted_at).strftime('%d/%m/%Y %H:%M') if t.deleted_at else None,
+            "deleted_by": (t.deleted_by.name or t.deleted_by.email) if view == 'trash' and t.deleted_by_id else None,
             "group_value": _group_value(t),
             "last_comment": {
                 "author": lc.user.name if lc and lc.user else "",
@@ -1091,7 +1096,7 @@ def _ticket_export_queryset(request):
             )
         else:
             qs = qs.order_by(f'-{db_sort}' if sort_dir == 'desc' else db_sort)
-    else:
+    elif view != 'trash':
         qs = qs.order_by('-created_at', '-id')
 
     qs = qs.select_related('brand', 'requester')
@@ -1110,14 +1115,16 @@ def _ticket_export_queryset(request):
     if brand_token and brand_token not in view_token:
         name_parts.append(brand_token)
     name_parts.append(view_token)
-    filename_base = '_'.join(name_parts) + f'_{date_from:%Y%m%d}-{date_to:%Y%m%d}'
+    dated = _view_uses_date_range(view)
+    suffix = f'_{date_from:%Y%m%d}-{date_to:%Y%m%d}' if dated else '_sin_limite_de_fecha'
+    filename_base = '_'.join(name_parts) + suffix
 
     metadata = {
         'title': view_label,
         'brand': brand_label,
         'view': view_label,
-        'date_from': date_from.strftime('%d/%m/%Y'),
-        'date_to': date_to.strftime('%d/%m/%Y'),
+        'date_from': date_from.strftime('%d/%m/%Y') if dated else 'Sin límite',
+        'date_to': date_to.strftime('%d/%m/%Y') if dated else 'Sin límite',
         'generated_at': generated_at.strftime('%d/%m/%Y %H:%M'),
         'total': total,
         'filename_base': filename_base,
@@ -1148,6 +1155,8 @@ def tickets_export_csv(request):
     import csv
     from django.http import StreamingHttpResponse
 
+    if request.GET.get('view') == 'trash' and not _is_agent(request.user):
+        return json_error('forbidden', 'Solo agentes pueden ver la papelera.', status=403)
     qs, metadata = _ticket_export_queryset(request)
 
     class _Echo:
@@ -1185,6 +1194,8 @@ def tickets_export_pdf(request):
     """Exporta el mismo conjunto del CSV como fichas de tickets paginadas."""
     from .services.ticket_exports import build_tickets_pdf
 
+    if request.GET.get('view') == 'trash' and not _is_agent(request.user):
+        return json_error('forbidden', 'Solo agentes pueden ver la papelera.', status=403)
     qs, metadata = _ticket_export_queryset(request)
     pdf_bytes = build_tickets_pdf(qs.iterator(chunk_size=500), metadata)
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
@@ -1281,7 +1292,7 @@ def customer_profile(request):
         Q(requester__id=customer.id) | Q(assignee__id=customer.id) |
         Q(ccs__id=customer.id) | Q(created_by_id=customer.id)
     ).distinct()
-    ctx = _profile_tickets_context(request, base_qs)
+    ctx = _profile_tickets_context(request, base_qs.filter(is_deleted=False))
     ctx["customer"] = customer
     return render(request, "tickets/customer_profile.html", ctx)
 
@@ -1492,7 +1503,7 @@ def profile(request):
         Q(requester__id=user.id) | Q(assignee__id=user.id) |
         Q(ccs__id=user.id) | Q(created_by_id=user.id)
     ).distinct()
-    ctx = _profile_tickets_context(request, base_qs)
+    ctx = _profile_tickets_context(request, base_qs.filter(is_deleted=False))
     ctx["user"] = user
     return render(request, "tickets/profile.html", ctx)
 
@@ -1785,7 +1796,7 @@ def create_ticket(request):
         ).order_by('-created_at').values('content')[:1]
 
         related = (Ticket.objects
-                   .filter(requester_id=ticket_obj.requester_id)
+                   .filter(requester_id=ticket_obj.requester_id, is_deleted=False)
                    .select_related('requester', 'assignee')
                    .annotate(last_pub_content=Subquery(last_comment_sub))
                    .order_by('-updated_at')[:30])
@@ -1811,6 +1822,7 @@ def create_ticket(request):
         'status': 'estado', 'assignee_id': 'asignado', 'group_id': 'grupo',
         'priority': 'prioridad', 'tags': 'tags', 'subject': 'asunto',
         'requester_id': 'solicitante', 'product_line_id': 'producto / servicio',
+        'deleted': 'eliminación', 'restored': 'restauración',
     }
     if ticket_obj:
         if _is_agent(request.user):
@@ -1827,7 +1839,7 @@ def create_ticket(request):
         feed = []
         for c in prepare_comments(comments_list):
             c.attachment_cards = [AttachmentService.metadata(a) for a in c.attachment_set.all()
-                                  if a.ticket_id == ticket_obj.id]
+                                  if a.ticket_id == ticket_obj.id and not a.is_inline]
             feed.append({'item_type': 'comment', 'obj': c})
         for e in events_list:
             feed.append({'item_type': 'event', 'obj': e,
@@ -1856,6 +1868,7 @@ def create_ticket(request):
         'username': request.user.name,
         'email': request.user.email,
         'ticket': ticket_obj,
+        'ticket_locked': bool(ticket_obj and (ticket_obj.is_deleted or ticket_obj.status == 'closed')),
         'feed': feed,
         'can_use_internal': _is_agent(request.user),
         'user_timeline': user_timeline,
@@ -1920,10 +1933,12 @@ def take_ticket(request, ticket_id):
     ticket = get_object_or_404(Ticket, id=ticket_id)
     if not can_update_ticket(request.user, ticket):
         return json_error('forbidden', 'Permiso denegado', status=403, success=False)
-    if ticket.assignee_id == request.user.id:
-        return JsonResponse({'ok': False, 'success': False, 'error': 'already_assigned'})
     with transaction.atomic():
         ticket = Ticket.objects.select_for_update().get(id=ticket_id)
+        if ticket.is_deleted or ticket.status == 'closed':
+            return json_error('ticket_locked', 'El ticket está eliminado o cerrado.', status=409)
+        if ticket.assignee_id == request.user.id:
+            return JsonResponse({'ok': False, 'success': False, 'error': 'already_assigned'})
         prev = str(ticket.assignee_id) if ticket.assignee_id else None
         ticket.assignee = request.user
         ticket.save(update_fields=['assignee'])
@@ -1993,6 +2008,7 @@ def _comment_payload(comment, ticket):
         'is_public': comment.is_public,
         'attachments': [
             AttachmentService.metadata(a) for a in comment.attachment_set.order_by('id')
+            if a.ticket_id == ticket.id and not a.is_inline
         ],
     }
 
@@ -2099,6 +2115,8 @@ def ai_suggest_reply(request, ticket_id):
     ticket = get_object_or_404(Ticket, id=ticket_id)
     if not permission_is_agent(request.user):
         return json_error("forbidden", "Solo agentes pueden usar la asistencia de IA.", status=403)
+    if ticket.is_deleted or ticket.status == 'closed':
+        return json_error('ticket_locked', 'El ticket está eliminado o cerrado.', status=409)
     if not TicketReplyService.can_use(request.user):
         return json_error("ai_disabled", "La asistencia de respuesta IA no está disponible.", status=503)
     try:
@@ -2244,6 +2262,8 @@ def upload_attachment(request, ticket_id):
     ticket = get_object_or_404(Ticket, id=ticket_id)
     if not can_view_ticket(request.user, ticket):
         return json_error('forbidden', 'No tienes acceso a este ticket.', status=403)
+    if ticket.is_deleted or ticket.status == 'closed':
+        return json_error('ticket_locked', 'El ticket está eliminado o cerrado.', status=409)
     try:
         att = AttachmentService.upload(_single_attachment_file(request), request.user, ticket=ticket,
                                        upload_key=request.POST.get('upload_key'), draft_key=request.POST.get('draft_key'))
@@ -2523,17 +2543,33 @@ def merge_ticket(request, ticket_id):
 @require_POST
 def bulk_delete(request):
     if not _is_agent(request.user):
-        return JsonResponse({'error': 'Permiso denegado'}, status=403)
+        return json_error('forbidden', 'Solo agentes pueden gestionar la papelera.', status=403)
     try:
-        ids = json.loads(request.body).get('ids', [])
-    except (json.JSONDecodeError, AttributeError):
-        return JsonResponse({'error': 'Payload inválido'}, status=400)
-    if not ids or not isinstance(ids, list):
-        return JsonResponse({'error': 'ids requerido'}, status=400)
-    updated = Ticket.objects.filter(
-        id__in=ids, merged_into__isnull=True, is_deleted=False
-    ).update(is_deleted=True)
+        ids = _ticket_trash_request_ids(request)
+        updated = TicketTrashService.delete(request.user, ids)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
     return JsonResponse({'ok': True, 'deleted': updated})
+
+
+@api_login_required
+@require_POST
+def bulk_restore(request):
+    if not _is_agent(request.user):
+        return json_error('forbidden', 'Solo agentes pueden gestionar la papelera.', status=403)
+    try:
+        ids = _ticket_trash_request_ids(request)
+        updated = TicketTrashService.restore(request.user, ids)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+    return JsonResponse({'ok': True, 'restored': updated})
+
+
+def _ticket_trash_request_ids(request):
+    data = parse_json_body(request)
+    if not isinstance(data, dict):
+        raise APIValidationError('invalid_json', 'Se requiere un objeto JSON.', status=400)
+    return data.get('ids')
 
 
 @api_login_required
@@ -3322,3 +3358,40 @@ def satisfaction_survey(request, token):
     if requested not in ('good', 'bad'):
         requested = rating.score if rating.is_answered else None
     return _render('form', score=requested)
+
+
+@api_login_required
+@require_POST
+def ticket_presence(request, ticket_id):
+    if not _is_agent(request.user):
+        return json_error('forbidden', 'La presencia solo está disponible para agentes.', status=403)
+    ticket = get_object_or_404(Ticket, pk=ticket_id)
+    try:
+        if request.content_type == 'application/json':
+            data = parse_json_body(request)
+            if not isinstance(data, dict):
+                raise APIValidationError('invalid_json', 'Se requiere un objeto JSON.', status=400)
+            composing = data.get('composing', False)
+        else:
+            data = request.POST
+            raw = data.get('composing', 'false')
+            if raw not in ('true', 'false', '1', '0'):
+                raise APIValidationError('invalid_composing', 'composing debe ser un booleano.', status=400)
+            composing = raw in ('true', '1')
+        action = data.get('action', 'heartbeat')
+        if action not in ('heartbeat', 'leave'):
+            raise APIValidationError('invalid_action', 'Acción de presencia no válida.', status=400)
+        seen_at = None
+        if action == 'leave' and data.get('seen_at'):
+            raw = data['seen_at']
+            try:
+                seen_at = parse_datetime(raw) if isinstance(raw, str) else None
+            except ValueError:
+                seen_at = None
+            if seen_at is None or timezone.is_naive(seen_at):
+                raise APIValidationError('invalid_seen_at', 'seen_at debe incluir fecha, hora y zona.', status=400)
+        payload = ticket_presence_heartbeat(ticket, request.user, composing=composing,
+                                            leave=action == 'leave', seen_at=seen_at)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+    return json_ok(payload)

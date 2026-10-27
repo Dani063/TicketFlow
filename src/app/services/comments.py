@@ -79,9 +79,12 @@ class CommentService:
             email_message_id=email_message_id,
         )
 
-        # Comentar en un ticket en on_hold lo devuelve a open; el estado pedido se
-        # aplica después, así que «publicar como on_hold» reinicia la espera.
-        interrupted = interrupt_on_hold(ticket, actor, now)
+        # Una respuesta del cliente reabre y reanuda el SLA. Las notas/respuestas
+        # del agente conservan la espera salvo un cambio explícito de estado.
+        interrupted = (
+            interrupt_on_hold(ticket, actor, now)
+            if not is_agent(actor) or comment.is_inbound_email else False
+        )
         changed = apply_status(ticket, actor, new_status, now)
         if not (interrupted or changed):
             ticket.updated_at = now

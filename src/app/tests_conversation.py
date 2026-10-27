@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -160,10 +161,49 @@ class ConversationTests(SimpleTestCase):
         code = present_comment(comment(html_body='<pre>if ok:\n    run()\n\n    done()</pre>'))
         self.assertIn('\n    run()', code['html'])
 
+    def test_empty_outlook_blocks_keep_the_blank_line_between_paragraphs(self):
+        for source, expected in [
+            ('<div>Primero</div><div><br></div><div>Segundo</div>', '<div>Primero</div><br><div>Segundo</div>'),
+            ('<p>Primero</p><p>&nbsp;</p><p>Segundo</p>', '<p>Primero</p><br><p>Segundo</p>'),
+        ]:
+            with self.subTest(source=source):
+                self.assertEqual(present_comment(comment(html_body=source))['html'], expected)
+
     def test_plain_text_links_remain_clickable(self):
         result = present_comment(comment('Consulta https://example.test/report o escribe a a@example.test'))
         self.assertIn('href="https://example.test/report"', result['html'])
         self.assertIn('href="mailto:a@example.test"', result['html'])
+
+    def test_web_links_open_safely_in_both_views_and_mail_and_phone_stay_native(self):
+        class Links(HTMLParser):
+            def __init__(self, source):
+                super().__init__()
+                self.links = []
+                self.feed(source)
+
+            def handle_starttag(self, tag, attrs):
+                if tag == 'a':
+                    self.links.append(dict(attrs))
+
+        sources = [
+            comment('Consulta https://example.test/report y http://example.test/status o a@example.test'),
+            comment(html_body='<p style="color:red"><a href="https://example.test/report?a=1&amp;b=2" target="_self" rel="opener">Alarma</a> '
+                    '<a href="mailto:a@example.test">Correo</a> <a href="tel:+34900000000">Teléfono</a></p>'),
+        ]
+        for source in sources:
+            result = present_comment(source)
+            for key in ('html', 'original_html'):
+                links = Links(result[key]).links
+                self.assertTrue(links)
+                for link in links:
+                    with self.subTest(source=source.html_body, view=key, href=link['href']):
+                        if link['href'].startswith(('https://', 'http://')):
+                            self.assertEqual(link.get('target'), '_blank')
+                            self.assertEqual(set(link['rel'].split()), {'noopener', 'noreferrer'})
+                        else:
+                            self.assertNotIn('target', link)
+            if source.html_body:
+                self.assertIn('style="color:red;"', result['original_html'])
 
     def test_ambiguous_from_and_invalid_dates_do_not_hide_text(self):
         result = present_comment(comment('De: esta configuración depende el error\nAsunto: falta fecha\nSep 99, 2026, 25:70 GMT+2\nFinal importante'))

@@ -212,6 +212,10 @@ class Ticket(models.Model):
     email_message_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     email_conversation_id = models.CharField(max_length=255, null=True, blank=True, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
+    deleted_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    deleted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='deleted_tickets',
+    )
 
     class Meta:
         indexes = [
@@ -333,6 +337,8 @@ class Attachment(models.Model):
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
     draft = models.ForeignKey(AttachmentDraft, on_delete=models.PROTECT, null=True, blank=True)
+    content_id = models.TextField(blank=True, default='', db_default='')
+    is_inline = models.BooleanField(default=False, db_default=False)
 
     @property
     def filename(self):
@@ -1243,3 +1249,15 @@ class TicketStatusInterval(models.Model):
 
     def __str__(self):
         return f"#{self.ticket_id} {self.status} desde {self.started_at}"
+
+
+class TicketPresence(models.Model):
+    """Latidos compartidos entre procesos; no se guardan en la caché local."""
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='presences')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ticket_presences')
+    last_seen = models.DateTimeField(db_index=True)
+    composing = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['ticket', 'user'], name='ticket_presence_user_unique')]
+        indexes = [models.Index(fields=['ticket', 'last_seen'], name='ticket_presence_seen_idx')]

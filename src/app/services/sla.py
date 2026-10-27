@@ -108,7 +108,10 @@ class SLAService:
         if had_due:
             # El due se limpia, así que el cumplimiento debe persistirse ahora:
             # después no es computable.
-            ticket.first_response_met = now <= ticket.first_response_due_at
+            # También se puede responder mientras sigue en espera. En ese caso
+            # el reloj de SLA está congelado en la entrada en on_hold.
+            sla_now = ticket.on_hold_at if ticket.status == 'on_hold' and ticket.on_hold_at else now
+            ticket.first_response_met = sla_now <= ticket.first_response_due_at
             ticket.first_response_due_at = None
             update_fields.extend(["first_response_met", "first_response_due_at"])
         ticket.save(update_fields=update_fields)

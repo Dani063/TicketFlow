@@ -98,16 +98,17 @@ class OnHoldLifecycleTests(_BaseFixture):
         self.assertEqual(log.template_key, "agent_reply")
         self.assertNotIn("72 horas", log.payload["body_text"])
 
-    def test_commenting_interrupts_on_hold(self):
-        ticket = self.put_on_hold(self.make_ticket(brand=self.brand_a), timezone.now())
+    def test_internal_note_keeps_on_hold_and_its_original_clock(self):
+        start = timezone.now() - timedelta(hours=10)
+        ticket = self.put_on_hold(self.make_ticket(brand=self.brand_a), start)
 
         CommentService.add_comment(ticket, self.agent, "Nota", is_public=False)
 
         ticket.refresh_from_db()
-        self.assertEqual(ticket.status, "open")
-        self.assertIsNone(ticket.on_hold_at)
+        self.assertEqual(ticket.status, "on_hold")
+        self.assertEqual(ticket.on_hold_at, start)
 
-    def test_choosing_on_hold_again_restarts_the_wait(self):
+    def test_agent_reply_keeping_on_hold_does_not_restart_the_wait(self):
         start = timezone.now() - timedelta(hours=10)
         ticket = self.put_on_hold(self.make_ticket(brand=self.brand_a), start)
 
@@ -115,14 +116,14 @@ class OnHoldLifecycleTests(_BaseFixture):
 
         ticket.refresh_from_db()
         self.assertEqual(ticket.status, "on_hold")
-        self.assertGreater(ticket.on_hold_at, start)
+        self.assertEqual(ticket.on_hold_at, start)
         statuses = list(
             TicketEvent.objects.filter(ticket=ticket, field_name="status")
             .order_by("id").values_list("old_value", "new_value")
         )
-        self.assertEqual(statuses[-2:], [("on_hold", "open"), ("open", "on_hold")])
+        self.assertEqual(statuses, [("open", "on_hold")])
 
-    def test_editing_fields_interrupts_on_hold(self):
+    def test_explicit_status_change_leaves_on_hold(self):
         ticket = self.put_on_hold(self.make_ticket(brand=self.brand_a), timezone.now())
         other = User.objects.create_user("agent3@example.com", "Agent Three", "secret")
 
@@ -131,6 +132,40 @@ class OnHoldLifecycleTests(_BaseFixture):
         self.assertEqual(response.status_code, 200)
         ticket.refresh_from_db()
         self.assertEqual((ticket.status, ticket.assignee_id), ("open", other.id))
+
+    def test_field_edit_keeping_status_does_not_restart_the_wait(self):
+        start = timezone.now() - timedelta(hours=73)
+        ticket = self.put_on_hold(self.make_ticket(brand=self.brand_a), start)
+
+        response = self.save_fields(ticket, subject='Asunto editado', status='on_hold')
+
+        self.assertEqual(response.status_code, 200)
+        ticket.refresh_from_db()
+        self.assertEqual((ticket.status, ticket.on_hold_at), ('on_hold', start))
+        self.assertIn(ticket.id, close_expired_on_hold())
+
+    def test_customer_web_reply_reopens_on_hold(self):
+        ticket = self.put_on_hold(self.make_ticket(brand=self.brand_a), timezone.now())
+
+        CommentService.add_comment(ticket, ticket.requester, 'Respuesta del cliente')
+
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, 'open')
+        self.assertIsNone(ticket.on_hold_at)
+
+    def test_first_response_while_paused_uses_the_remaining_sla_budget(self):
+        now = timezone.now()
+        start = now - timedelta(hours=5)
+        ticket = self.make_ticket(brand=self.brand_a)
+        Ticket.objects.filter(pk=ticket.pk).update(first_response_due_at=start + timedelta(hours=1))
+        ticket = self.put_on_hold(ticket, start)
+
+        CommentService.add_comment(ticket, self.agent, 'Seguimos esperando', new_status='on_hold')
+
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status, 'on_hold')
+        self.assertEqual(ticket.on_hold_at, start)
+        self.assertTrue(ticket.first_response_met)
 
     def test_saving_fields_without_status_keeps_it(self):
         ticket = self.make_ticket(brand=self.brand_a, status="pending")
@@ -178,7 +213,7 @@ class OnHoldLifecycleTests(_BaseFixture):
         Ticket.objects.filter(pk=ticket.pk).update(resolution_due_at=due, due_at=due)
         ticket = self.put_on_hold(ticket, timezone.now() - timedelta(hours=5))
 
-        CommentService.add_comment(ticket, self.agent, "Seguimos", is_public=False)
+        CommentService.add_comment(ticket, ticket.requester, "Respuesta del cliente")
 
         ticket.refresh_from_db()
         self.assertEqual(ticket.status, "open")

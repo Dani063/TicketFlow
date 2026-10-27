@@ -17,7 +17,6 @@ from app.services.ticket_status import (
     AGENT_STATUS_VALUES,
     apply_status,
     ensure_editable,
-    interrupt_on_hold,
     queue_on_hold_notice,
 )
 
@@ -36,6 +35,8 @@ class TicketService:
         "agentia365": "agentia365",
         "agentia_365": "agentia365",
         "agentia-365": "agentia365",
+        "cognitia": "cognitia",
+        "rightfax": "rightfax",
     }
     EVENT_FIELDS = [
         ("status", "status"),
@@ -398,9 +399,8 @@ class TicketService:
         now = timezone.now()
         entered_on_hold = False
         if payload.get("status"):
-            # Editar un ticket en on_hold lo interrumpe; si el agente vuelve a
-            # elegir on_hold, la espera empieza de nuevo.
-            interrupt_on_hold(ticket, actor, now)
+            # Guardar campos no altera la espera ni su plazo de 72 horas.
+            # Solo un estado distinto elegido explícitamente la interrumpe.
             entered_on_hold = apply_status(ticket, actor, payload["status"], now) and ticket.status == "on_hold"
         for event_name, model_field in TicketService.EVENT_FIELDS:
             if event_name == "status":
