@@ -303,7 +303,17 @@ class TicketService:
         NotificationService.notify_ticket_users(ticket, f"Nuevo ticket #{ticket.id}: {ticket.subject}", actor=actor)
         AutomationService.run_for_ticket(ticket, actor=actor, event="ticket_created", event_key=f"ticket_created:{ticket.id}")
         record_metric("tickets.created", labels={"ticket_id": ticket.id})
-        if not payload.get("suppress_requester_email"):
+        # Si el agente abre el ticket con un mensaje público, el cliente ya lo
+        # recibe como respuesta (mismo criterio que CommentService): el acuse
+        # sería un segundo correo (#21380).
+        sends_agent_reply = (
+            bool(payload.get("content") or payload.get("html_body") or attachments)
+            and payload.get("is_public", True)
+            and is_agent(actor)
+            and payload.get("via_channel") != "email"
+            and not payload.get("email_message_id")
+        )
+        if not payload.get("suppress_requester_email") and not sends_agent_reply:
             # Import local: email_outbound importa modelos y este módulo se importa
             # desde tasks vía email_ingestion (evitar ciclos).
             from app.services.email_outbound import OutboundEmailService
