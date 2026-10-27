@@ -250,6 +250,7 @@
         const subjectCell = row.cells[1];
         const dot = document.createElement('span');
         dot.className = 'status-dot status-' + (t.status || '').toLowerCase();
+        dot.title = t.status === 'on_hold' ? 'On-hold' : (t.status || '');
         const span = document.createElement('span');
         span.className = 'subject-text';
         span.textContent = _truncateSubject(t.subject);
@@ -509,7 +510,7 @@
 
         function show(span) {
             const s = span.dataset;
-            card.querySelector('.tpc-status').textContent = s.status || '';
+            card.querySelector('.tpc-status').textContent = s.status === 'on_hold' ? 'On-hold' : (s.status || '');
             card.querySelector('.tpc-status').className = 'tpc-status status-' + (s.status || '').toLowerCase();
             card.querySelector('.tpc-subject').textContent = s.subject || '';
             card.querySelector('.tpc-priority').textContent = s.priority ? '(' + s.priority + ')' : '';
