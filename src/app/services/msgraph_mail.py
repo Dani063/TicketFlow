@@ -73,6 +73,87 @@ def inbox_folder_id(mailbox, headers):
     return response.json()['id']
 
 
+# Carpetas que nunca se barren (#21419). Las primeras son imprescindibles: barrer
+# Enviados convertiría cada respuesta propia en un ticket. Si no se pueden
+# resolver, la vuelta se queda solo con Inbox.
+REQUIRED_EXCLUDED_FOLDERS = ('sentitems', 'drafts', 'outbox', 'deleteditems', 'junkemail')
+# Estas pueden no existir en un buzón dado; si no responden, no hay nada que excluir.
+OPTIONAL_EXCLUDED_FOLDERS = (
+    'conversationhistory', 'syncissues', 'scheduled', 'searchfolders', 'clutter',
+    'recoverableitemsdeletions',
+)
+
+
+def _well_known_folder_id(mailbox, name, headers):
+    response = _request('GET', f'{_user_path(mailbox)}/mailFolders/{name}', headers,
+                        params={'$select': 'id'})
+    return response.json()['id']
+
+
+def _list_mail_folders(mailbox, headers, excluded_ids):
+    """Todas las carpetas de correo visibles, recorriendo subcarpetas.
+
+    Las excluidas se saltan con todo lo que cuelga de ellas (una subcarpeta de
+    la papelera tampoco se barre).
+    """
+    folders = []
+    pending = [f'{_user_path(mailbox)}/mailFolders']
+    while pending:
+        url = pending.pop()
+        params = {'$select': 'id,displayName,childFolderCount', '$top': '100'}
+        while url:
+            data = _request('GET', url, headers, params=params).json()
+            for folder in data.get('value', []):
+                if folder['id'] in excluded_ids:
+                    continue
+                folders.append({'id': folder['id'], 'name': folder.get('displayName') or ''})
+                if folder.get('childFolderCount'):
+                    pending.append(
+                        f'{_user_path(mailbox)}/mailFolders/{quote(folder["id"], safe="")}/childFolders'
+                    )
+            # El nextLink ya lleva sus parámetros.
+            url, params = data.get('@odata.nextLink'), None
+    return folders
+
+
+def sweep_folders(mailbox, headers):
+    """Carpetas que se barren en un buzón, Inbox primero.
+
+    Todas salvo las de sistema, también las que se creen más adelante: el
+    equipo mueve alarmas e informes a carpetas propias con reglas del buzón y
+    tienen que seguir entrando como tickets (#21419). La lista se cachea unos
+    minutos para no recorrer el árbol de carpetas en cada vuelta.
+    """
+    from django.core.cache import cache
+
+    inbox = {'id': inbox_folder_id(mailbox, headers), 'name': 'Inbox'}
+    if not getattr(settings, 'INBOUND_SWEEP_ALL_FOLDERS', True):
+        return [inbox]
+    cache_key = f'inbound_sweep_folders:{mailbox.lower()}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        excluded = {_well_known_folder_id(mailbox, name, headers) for name in REQUIRED_EXCLUDED_FOLDERS}
+        for name in OPTIONAL_EXCLUDED_FOLDERS:
+            try:
+                excluded.add(_well_known_folder_id(mailbox, name, headers))
+            except GraphNotFound:
+                pass
+        folders = [inbox] + [
+            folder for folder in _list_mail_folders(mailbox, headers, excluded)
+            if folder['id'] != inbox['id']
+        ]
+    except Exception as exc:
+        # Sin la lista completa (o sin saber qué excluir) se barre solo Inbox en
+        # esta vuelta: nunca se arriesga a barrer Enviados. No se cachea.
+        logger.error('inbound_sweep [%s]: no se pudieron listar las carpetas, solo se barre Inbox: %s',
+                     mailbox, exc)
+        return [inbox]
+    cache.set(cache_key, folders, getattr(settings, 'INBOUND_SWEEP_FOLDERS_CACHE_SECONDS', 600))
+    return folders
+
+
 def list_window(mailbox, folder_id, since, until=None, headers=None, top=200, skip=0, fields=LIST_FIELDS):
     """Una página de mensajes recibidos desde `since`, en orden ascendente.
 

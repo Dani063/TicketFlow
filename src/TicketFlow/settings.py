@@ -617,6 +617,10 @@ INBOUND_MARK_READ_ENABLED = os.getenv('INBOUND_MARK_READ_ENABLED', 'false').lowe
 # Minutos sin una vuelta de barrido buena a partir de los cuales se avisa con
 # ERROR. El 29/09/2026 un fallo repetido tuvo la ingesta parada dos días.
 INBOUND_CURSOR_STALE_MINUTES = int(os.getenv('INBOUND_CURSOR_STALE_MINUTES', '5'))
+# Barrer todas las carpetas del buzón salvo las de sistema (#21419); con false,
+# solo Inbox. La lista de carpetas se refresca cada INBOUND_SWEEP_FOLDERS_CACHE_SECONDS.
+INBOUND_SWEEP_ALL_FOLDERS = os.getenv('INBOUND_SWEEP_ALL_FOLDERS', 'true').lower() in ('1', 'true', 'yes', 'on')
+INBOUND_SWEEP_FOLDERS_CACHE_SECONDS = int(os.getenv('INBOUND_SWEEP_FOLDERS_CACHE_SECONDS', '600'))
 
 # === Email saliente (confirmaciones al cliente) ===
 # SES autentica con el rol IAM del pod (como SQS/SSM): sin credenciales SMTP.

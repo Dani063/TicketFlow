@@ -95,31 +95,35 @@ def _sender_is_valid(message):
 def resolve_targets(brands, headers):
     """Agrupa las marcas por carpeta física. Devuelve ``(destinos, todas_resueltas)``.
 
-    Las direcciones de soporte son alias del mismo buzón: varias marcas
-    resuelven a la misma carpeta y se barre una sola vez, como la marca fijada
-    en su cursor. Si un alias no resuelve, el resto sigue; lo único que no se
-    hace en esa vuelta es crear cursores nuevos, para que la marca de un buzón
-    no dependa de qué alias respondió.
+    Cada carpeta del buzón que no sea de sistema es un destino con su propio
+    cursor (#21419): las reglas del buzón mueven alarmas e informes fuera de
+    Inbox y tienen que seguir entrando. Las direcciones de soporte son alias del
+    mismo buzón: varias marcas resuelven a las mismas carpetas y cada una se
+    barre una sola vez, como la marca fijada en su cursor. Si un alias no
+    resuelve, el resto sigue; lo único que no se hace en esa vuelta es crear
+    cursores nuevos, para que la marca de un buzón no dependa de qué alias
+    respondió.
     """
     targets = {}
     all_resolved = True
     for brand in brands:
         try:
-            folder_id = msgraph_mail.inbox_folder_id(brand.support_email, headers)
+            folders = msgraph_mail.sweep_folders(brand.support_email, headers)
         except Exception as exc:
             all_resolved = False
             logger.error('inbound_sweep [%s]: no se pudo resolver la carpeta Inbox: %s',
                          brand.support_email, exc)
             record_metric('email.inbound.folder_unresolved', labels={'mailbox': brand.support_email})
             continue
-        key = folder_key(folder_id)
-        if key in targets:
-            targets[key]['shared_with'].append(brand.name)
-            continue
-        targets[key] = {
-            'folder_key': key, 'folder_id': folder_id, 'mailbox': brand.support_email,
-            'brand': brand, 'shared_with': [],
-        }
+        for folder in folders:
+            key = folder_key(folder['id'])
+            if key in targets:
+                targets[key]['shared_with'].append(brand.name)
+                continue
+            targets[key] = {
+                'folder_key': key, 'folder_id': folder['id'], 'folder_name': folder['name'],
+                'mailbox': brand.support_email, 'brand': brand, 'shared_with': [],
+            }
     return list(targets.values()), all_resolved
 
 
@@ -742,7 +746,7 @@ def run_sweep(environment=None, clock=timezone.now):
                 outcomes.append(f'{cursor.mailbox}:paused')
                 continue
             outcome = MailboxSweep(cursor, target, headers, environment, clock=clock).run()
-            outcomes.append(f'{cursor.mailbox}:{outcome}')
+            outcomes.append(f'{cursor.mailbox}/{target.get("folder_name") or "Inbox"}:{outcome}')
         except Exception:
             logger.exception('inbound_sweep [%s]: vuelta abortada', target['mailbox'])
             record_metric('email.inbound.sweep_aborted',
