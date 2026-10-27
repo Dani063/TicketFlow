@@ -13,11 +13,17 @@ from app.services.attachments import AttachmentService, retry_attachment_mutatio
 from app.services.metrics import record_metric
 from app.services.notifications import NotificationService
 from app.services.sla import SLAService
-from app.services.ticket_status import apply_status
+from app.services.ticket_status import (
+    AGENT_STATUS_VALUES,
+    apply_status,
+    ensure_editable,
+    interrupt_on_hold,
+    queue_on_hold_notice,
+)
 
 
 class TicketService:
-    STATUS_VALUES = {"open", "pending", "closed", "resolved"}
+    STATUS_VALUES = set(AGENT_STATUS_VALUES)
     PRIORITY_VALUES = {"low", "normal", "high", "urgent"}
     PRODUCT_SERVICE_ALIASES = {
         "recordia": "recordia",
@@ -83,9 +89,11 @@ class TicketService:
         if not subject:
             raise APIValidationError("subject_required", "El asunto es obligatorio.", status=400)
 
-        status = (post_data.get("status") or "open").strip().lower()
-        if status not in TicketService.STATUS_VALUES:
-            status = "open"
+        # Sin estado: al crear es open y al actualizar se conserva. Antes caía a
+        # open y un guardado sin estado reabría el ticket.
+        status = (post_data.get("status") or "").strip().lower() or None
+        if status and status not in TicketService.STATUS_VALUES:
+            raise APIValidationError("invalid_status", "Estado no valido.", status=400)
 
         priority = (post_data.get("prioridad") or "").strip().lower() or None
         if priority not in TicketService.PRIORITY_VALUES:
@@ -243,7 +251,8 @@ class TicketService:
             email_message_id=payload.get("email_message_id"),
             email_conversation_id=payload.get("email_conversation_id"),
             closed_at=now if payload.get("status") == "closed" else None,
-            resolved_at=now if payload.get("status") == "resolved" else None,
+            resolved_at=now if payload.get("status") in ("resolved", "on_hold") else None,
+            on_hold_at=now if payload.get("status") == "on_hold" else None,
         )
         TicketService._set_m2m(ticket, payload.get("ccs_ids") or [], payload.get("tags") or [])
         SLAService.apply_policy(ticket)
@@ -264,6 +273,8 @@ class TicketService:
                 new_value=str(ticket.product_line_id),
                 created_at=now,
             )
+        if ticket.channel == "email":
+            TicketService._link_follow_up(ticket, payload, now)
         if draft:
             draft.ticket = ticket
             draft.published_at = timezone.now()
@@ -325,6 +336,7 @@ class TicketService:
         ticket = Ticket.objects.select_for_update().get(id=ticket_id)
         if not can_update_ticket(actor, ticket):
             raise APIValidationError("forbidden", "No puedes actualizar este ticket.", status=403)
+        ensure_editable(ticket)
 
         old_values = {
             event_name: getattr(ticket, model_field)
@@ -335,9 +347,9 @@ class TicketService:
         # Sin "description": es el cuerpo con el que se abrió el ticket, y el
         # mensaje del formulario es un comentario nuevo (se publica más abajo).
         # Copiarlo aquí vaciaba la descripción en cada guardado sin comentario.
+        # Sin "status": lo aplica ticket_status más abajo, con sus relojes.
         for field in (
             "subject",
-            "status",
             "priority",
             "brand",
             "product_line",
@@ -370,21 +382,19 @@ class TicketService:
             ticket.requester_id = requester_id
         ticket.assignee_id = payload.get("assignee_id")
         ticket.assigned_group_id = payload.get("assigned_group_id")
-        if ticket.status == "closed" and not ticket.closed_at:
-            ticket.closed_at = timezone.now()
-        # Reloj del que cuelga la encuesta de satisfacción. Se refresca en CADA
-        # entrada en 'resolved' (una reapertura y nueva resolución abre un ciclo de
-        # encuesta nuevo); un cierre directo sin pasar por 'resolved' también cuenta
-        # como resolución, o esos tickets no se encuestarían nunca.
-        if old_values["status"] != "resolved" and ticket.status == "resolved":
-            ticket.resolved_at = timezone.now()
-        elif ticket.status == "closed" and not ticket.resolved_at:
-            ticket.resolved_at = ticket.closed_at or timezone.now()
         ticket.save()
         TicketService._set_m2m(ticket, payload.get("ccs_ids") or [], payload.get("tags") or [])
 
         now = timezone.now()
+        entered_on_hold = False
+        if payload.get("status"):
+            # Editar un ticket en on_hold lo interrumpe; si el agente vuelve a
+            # elegir on_hold, la espera empieza de nuevo.
+            interrupt_on_hold(ticket, actor, now)
+            entered_on_hold = apply_status(ticket, actor, payload["status"], now) and ticket.status == "on_hold"
         for event_name, model_field in TicketService.EVENT_FIELDS:
+            if event_name == "status":
+                continue  # el TicketEvent lo deja ticket_status
             new_value = getattr(ticket, model_field)
             old_value = old_values[event_name]
             if old_value != new_value:
@@ -410,6 +420,8 @@ class TicketService:
 
         SLAService.apply_policy(ticket)
         NotificationService.notify_ticket_users(ticket, f"Ticket #{ticket.id} actualizado", actor=actor)
+        if entered_on_hold:
+            queue_on_hold_notice(ticket)
         if payload.get("content") or payload.get('html_body') or payload.get('attachment_ids'):
             CommentService.add_comment(
                 ticket,
@@ -434,13 +446,38 @@ class TicketService:
         por update_ticket exigiría el producto, que los tickets de correo no traen.
         """
         ticket = Ticket.objects.select_for_update().get(id=ticket_id)
+        ensure_editable(ticket)
         if not apply_status(ticket, actor, new_status, timezone.now()):
             raise APIValidationError("empty_comment", "El mensaje no puede estar vacío.", status=400)
         SLAService.apply_policy(ticket)
         NotificationService.notify_ticket_users(ticket, f"Ticket #{ticket.id} actualizado", actor=actor)
+        if ticket.status == "on_hold":
+            queue_on_hold_notice(ticket)
         AutomationService.run_for_ticket(ticket, actor=actor, event="ticket_updated")
         record_metric("tickets.status_changed", labels={"ticket_id": ticket.id})
         return ticket
+
+    @staticmethod
+    def _link_follow_up(ticket, payload, now):
+        """Un correo que continúa un ticket ya cerrado abre este ticket nuevo; se
+        deja constancia del anterior para los agentes (#21384)."""
+        # Import local: email_ingestion importa este módulo.
+        from app.services.email_ingestion import EmailIngestionService
+
+        previous = EmailIngestionService.closed_ticket_for_message(
+            payload.get("subject"), payload.get("email_conversation_id"), payload.get("brand"),
+            exclude_id=ticket.id,
+        )
+        if previous is None:
+            return
+        TicketEvent.objects.create(
+            ticket=ticket,
+            actor=None,
+            field_name="follow_up_of",
+            old_value=None,
+            new_value=str(previous.id),
+            created_at=now,
+        )
 
     @staticmethod
     def _set_m2m(ticket, ccs_ids, tags_in):

@@ -1038,7 +1038,7 @@
 
     let updHideTimer = null;
 
-    const STATUS_LABELS = { open:'open', pending:'pending', resolved:'resolved', closed:'closed' };
+    const STATUS_LABELS = { open:'open', pending:'pending', resolved:'resolved', on_hold:'on-hold', closed:'closed' };
     const PRIORITY_LABELS = { low:'Baja', normal:'Normal', high:'Alta', urgent:'Urgente' };
 
     function showUpdPopup(item) {

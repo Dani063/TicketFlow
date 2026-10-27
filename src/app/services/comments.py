@@ -11,7 +11,7 @@ from app.services.metrics import record_metric
 from app.services.attachments import AttachmentService, retry_attachment_mutation
 from app.services.notifications import NotificationService
 from app.services.sla import SLAService
-from app.services.ticket_status import apply_status
+from app.services.ticket_status import apply_status, ensure_editable, interrupt_on_hold, queue_on_hold_notice
 
 
 logger = logging.getLogger(__name__)
@@ -62,6 +62,7 @@ class CommentService:
             if not previous.comment.is_public and not is_agent(actor):
                 raise APIValidationError('forbidden', 'No tienes acceso a este comentario.', status=403)
             return previous.comment, previous.result['new_status']
+        ensure_editable(ticket)
         attachments = AttachmentService.pending_for_publish(actor, attachment_ids, ticket=ticket)
         if not content and not html_body and not attachments:
             raise APIValidationError('empty_comment', 'El mensaje no puede estar vacío.', status=400)
@@ -78,21 +79,30 @@ class CommentService:
             email_message_id=email_message_id,
         )
 
-        if not apply_status(ticket, actor, new_status, now):
+        # Comentar en un ticket en on_hold lo devuelve a open; el estado pedido se
+        # aplica después, así que «publicar como on_hold» reinicia la espera.
+        interrupted = interrupt_on_hold(ticket, actor, now)
+        changed = apply_status(ticket, actor, new_status, now)
+        if not (interrupted or changed):
             ticket.updated_at = now
             ticket.save(update_fields=["updated_at"])
         applied_status = ticket.status
+        entered_on_hold = changed and applied_status == "on_hold"
 
         if attachments:
             Attachment.objects.filter(id__in=attachment_ids).update(comment=comment)
 
         SLAService.record_first_response(ticket, actor, comment_is_public=final_is_public)
 
-        if send_requester_email and final_is_public and is_agent(actor) and not comment.is_inbound_email:
+        sends_reply = send_requester_email and final_is_public and is_agent(actor) and not comment.is_inbound_email
+        if entered_on_hold and not sends_reply:
+            queue_on_hold_notice(ticket)
+        if sends_reply:
             try:
                 from app.services.email_outbound import OutboundEmailService
 
-                OutboundEmailService.queue_agent_reply(ticket, comment)
+                # Con respuesta pública, el aviso de cierre va dentro: un solo correo.
+                OutboundEmailService.queue_agent_reply(ticket, comment, closing_notice=entered_on_hold)
             except Exception:
                 # El comentario ya es la operación principal: un error de plantilla
                 # o de encolado no debe impedir que el agente responda al ticket.

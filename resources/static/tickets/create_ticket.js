@@ -11,6 +11,13 @@
 // All DOM queries for elements inside the pane are scoped to $root / rootEl.
 // References to window.ticketId have been replaced with ctx.ticketId.
 
+// Estado que propone "Publicar como": en on_hold es open, porque comentar o
+// editar interrumpe la espera de cierre (#21384); volver a on_hold hay que elegirlo.
+function tfPublishStatusFor(status) {
+    return status === 'on_hold' ? 'open' : status;
+}
+window.tfPublishStatusFor = tfPublishStatusFor;
+
 // Shared Select2 config. Used by initTicketPane (first mount) and by
 // tfApplyPaneSelect2 (defensive re-init after a pane was detached and
 // re-attached by tabs.js — Select2 widget state doesn't survive that round-trip
@@ -484,6 +491,10 @@ window.initTicketPane = function (root, ctx) {
         if (ev) { ev.preventDefault(); ev.stopPropagation(); }
         if (submissionBusy) return;
         if (!ctx.ticketId) return createTicketWithAttachments();
+        if (rootEl.querySelector('#ticket-form')?.dataset.locked) {
+            window.toast.warning('El ticket está cerrado y ya no admite cambios.');
+            return;
+        }
         if (!attachmentsReady()) return;
         const textarea = rootEl.querySelector('#new-message');
         const content = (textarea?.value || '').trim();
@@ -500,7 +511,10 @@ window.initTicketPane = function (root, ctx) {
                 // Con otros campos cambiados el formulario ya lleva el estado; sin
                 // ellos, la ruta de solo estado no exige producto.
                 const saved = fieldsChanged ? await saveTicketFields(newStatus) : await saveStatusOnly(newStatus);
-                if (saved) window.toast.success('Cambios del ticket guardados.');
+                if (saved) {
+                    rootEl.querySelector('#selected-status').textContent = tfPublishStatusFor(newStatus);
+                    window.toast.success('Cambios del ticket guardados.');
+                }
             } finally { setSubmissionBusy(false); }
             return;
         }
@@ -514,9 +528,9 @@ window.initTicketPane = function (root, ctx) {
         try {
             // El botón de enviar también guarda los campos: un CC añadido a mano
             // tiene que estar en el ticket antes de encolar la respuesta o no la
-            // recibe. Ese botón no cambia el estado, así que viaja el del servidor.
-            const fieldsStatus = updateFields ? newStatus : (rootEl.__tfLive?.serverStatus || newStatus);
-            if (!await saveTicketFields(fieldsStatus)) return;
+            // recibe. Los campos viajan sin estado: el estado va con el comentario,
+            // para que la transición (y el aviso de on_hold) ocurra una sola vez.
+            if (!await saveTicketFields(null)) return;
             const response = await fetch('/tickets/' + ctx.ticketId + '/add_comment/', {
                 method:'POST',
                 headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
@@ -532,7 +546,7 @@ window.initTicketPane = function (root, ctx) {
             paneComposer?.clear();
             textarea.value = '';
             lastAttempt = null;
-            if (data.new_status) rootEl.querySelector('#selected-status').textContent = data.new_status;
+            if (data.new_status) rootEl.querySelector('#selected-status').textContent = tfPublishStatusFor(data.new_status);
             window.tfApplyTicketHeader?.(rootEl, data.ticket);
         } catch (_) {
             window.toast.error('No se pudo confirmar la publicación. Reintenta; no se duplicará el mensaje.');
@@ -576,8 +590,9 @@ window.initTicketPane = function (root, ctx) {
         // El comentario lo publica add_comment (con HTML, adjuntos y visibilidad).
         // Si 'message' viajara aquí, update_ticket crearía un segundo comentario.
         fd.delete('message');
-        // Sin 'status' explícito el backend cae a "open" y reabriría el ticket.
-        fd.set('status', status || rootEl.querySelector('#selected-status')?.textContent?.trim() || 'open');
+        // Sin 'status' el backend conserva el estado actual.
+        if (status) fd.set('status', status);
+        else fd.delete('status');
 
         try {
             const res = await fetch(form.action, {
@@ -620,6 +635,7 @@ window.initTicketPane = function (root, ctx) {
                 window.toast.error(responseError(data, 'No se pudo cambiar el estado del ticket.'));
                 return false;
             }
+            rootEl.querySelector('#selected-status').textContent = tfPublishStatusFor(data.new_status || status);
             window.tfApplyTicketHeader?.(rootEl, data.ticket);
             return true;
         } catch (_) {
@@ -1649,7 +1665,8 @@ window.initTicketPane = function (root, ctx) {
     rootEl.__tfLive = {
         ticketId: ctx.ticketId,
         lastCommentId: _lastCommentId,
-        serverStatus: (rootEl.querySelector('#selected-status')?.textContent || '').trim().toLowerCase(),
+        serverStatus: (rootEl.querySelector('#selected-status')?.dataset.serverStatus
+            || rootEl.querySelector('#selected-status')?.textContent || '').trim().toLowerCase(),
         appendComment: appendPublishedComment,
         hasPendingFieldChanges: hasTicketFieldChanges,
     };

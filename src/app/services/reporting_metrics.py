@@ -20,7 +20,7 @@ from app.permissions import AGENT_ROLE_NAMES, is_agent
 logger = logging.getLogger(__name__)
 
 UNSOLVED_STATUSES = ("open", "pending")
-SOLVED_STATUSES = ("resolved", "closed")
+SOLVED_STATUSES = ("resolved", "on_hold", "closed")
 STATUS_EVENT_NAMES = ("status", "estado")
 ASSIGNEE_EVENT_NAMES = ("assignee_id", "assignee", "asignado")
 GROUP_EVENT_NAMES = ("group_id", "group", "grupo")
@@ -40,8 +40,10 @@ STATUS_ALIASES = {
     "open": "open",
     "pending": "pending",
     "hold": "pending",
-    "on-hold": "pending",
-    "on_hold": "pending",
+    # "hold" es el on-hold de Zendesk (espera a un tercero): se importó como pending.
+    # El on_hold de TicketFlow es el cierre de los agentes (#21384).
+    "on-hold": "on_hold",
+    "on_hold": "on_hold",
     "solved": "resolved",
     "resolved": "resolved",
     "closed": "closed",
@@ -556,7 +558,7 @@ def _lifecycle_facts(tickets, now=None):
     return facts
 
 
-_SOLVED_EVENT_VALUES = ("resolved", "closed", "solved")
+_SOLVED_EVENT_VALUES = ("resolved", "on_hold", "closed", "solved")
 
 
 def _full_resolution_moments(qs, ticket_ids):
@@ -2021,7 +2023,7 @@ def build_legacy_overview(brand_id, date_from, date_to, start_dt, end_dt):
     def _resolved_qs(s, e):
         qs = TicketEvent.objects.filter(
             field_name='status',
-            new_value__in=('resolved', 'closed'),
+            new_value__in=SOLVED_STATUSES,
             created_at__range=(s, e),
             ticket__is_deleted=False,
             ticket__merged_into__isnull=True,
@@ -2036,8 +2038,8 @@ def build_legacy_overview(brand_id, date_from, date_to, start_dt, end_dt):
     # Reaperturas: tickets que volvieron de resuelto/cerrado a open/pending en el rango.
     reopened_qs = TicketEvent.objects.filter(
         field_name='status',
-        old_value__in=('resolved', 'closed'),
-        new_value__in=('open', 'pending'),
+        old_value__in=SOLVED_STATUSES,
+        new_value__in=UNSOLVED_STATUSES,
         created_at__range=(start_dt, end_dt),
         ticket__is_deleted=False,
         ticket__merged_into__isnull=True,

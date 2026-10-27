@@ -11,6 +11,7 @@ from app.models import SLAPolicy, Ticket, TicketEvent
 from app.permissions import is_agent
 from app.services.metrics import record_metric
 from app.services.notifications import NotificationService
+from app.services.ticket_status import SOLVED_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,8 @@ class SLAService:
         if not policy:
             return None
 
-        base = ticket.created_at or timezone.now()
+        # El tiempo en on_hold no cuenta: la pausa acumulada retrasa los plazos.
+        base = (ticket.created_at or timezone.now()) + timedelta(seconds=ticket.sla_paused_seconds or 0)
         update_fields = []
         # Solo armamos el vencimiento de primera respuesta si aun no se ha
         # respondido. Sin esta guarda, cada update re-fijaria el due desde
@@ -84,7 +86,7 @@ class SLAService:
         if policy.first_response_minutes and not ticket.first_responded_at:
             ticket.first_response_due_at = base + timedelta(minutes=policy.first_response_minutes)
             update_fields.append("first_response_due_at")
-        if policy.resolution_minutes and ticket.status not in ("closed", "resolved"):
+        if policy.resolution_minutes and ticket.status not in SOLVED_STATUSES:
             ticket.resolution_due_at = base + timedelta(minutes=policy.resolution_minutes)
             ticket.due_at = ticket.resolution_due_at
             update_fields.extend(["resolution_due_at", "due_at"])
@@ -131,7 +133,7 @@ class SLAService:
         ).filter(
             Q(first_response_due_at__isnull=False, first_response_due_at__lt=now)
             | Q(resolution_due_at__isnull=False, resolution_due_at__lt=now)
-        ).exclude(status__in=("closed", "resolved"))
+        ).exclude(status__in=SOLVED_STATUSES)
 
         with transaction.atomic():
             for ticket in qs.select_for_update():
@@ -190,7 +192,7 @@ class SLAService:
                 merged_into__isnull=True,
                 sla_breached_at__isnull=True,
                 sla_risk_notified_at__isnull=True,
-            ).exclude(status__in=("closed", "resolved"))
+            ).exclude(status__in=SOLVED_STATUSES)
         ).filter(sla_next_due__gt=now, sla_next_due__lte=deadline)
 
         notified = []

@@ -48,6 +48,12 @@ class ResponseTemplateService:
         rendered_html = engine.from_string(template.body_html).render(context)
         body_text_source = template.body_text or strip_tags(template.body_html)
         rendered_text = engine.from_string(body_text_source).render(context)
+        # Una plantilla editada en el panel puede no conocer el aviso de cierre;
+        # entonces va al final para que el cliente no se quede sin él.
+        if context.get("closing_notice_html") and "closing_notice" not in template.body_html:
+            rendered_html += context["closing_notice_html"]
+        if context.get("closing_notice_text") and "closing_notice" not in body_text_source:
+            rendered_text += "\n\n" + context["closing_notice_text"]
         # MySQL STRICT_TRANS_TABLES: subject de log/email limitado a 255
         return {
             "subject": rendered_subject[:255],
@@ -86,10 +92,48 @@ class ResponseTemplateService:
             "created_at": ticket.created_at.strftime("%d/%m/%Y %H:%M") if ticket.created_at else "",
         }
 
+    CLOSING_NOTICE = {
+        "es": (
+            "Damos por resuelta tu solicitud. Si necesitas algo más, responde a este "
+            "correo en las próximas {hours} horas y continuaremos en el mismo ticket. "
+            "Pasado ese plazo se cerrará definitivamente y, si vuelves a escribirnos, "
+            "abriremos uno nuevo."
+        ),
+        "en": (
+            "We consider your request resolved. If you need anything else, reply to "
+            "this email within the next {hours} hours and we will continue in the same "
+            "ticket. After that it will be permanently closed and, if you write to us "
+            "again, we will open a new one."
+        ),
+    }
+
     @staticmethod
-    def context_for_agent_reply(ticket, comment):
+    def closing_notice(ticket):
+        """Aviso de cierre de on_hold (#21384) en el idioma del ticket: (html, texto)."""
+        from app.services.ticket_status import on_hold_close_hours
+
+        language = ResponseTemplateService.pick_language(ticket)
+        notice = ResponseTemplateService.CLOSING_NOTICE.get(
+            language, ResponseTemplateService.CLOSING_NOTICE["es"],
+        ).format(hours=on_hold_close_hours())
+        return f"<p>{escape(notice)}</p>", notice
+
+    @staticmethod
+    def context_for_on_hold(ticket):
+        """Contexto del aviso suelto de cierre: el del ticket más el aviso."""
+        context = ResponseTemplateService.context_for_ticket(ticket)
+        notice_html, notice_text = ResponseTemplateService.closing_notice(ticket)
+        context.update({"closing_notice_html": notice_html, "closing_notice_text": notice_text})
+        return context
+
+    @staticmethod
+    def context_for_agent_reply(ticket, comment, closing_notice=False):
         """Contexto seguro para la respuesta pública escrita por un agente."""
         context = ResponseTemplateService.context_for_ticket(ticket)
+        notice_html, notice_text = (
+            ResponseTemplateService.closing_notice(ticket) if closing_notice else ("", "")
+        )
+        context.update({"closing_notice_html": notice_html, "closing_notice_text": notice_text})
         if comment.html_body:
             reply_html = comment.html_body
             reply_text = strip_tags(comment.html_body).strip()

@@ -107,6 +107,7 @@
 .status-badge-pending  { background: #fef9c3; color: #854d0e; border: 1px solid #fde68a; }
 .status-badge-resolved { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
 .status-badge-closed   { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+.status-badge-on_hold  { background: #ede9fe; color: #6d28d9; border: 1px solid #ddd6fe; }
 
 /* Zendesk ID in header */
 .ticket-zd-id {
@@ -1291,6 +1292,7 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 .tl-badge.status-pending  { background: #f59e0b; }
 .tl-badge.status-resolved { background: #22c55e; }
 .tl-badge.status-closed   { background: #6b7280; }
+.tl-badge.status-on_hold  { background: #8b5cf6; }
 
 .tl-content { flex: 1; min-width: 0; }
 
@@ -1603,6 +1605,7 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 .status-resolved { background: #22c55e; }
 .status-closed   { background: #6b7280; }
 /* gris */
+.status-on_hold  { background: #8b5cf6; }
 
 /* ---- Vínculo problema ↔ incidencias (ITIL) ----
    "Problema vinculado" (una incidencia → su problema padre) e "Incidencias
@@ -1650,6 +1653,7 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 .li-status.status-pending  { background: #f59e0b; }
 .li-status.status-resolved { background: #22c55e; }
 .li-status.status-closed   { background: #6b7280; }
+.li-status.status-on_hold  { background: #8b5cf6; }
 
 /* System event divider (audit trail) */
 .sys-event {
@@ -1954,6 +1958,7 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 :root[data-theme="dark"] .status-badge-pending  { background: var(--status-pending-bg); color: var(--status-pending-fg); border-color: transparent; }
 :root[data-theme="dark"] .status-badge-resolved { background: var(--status-resolved-bg); color: var(--status-resolved-fg); border-color: transparent; }
 :root[data-theme="dark"] .status-badge-closed   { background: var(--status-closed-bg); color: var(--status-closed-fg); border-color: transparent; }
+:root[data-theme="dark"] .status-badge-on_hold  { background: #2e1065; color: #c4b5fd; border-color: transparent; }
 :root[data-theme="dark"] .sat-badge.sat-good { background: var(--color-success-bg); color: var(--color-success); border-color: transparent; }
 :root[data-theme="dark"] .sat-badge.sat-bad  { background: var(--color-danger-bg);  color: var(--color-danger);  border-color: transparent; }
 :root[data-theme="dark"] .take-it-btn { border-color: var(--color-primary); color: #fff; }
@@ -2253,3 +2258,23 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 .select2-results__option--highlighted .tf-user-opt__email { color: inherit; opacity: .8; }
 .tf-quick-user__error { display: block; margin-top: 6px; font-size: 12px; color: var(--color-danger); }
 .tf-quick-user__error[hidden] { display: none; }
+
+/* Ticket cerrado o eliminado: solo lectura (#21384) */
+.ticket-locked-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+    font-size: 13px;
+}
+#ticket-form.is-locked .message-input,
+#ticket-form.is-locked .compose-resize-handle,
+#ticket-form.is-locked .publish-group,
+#ticket-form.is-locked .macro-wrap,
+#ticket-form.is-locked .footer-sep { display: none; }
+:root[data-theme="dark"] .ticket-locked-banner { background: var(--status-closed-bg); color: var(--status-closed-fg); border-color: transparent; }

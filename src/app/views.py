@@ -2305,7 +2305,8 @@ def macros_api(request):
     return JsonResponse({'macros': list(macros)})
 
 
-_MACRO_STATUS_CHOICES = {'open', 'pending', 'resolved', 'closed'}
+# 'closed' solo lo pone el sistema (#21384): las macros cierran con on_hold.
+_MACRO_STATUS_CHOICES = {'open', 'pending', 'resolved', 'on_hold'}
 _MACRO_PRIORITY_CHOICES = {'low', 'normal', 'high', 'urgent'}
 
 

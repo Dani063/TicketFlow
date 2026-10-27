@@ -28,6 +28,7 @@ class OutboundEmailService:
     TEMPLATE_TICKET_CREATED = "ticket_created"
     TEMPLATE_AGENT_REPLY = "agent_reply"
     TEMPLATE_SATISFACTION_SURVEY = "satisfaction_survey"
+    TEMPLATE_ON_HOLD = "ticket_on_hold"
     TEMPLATE_SWITCHES = {
         TEMPLATE_TICKET_CREATED: (
             "OUTBOUND_TICKET_CREATED_ENABLED",
@@ -40,6 +41,10 @@ class OutboundEmailService:
         TEMPLATE_SATISFACTION_SURVEY: (
             "SATISFACTION_SURVEY_ENABLED",
             "satisfaction_survey_disabled",
+        ),
+        TEMPLATE_ON_HOLD: (
+            "OUTBOUND_TICKET_ON_HOLD_ENABLED",
+            "ticket_on_hold_disabled",
         ),
     }
 
@@ -140,11 +145,29 @@ class OutboundEmailService:
         )
 
     @staticmethod
-    def queue_agent_reply(ticket, comment):
+    def queue_on_hold_notice(ticket):
+        """Encola el aviso de que el ticket se cerrará si el cliente no responde.
+
+        Idempotente por cada entrada en on_hold: si la espera se reinicia, el
+        aviso vuelve a salir con el plazo nuevo.
+        """
+        return OutboundEmailService._queue(
+            ticket,
+            OutboundEmailService.TEMPLATE_ON_HOLD,
+            dedup_suffix=f"{ticket.id}:{ticket.on_hold_at.isoformat() if ticket.on_hold_at else ''}",
+            context_builder=lambda tkt: ResponseTemplateService.context_for_on_hold(tkt),
+        )
+
+    @staticmethod
+    def queue_agent_reply(ticket, comment, closing_notice=False):
         """Encola una respuesta pública escrita por un agente.
 
         La deduplicación usa el comentario: reintentar una petición o una entrega
         no puede generar dos correos, pero dos respuestas distintas sí.
+
+        Con ``closing_notice`` la respuesta pasa el ticket a on_hold y lleva dentro
+        el aviso de cierre, para que el cliente reciba un solo correo. Si el aviso
+        está apagado, la respuesta sale igual sin él.
         """
         # El rol del remitente no convierte un correo recibido en una respuesta
         # escrita desde TicketFlow. También protege las llamadas directas.
@@ -157,7 +180,12 @@ class OutboundEmailService:
             ticket,
             OutboundEmailService.TEMPLATE_AGENT_REPLY,
             dedup_suffix=str(comment.id),
-            context_builder=lambda tkt: ResponseTemplateService.context_for_agent_reply(tkt, comment),
+            context_builder=lambda tkt: ResponseTemplateService.context_for_agent_reply(
+                tkt, comment,
+                closing_notice=closing_notice and not OutboundEmailService._template_block(
+                    OutboundEmailService.TEMPLATE_ON_HOLD,
+                ),
+            ),
             payload_extra={
                 "attachment_ids": list(
                     comment.attachment_set.order_by("id").values_list("id", flat=True)

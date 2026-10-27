@@ -6,6 +6,7 @@ from django.utils import timezone
 from app.models import AssignmentRule, Ticket, TicketEvent, User
 from app.permissions import agent_user_filter
 from app.services.metrics import record_metric
+from app.services.ticket_status import SOLVED_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ class AssignmentService:
             return {}
         return dict(
             Ticket.objects.filter(assignee_id__in=user_ids, is_deleted=False)
-            .exclude(status__in=["closed", "resolved"])
+            .exclude(status__in=SOLVED_STATUSES)
             .values("assignee_id")
             .annotate(n=Count("id"))
             .values_list("assignee_id", "n")

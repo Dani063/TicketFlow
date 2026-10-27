@@ -94,6 +94,15 @@ def notify_sla_at_risk():
     return f'at_risk_count: {len(notified)}'
 
 
+@shared_task(name='app.tasks.close_on_hold_tickets')
+def close_on_hold_tickets():
+    """Cierra los tickets que han agotado la espera en on_hold (#21384)."""
+    from app.services.ticket_status import close_expired_on_hold
+
+    closed = close_expired_on_hold()
+    return f'closed_count: {len(closed)}'
+
+
 @shared_task(name='app.tasks.offer_satisfaction_surveys')
 def offer_satisfaction_surveys():
     """Ofrece la encuesta de satisfacción de los tickets resueltos hace suficiente.

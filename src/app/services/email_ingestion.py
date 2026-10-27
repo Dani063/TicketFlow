@@ -19,6 +19,7 @@ from app.services.attachments import AttachmentService
 from app.services.metrics import record_metric
 from app.services.notifications import NotificationService
 from app.services.sla import SLAService
+from app.services.ticket_status import transition
 from app.services.tickets import TicketService
 
 logger = logging.getLogger(__name__)
@@ -333,22 +334,73 @@ class EmailIngestionService:
         return user
 
     @staticmethod
-    def find_ticket_for_message(subject, conversation_id, brand, requester=None):
-        if conversation_id:
-            ticket = exact_match(
-                Ticket.objects.filter(brand=brand), "email_conversation_id", conversation_id,
-            )
-            if ticket:
-                return ticket
+    def _live_target(ticket):
+        """Sigue la cadena de fusiones hasta el ticket vivo; None si acaba borrado."""
+        seen = set()
+        while ticket is not None and ticket.merged_into_id and ticket.id not in seen:
+            seen.add(ticket.id)
+            ticket = ticket.merged_into
+        if ticket is None or ticket.is_deleted:
+            return None
+        return ticket
 
+    @staticmethod
+    def _referenced_tickets(subject, conversation_id, brand):
+        """Tickets a los que remite el correo, ya resueltas las fusiones.
+
+        Primero los de la conversación, del más reciente al más antiguo: tras
+        cerrarse un ticket, su seguimiento comparte conversationId con él y es el
+        que tiene que recibir las respuestas. Después el [Ticket #N] del asunto.
+        """
+        candidates = []
+        if conversation_id:
+            candidates += [
+                ticket
+                for ticket in Ticket.objects.filter(brand=brand, email_conversation_id=conversation_id).order_by("-id")
+                if ticket.email_conversation_id == conversation_id
+            ]
         match = TICKET_REF_RE.search(subject or "")
         if match:
             number = int(match.group(1))
             for lookup in ({"id": number, "brand": brand}, {"zendesk_id": number, "brand": brand}):
-                try:
-                    return Ticket.objects.get(**lookup)
-                except Ticket.DoesNotExist:
-                    pass
+                ticket = Ticket.objects.filter(**lookup).first()
+                if ticket:
+                    candidates.append(ticket)
+                    break
+        targets = []
+        for ticket in candidates:
+            target = EmailIngestionService._live_target(ticket)
+            if target is not None and target not in targets:
+                targets.append(target)
+        return targets
+
+    @staticmethod
+    def closed_ticket_for_message(subject, conversation_id, brand, exclude_id=None):
+        """Ticket cerrado al que responde el correo, si todos los referidos lo están.
+
+        ``exclude_id`` es el ticket que acaba de abrir el propio correo, que ya
+        comparte la conversación.
+        """
+        targets = [
+            ticket
+            for ticket in EmailIngestionService._referenced_tickets(subject, conversation_id, brand)
+            if ticket.id != exclude_id
+        ]
+        if targets and all(ticket.status == "closed" for ticket in targets):
+            return targets[0]
+        return None
+
+    @staticmethod
+    def find_ticket_for_message(subject, conversation_id, brand, requester=None):
+        # Una respuesta a un ticket fusionado va al ticket en el que se fusionó. Un
+        # ticket cerrado ya no admite cambios ni uno borrado se ve: el correo abre
+        # un ticket nuevo (#21384).
+        targets = EmailIngestionService._referenced_tickets(subject, conversation_id, brand)
+        for ticket in targets:
+            if ticket.status != "closed":
+                return ticket
+        if targets:
+            return None
 
         if requester and not conversation_id:
             normalized = EmailIngestionService.normalize_subject(subject or "")
@@ -412,19 +464,10 @@ class EmailIngestionService:
             email_message_id=email_message_id,
         )
 
-        if ticket.status in ("pending", "resolved"):
-            old_status = ticket.status
-            ticket.status = "open"
-            ticket.updated_at = now
-            ticket.save(update_fields=["status", "updated_at"])
-            TicketEvent.objects.create(
-                ticket=ticket,
-                actor=actor,
-                field_name="status",
-                old_value=old_status,
-                new_value="open",
-                created_at=now,
-            )
+        # La respuesta del cliente reabre el mismo ticket; en on_hold además
+        # reanuda el SLA (ticket_status).
+        if ticket.status in ("pending", "resolved", "on_hold"):
+            transition(ticket, actor, "open", now)
         else:
             ticket.updated_at = now
             ticket.save(update_fields=["updated_at"])

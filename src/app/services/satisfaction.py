@@ -23,9 +23,9 @@ from app.services.metrics import record_metric
 
 logger = logging.getLogger(__name__)
 
-# Estados desde los que se encuesta. 'closed' entra porque un agente puede cerrar
-# sin pasar por 'resolved' y esos tickets no se encuestarían nunca.
-TERMINAL_STATUSES = ("resolved", "closed")
+# Estados desde los que se encuesta. 'on_hold' es el cierre que ponen los
+# agentes y puede no pasar por 'resolved'; 'closed' lo pone después el sistema.
+TERMINAL_STATUSES = ("resolved", "on_hold", "closed")
 
 
 class SatisfactionService:

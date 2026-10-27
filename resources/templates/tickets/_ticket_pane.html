@@ -46,7 +46,7 @@
     {% endif %}
 </div>
 
-<form id="ticket-form" method="post"
+<form id="ticket-form" method="post"{% if ticket_locked or ticket.status == "closed" or ticket.is_deleted %} class="is-locked" data-locked="1"{% endif %}
       action="{% url 'create_ticket' %}{% if ticket %}?id={{ ticket.id }}{% elif request.GET.id %}?id={{ request.GET.id }}{% endif %}">
     {% csrf_token %}
     <div class="ticket-form" id="ticketLayout">
@@ -269,6 +269,19 @@
                 {% endwith %}
                 {% else %}
                 {% with e=item.obj %}
+                {% if e.field_name == "follow_up_of" %}
+                {# Nota interna: el cliente escribió a un ticket ya cerrado (#21384). #}
+                {% if can_use_internal %}
+                <div class="sys-event">
+                    <span class="sys-text">
+                        <i class="fas fa-link"></i>
+                        Seguimiento del ticket cerrado
+                        <a href="{% url 'create_ticket' %}?id={{ e.new_value }}">#{{ e.new_value }}</a>
+                    </span>
+                    <span class="sys-time" data-ts="{{ e.created_at|date:'c' }}" title="{{ e.created_at|date:'d/m/Y H:i' }}">{{ e.created_at|date:'d/m/Y H:i' }}</span>
+                </div>
+                {% endif %}
+                {% else %}
                 <div class="sys-event">
                     <span class="sys-text">
                         <span class="sys-actor">{{ e.actor.name|default:"Sistema" }}</span>
@@ -278,6 +291,7 @@
                     </span>
                     <span class="sys-time" data-ts="{{ e.created_at|date:'c' }}" title="{{ e.created_at|date:'d/m/Y H:i' }}">{{ e.created_at|date:'d/m/Y H:i' }}</span>
                 </div>
+                {% endif %}
                 {% endwith %}
                 {% endif %}
                 {% empty %}
@@ -289,6 +303,11 @@
             </div>
             <!-- Resize handle compose -->
             <div class="compose-resize-handle" id="composeResizer"></div>
+            {% if ticket.status == "closed" and not ticket.is_deleted %}
+            <div class="ticket-locked-banner"><i class="fas fa-lock"></i>
+                Ticket cerrado: ya no admite cambios. Si el cliente vuelve a escribir, se abrirá un ticket nuevo.
+            </div>
+            {% endif %}
             <!-- Input de Mensaje -->
             <div class="message-input" id="messageInputArea">
                 <div class="dropzone-overlay" id="composerDropzone" aria-hidden="true">
@@ -470,14 +489,15 @@
             {% endif %}
             <div class="publish-group">
                 <button type="button" id="publish-button" class="main-btn">
-                    Publicar como <span id="selected-status">{{ ticket.status|default:"open" }}</span>
+                    {# En on_hold, publicar reabre por defecto: comentar interrumpe la espera (#21384). #}
+                    Publicar como <span id="selected-status" data-server-status="{{ ticket.status|default:'open' }}">{% if ticket.status == "on_hold" %}open{% else %}{{ ticket.status|default:"open" }}{% endif %}</span>
                 </button>
                 <button id="dropdown-button" class="dropdown-btn"><i class="fas fa-caret-down"></i></button>
                 <div id="dropdown-content" class="dropdown-content">
                     <a href="#" data-status="open">Abierto</a>
                     <a href="#" data-status="pending">Pendiente</a>
                     <a href="#" data-status="resolved">Resuelto</a>
-                    <a href="#" data-status="closed">Cerrado</a>
+                    <a href="#" data-status="on_hold">On-hold</a>
                 </div>
             </div>
         </div>
@@ -560,7 +580,7 @@
                             <option value="open">Abierto</option>
                             <option value="pending">Pendiente</option>
                             <option value="resolved">Resuelto</option>
-                            <option value="closed">Cerrado</option>
+                            <option value="on_hold">On-hold</option>
                         </select>
                     </div>
                     <div class="tf-field">

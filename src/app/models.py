@@ -149,7 +149,9 @@ class Ticket(models.Model):
     zendesk_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)
     subject = models.CharField(max_length=255, null=False)
     description = models.TextField(null=False)
-    status = models.CharField(max_length=255, choices=[('open', 'Open'), ('pending', 'Pending'), ('closed', 'Closed'), ('resolved', 'Resolved')])
+    # 'on_hold' es el cierre que ponen los agentes; 'closed' solo lo pone el
+    # sistema cuando vence la espera (ver services/ticket_status.py).
+    status = models.CharField(max_length=255, choices=[('open', 'Open'), ('pending', 'Pending'), ('closed', 'Closed'), ('resolved', 'Resolved'), ('on_hold', 'On-hold')])
     priority = models.CharField(max_length=255, choices=[('low', 'Low'), ('normal', 'Normal'), ('high', 'High'), ('urgent', 'Urgent')], null=True, blank=True)
     requester = models.ForeignKey(User, on_delete=models.CASCADE, related_name='requested_tickets')
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='assigned_tickets')
@@ -181,6 +183,11 @@ class Ticket(models.Model):
     # satisfacción; los tickets resueltos antes de existir este campo se quedan a
     # NULL a propósito, para que el barrido no los encueste retroactivamente.
     resolved_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    # Entrada en 'on_hold': de aquí cuelga el cierre automático. NULL fuera de on_hold.
+    on_hold_at = models.DateTimeField(null=True, blank=True)
+    # Tiempo acumulado en on_hold, que no cuenta para el SLA. Nulo (= 0) para
+    # que los pods con la imagen anterior sigan pudiendo insertar tickets.
+    sla_paused_seconds = models.PositiveIntegerField(null=True, blank=True)
     due_at = models.DateTimeField(null=True, blank=True)
     first_response_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
     first_responded_at = models.DateTimeField(null=True, blank=True)

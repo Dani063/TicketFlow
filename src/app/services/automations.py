@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from app.models import AutomationExecution, AutomationRule, Group, TicketEvent, TicketTag, User
 from app.services.notifications import NotificationService
+from app.services.ticket_status import STATUS_VALUES, transition
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +64,15 @@ class AutomationService:
         now = timezone.now()
         changed_fields = []
 
-        for field in ("status", "priority"):
-            if field in actions and getattr(ticket, field) != actions[field]:
-                old = getattr(ticket, field)
-                setattr(ticket, field, actions[field])
-                changed_fields.append((field, old, actions[field]))
+        # El estado pasa por ticket_status para mantener relojes y pausa del SLA;
+        # deja su propio TicketEvent.
+        if actions.get("status") in STATUS_VALUES:
+            transition(ticket, actor, actions["status"], now)
+
+        if "priority" in actions and ticket.priority != actions["priority"]:
+            old = ticket.priority
+            ticket.priority = actions["priority"]
+            changed_fields.append(("priority", old, actions["priority"]))
 
         if "assigned_group_id" in actions:
             group = Group.objects.filter(id=actions["assigned_group_id"]).first()

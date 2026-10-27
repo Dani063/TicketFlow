@@ -484,7 +484,15 @@ CELERY_BEAT_SCHEDULE = {
         'schedule': 3600.0,
         'options': {'expires': 3590},
     },
+    'close-on-hold-tickets': {
+        'task': 'app.tasks.close_on_hold_tickets',
+        'schedule': 600.0,  # El plazo es de horas: 10 min de margen bastan
+        'options': {'expires': 590},
+    },
 }
+
+# Horas en on_hold sin actividad tras las que el sistema cierra el ticket.
+TICKET_ON_HOLD_CLOSE_HOURS = int(os.getenv('TICKET_ON_HOLD_CLOSE_HOURS', '72'))
 
 # === Azure AD (lectura buzones M365 + envío via Graph sendMail) ===
 # Local: desde .env | Producción: desde SSM /Recordia/.../AzureCredentials
@@ -629,6 +637,10 @@ OUTBOUND_TICKET_CREATED_ENABLED = os.getenv(
 ).lower() in ('1', 'true', 'yes', 'on')
 OUTBOUND_AGENT_REPLY_ENABLED = os.getenv(
     'OUTBOUND_AGENT_REPLY_ENABLED', 'false'
+).lower() in ('1', 'true', 'yes', 'on')
+# Aviso al cliente de que el ticket en on_hold se cerrará si no responde.
+OUTBOUND_TICKET_ON_HOLD_ENABLED = os.getenv(
+    'OUTBOUND_TICKET_ON_HOLD_ENABLED', 'false'
 ).lower() in ('1', 'true', 'yes', 'on')
 AWS_SES_REGION = os.getenv('AWS_SES_REGION', 'eu-west-1')
 SES_CONFIGURATION_SET = os.getenv('SES_CONFIGURATION_SET', '')  # opcional: tracking de bounces/quejas

@@ -59,15 +59,26 @@
         // asi que si otro agente cambia el estado hay que re-sincronizarlo o la
         // siguiente publicacion lo revertiria sin querer. Pero solo si el agente
         // no lo ha tocado el mismo: si lo ha cambiado a mano, esa es su intencion.
+        // En on_hold lo propuesto es open (ver tfPublishStatusFor en create_ticket.js).
+        const publishFor = window.tfPublishStatusFor || (s => s);
         const live = pane.__tfLive;
         const selected = pane.querySelector('#selected-status');
         if (selected && ticket.status && live) {
             const shown = (selected.textContent || '').trim().toLowerCase();
-            const untouched = !live.serverStatus || shown === live.serverStatus;
+            const untouched = !live.serverStatus || shown === publishFor(live.serverStatus);
             const editing = typeof live.hasPendingFieldChanges === 'function'
                 && live.hasPendingFieldChanges();
-            if (untouched && !editing) selected.textContent = ticket.status;
+            if (untouched && !editing) selected.textContent = publishFor(ticket.status);
+            selected.dataset.serverStatus = ticket.status;
             live.serverStatus = ticket.status;
+        }
+
+        // El cierre automático de on_hold puede llegar con el ticket abierto en
+        // pantalla: a partir de ahí es de solo lectura.
+        const form = pane.querySelector('#ticket-form');
+        if (form && ticket.status === 'closed' && !form.dataset.locked) {
+            form.dataset.locked = '1';
+            form.classList.add('is-locked');
         }
     }
 

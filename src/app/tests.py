@@ -2133,11 +2133,13 @@ class SatisfactionSurveyTests(_BaseFixture):
         ticket.refresh_from_db()
         self.assertGreater(ticket.resolved_at, first_stamp)
 
-    def test_direct_close_counts_as_resolution_for_the_survey_clock(self):
+    def test_direct_on_hold_counts_as_resolution_for_the_survey_clock(self):
         from app.services.comments import CommentService
 
+        # on_hold es el cierre de los agentes (#21384): sin pasar por resolved
+        # también abre el ciclo de encuesta.
         ticket = self.make_ticket(status="open")
-        CommentService.add_comment(ticket, self.agent, "cerrado", new_status="closed")
+        CommentService.add_comment(ticket, self.agent, "cerrado", new_status="on_hold")
         ticket.refresh_from_db()
         self.assertIsNotNone(ticket.resolved_at)
 
@@ -2329,8 +2331,10 @@ class AgentInboxTests(_BaseFixture):
         self.assertEqual(self._activity_ids(), [])
 
     def test_closed_tickets_stay_out(self):
-        ticket = self.make_ticket(status="closed")
+        ticket = self.make_ticket()
         self._reply(ticket, self.customer)
+        # 'closed' ya solo lo pone el sistema y no admite respuestas (#21384).
+        Ticket.objects.filter(pk=ticket.pk).update(status="closed")
         self.assertEqual(self._activity_ids(), [])
 
     def test_opening_a_ticket_marks_its_notifications_read(self):
