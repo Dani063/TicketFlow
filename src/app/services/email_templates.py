@@ -1,11 +1,18 @@
 """Resolución y renderizado de plantillas de respuesta al cliente (ES/EN, por marca)."""
 
+import re
+
 from django.template import engines
 from django.utils.html import escape, linebreaks, strip_tags
 from django.utils import timezone
 
 from app.constants import normalize_language
 from app.models import ResponseTemplate
+
+# Prefijos de respuesta/reenvío y etiqueta de ticket que se quitan del asunto
+# original para responder en el mismo hilo (#21389).
+_TICKET_TAG_RE = re.compile(r"\s*\[ticket\s*#\d+\]\s*", re.IGNORECASE)
+_REPLY_PREFIX_RE = re.compile(r"^\s*(?:(?:re|rv|fw|fwd|aw|wg|tr)\s*:\s*)+", re.IGNORECASE)
 
 
 class ResponseTemplateService:
@@ -45,10 +52,18 @@ class ResponseTemplateService:
         en el panel de administración.
         """
         engine = engines["django"]
-        rendered_subject = engine.from_string(template.subject).render(context)
+
+        def plain(source):
+            # El asunto y el texto plano no son HTML: escaparlos convertía «&» en
+            # «&amp;» y el asunto ya no coincidía con el del cliente.
+            return engine.from_string(
+                "{% autoescape off %}" + source + "{% endautoescape %}"
+            ).render(context)
+
+        rendered_subject = " ".join(plain(template.subject).split())
         rendered_html = engine.from_string(template.body_html).render(context)
         body_text_source = template.body_text or strip_tags(template.body_html)
-        rendered_text = engine.from_string(body_text_source).render(context)
+        rendered_text = plain(body_text_source)
         # Una plantilla editada en el panel puede no conocer el aviso de cierre;
         # entonces va al final para que el cliente no se quede sin él.
         if context.get("closing_notice_html") and "closing_notice" not in template.body_html:
@@ -82,6 +97,7 @@ class ResponseTemplateService:
         return {
             "ticket_id": ticket.id,
             "subject": ticket.subject,
+            "thread_subject": ResponseTemplateService.thread_subject(ticket),
             "requester_name": ticket.requester.name if ticket.requester_id and ticket.requester else "",
             "requester_email": ticket.requester.email if ticket.requester_id and ticket.requester else "",
             "brand_name": brand.name if brand else "",
@@ -92,6 +108,13 @@ class ResponseTemplateService:
             "ticket_url": f"{base_url}/help/{center.slug}/{locale}/" if base_url and center else "",
             "created_at": timezone.localtime(ticket.created_at).strftime("%d/%m/%Y %H:%M") if ticket.created_at else "",
         }
+
+    @staticmethod
+    def thread_subject(ticket):
+        """Asunto original sin «RE:»/«FW:» ni [Ticket #N]: las respuestas lo usan
+        tras «RE:» para que el cliente las vea en el mismo hilo (#21389)."""
+        subject = _TICKET_TAG_RE.sub(" ", ticket.subject or "").strip()
+        return _REPLY_PREFIX_RE.sub("", subject).strip() or (ticket.subject or "")
 
     CLOSING_NOTICE = {
         "es": (

@@ -1,4 +1,6 @@
+import base64
 import json
+from email import message_from_bytes, policy as email_policy
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -1300,8 +1302,8 @@ class OutboundEmailTests(_BaseFixture):
         self.assertEqual(message_id, "ses-123")
         kwargs = mock_boto.return_value.send_email.call_args.kwargs
         self.assertIn("Ecomfax", kwargs["FromEmailAddress"])
-        headers = {h["Name"]: h["Value"] for h in kwargs["Content"]["Simple"]["Headers"]}
-        self.assertEqual(headers["Auto-Submitted"], "auto-generated")
+        raw = message_from_bytes(kwargs["Content"]["Raw"]["Data"], policy=email_policy.default)
+        self.assertEqual(raw["Auto-Submitted"], "auto-generated")
 
         m365_ticket = self.make_ticket(brand=self.brand_a)
         m365_log = OutboundEmailLog.objects.create(
@@ -1316,8 +1318,9 @@ class OutboundEmailTests(_BaseFixture):
         self.assertIsNone(message_id)
         called_url = mock_post.call_args.args[0]
         self.assertIn("helpdesk@comuny.example/sendMail", called_url)
-        sent_json = mock_post.call_args.kwargs["json"]
-        self.assertEqual(sent_json["message"]["toRecipients"][0]["emailAddress"]["address"], "c@x.example")
+        self.assertEqual(mock_post.call_args.kwargs["headers"]["Content-Type"], "text/plain")
+        sent = message_from_bytes(base64.b64decode(mock_post.call_args.kwargs["data"]), policy=email_policy.default)
+        self.assertEqual(sent["To"], "c@x.example")
 
     def test_send_task_marks_sent_and_is_idempotent(self):
         from app.tasks import send_outbound_email

@@ -1,4 +1,6 @@
+import base64
 import io
+from email import message_from_bytes, policy as email_policy
 import tempfile
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
@@ -401,9 +403,10 @@ class AttachmentStorageTests(TestCase):
 
         self.assertEqual(OutboundEmailService.deliver(log), "ses-file")
         sent = client_factory.return_value.send_email.call_args.kwargs
-        item = sent["Content"]["Simple"]["Attachments"][0]
-        self.assertEqual(item["FileName"], "ses.txt")
-        self.assertEqual(item["RawContent"], b"ses-content")
+        raw = message_from_bytes(sent["Content"]["Raw"]["Data"], policy=email_policy.default)
+        item = next(raw.iter_attachments())
+        self.assertEqual(item.get_filename(), "ses.txt")
+        self.assertEqual(item.get_payload(decode=True), b"ses-content")
 
     @override_settings(ATTACHMENT_STORAGE_BACKEND="local", PUBLIC_ATTACHMENTS_S3_BUCKET="")
     def test_graph_delivery_contains_small_attachment(self):
@@ -432,14 +435,16 @@ class AttachmentStorageTests(TestCase):
             post.return_value.raise_for_status.return_value = None
             self.assertIsNone(OutboundEmailService.deliver(log))
 
-        sent_message = post.call_args.kwargs["json"]["message"]
-        self.assertEqual(sent_message["attachments"][0]["name"], "graph.txt")
-        self.assertEqual(sent_message["attachments"][0]["contentBytes"], "Z3JhcGgtY29udGVudA==")
+        sent = message_from_bytes(base64.b64decode(post.call_args.kwargs["data"]), policy=email_policy.default)
+        item = next(sent.iter_attachments())
+        self.assertEqual(item.get_filename(), "graph.txt")
+        self.assertEqual(item.get_payload(decode=True), b"graph-content")
 
     @override_settings(
         ATTACHMENT_STORAGE_BACKEND="local",
         PUBLIC_ATTACHMENTS_S3_BUCKET="",
         GRAPH_SIMPLE_ATTACHMENT_MAX_BYTES=5,
+        GRAPH_SENDMAIL_MIME_MAX_BYTES=5,
     )
     def test_graph_delivery_uses_upload_session_for_large_attachment(self):
         brand = Brand.objects.create(

@@ -5,15 +5,27 @@
   las ha editado; una plantilla editada lo recibe al final al renderizar.
 - Las macros que cerraban tickets pasan a on_hold: 'closed' ya solo lo pone el
   sistema.
+- #21389: las plantillas que contestan al cliente (acuse, respuesta de agente y
+  aviso de cierre) usan «RE: <asunto original> [Ticket #N]» para quedar en su
+  hilo. Solo se cambian las sembradas sin editar.
 """
 
 from django.db import migrations
 
 
+THREAD_SUBJECT = "RE: {{thread_subject}} [Ticket #{{ticket_id}}]"
+# Asuntos sembrados en la 0042 (acuse) y la 0056 (respuesta de agente).
+SEEDED_SUBJECTS = {
+    ("ticket_created", "es"): "[Ticket #{{ticket_id}}] Hemos recibido tu solicitud: {{subject}}",
+    ("ticket_created", "en"): "[Ticket #{{ticket_id}}] We received your request: {{subject}}",
+    ("agent_reply", "es"): "[Ticket #{{ticket_id}}] Respuesta de soporte: {{subject}}",
+    ("agent_reply", "en"): "[Ticket #{{ticket_id}}] Support reply: {{subject}}",
+}
+
 ON_HOLD_TEMPLATES = [
     {
         "language": "es",
-        "subject": "[Ticket #{{ticket_id}}] Solicitud resuelta: {{subject}}",
+        "subject": THREAD_SUBJECT,
         "body_html": (
             "<p>Hola {{requester_name}},</p>"
             "<p>Te escribimos sobre tu solicitud <strong>#{{ticket_id}}</strong>.</p>"
@@ -29,7 +41,7 @@ ON_HOLD_TEMPLATES = [
     },
     {
         "language": "en",
-        "subject": "[Ticket #{{ticket_id}}] Request resolved: {{subject}}",
+        "subject": THREAD_SUBJECT,
         "body_html": (
             "<p>Hello {{requester_name}},</p>"
             "<p>We are writing about your request <strong>#{{ticket_id}}</strong>.</p>"
@@ -109,6 +121,11 @@ def forward(apps, schema_editor):
             template.body_text = template.body_text.replace(text_old, text_new, 1)
             template.save(update_fields=["body_html", "body_text"])
 
+    for (key, language), subject in SEEDED_SUBJECTS.items():
+        ResponseTemplate.objects.filter(
+            key=key, brand__isnull=True, language=language, subject=subject,
+        ).update(subject=THREAD_SUBJECT)
+
     for macro in Macro.objects.all():
         actions = macro.actions or {}
         if isinstance(actions, dict) and actions.get("status") == "closed":
@@ -130,6 +147,11 @@ def reverse(apps, schema_editor):
             template.body_html = template.body_html.replace(html_new, html_old, 1)
             template.body_text = template.body_text.replace(text_new, text_old, 1)
             template.save(update_fields=["body_html", "body_text"])
+
+    for (key, language), subject in SEEDED_SUBJECTS.items():
+        ResponseTemplate.objects.filter(
+            key=key, brand__isnull=True, language=language, subject=THREAD_SUBJECT,
+        ).update(subject=subject)
 
     for macro in Macro.objects.all():
         actions = macro.actions or {}

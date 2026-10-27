@@ -1,3 +1,5 @@
+import base64
+from email import message_from_bytes, policy as email_policy
 from unittest.mock import patch
 
 from django.test import override_settings
@@ -46,8 +48,8 @@ class EmailCCTests(_BaseFixture):
         ticket.ccs.clear()
         with patch("app.services.msgraph.get_graph_token", return_value="tok"), patch("requests.post") as post:
             OutboundEmailService.deliver(log)
-        self.assertEqual(post.call_args.kwargs["json"]["message"]["ccRecipients"],
-                         [{"emailAddress": {"address": copy.email}}])
+        sent = message_from_bytes(base64.b64decode(post.call_args.kwargs["data"]), policy=email_policy.default)
+        self.assertEqual(sent["Cc"], copy.email)
         log.brand = self.brand_b
         with patch("boto3.client") as boto:
             OutboundEmailService.deliver(log)

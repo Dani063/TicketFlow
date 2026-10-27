@@ -8,13 +8,17 @@ OutboundEmailLog (queued/sent/failed/suppressed).
 import base64
 import logging
 import re
+import uuid
+from email.message import EmailMessage
+from email.policy import SMTP
+from email.utils import formataddr, formatdate
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
 
-from app.models import Attachment, Brand, Comment, OutboundEmailLog
+from app.models import Attachment, Brand, Comment, InboundEmailLog, OutboundEmailLog
 from app.services.attachments import AttachmentService
 from app.services.email_templates import ResponseTemplateService
 from app.services.metrics import record_metric
@@ -208,6 +212,46 @@ class OutboundEmailService:
             context_builder=lambda tkt: ResponseTemplateService.context_for_survey(tkt, rating),
         )
 
+    # Plantillas que contestan al correo del cliente y deben seguir su hilo.
+    THREADED_TEMPLATES = {"ticket_created", "agent_reply", "ticket_on_hold"}
+    THREAD_MAX_REFERENCES = 10
+
+    @staticmethod
+    def _thread(ticket, brand, template_key):
+        """Message-ID propio y, si contesta al cliente, In-Reply-To/References (#21389).
+
+        Sin estas cabeceras cada respuesta abría un hilo nuevo en el correo del
+        cliente. Se calculan al encolar para que un reintento envíe lo mismo.
+        """
+        domain = (brand.support_email.rsplit("@", 1)[-1] if brand and brand.support_email else "ticketflow")
+        thread = {"message_id": f"<tf.{ticket.id}.{uuid.uuid4().hex}@{domain}>"}
+        if template_key not in OutboundEmailService.THREADED_TEMPLATES:
+            return thread
+        moments = [
+            (log.graph_received_at or log.received_at, log.internet_message_id.strip())
+            for log in InboundEmailLog.objects.filter(ticket=ticket, internet_message_id__isnull=False)
+            .only("graph_received_at", "received_at", "internet_message_id")
+            if log.internet_message_id.strip()
+        ]
+        inbound_ids = [message_id for _, message_id in sorted(moments, key=lambda item: item[0])]
+        for log in OutboundEmailLog.objects.filter(ticket=ticket, status=OutboundEmailLog.STATUS_SENT).only(
+            "sent_at", "created_at", "payload",
+        ):
+            message_id = ((log.payload or {}).get("thread") or {}).get("message_id")
+            if message_id:
+                moments.append((log.sent_at or log.created_at, message_id))
+        references = list(dict.fromkeys(
+            message_id for _, message_id in sorted(moments, key=lambda item: item[0])
+        ))
+        if references:
+            # El primero ancla el hilo; el resto, los más recientes.
+            limit = OutboundEmailService.THREAD_MAX_REFERENCES
+            thread["references"] = references[:1] + references[1:][-(limit - 1):]
+            # Se responde al último correo del cliente: su Message-ID es seguro,
+            # el de los envíos propios lo puede reescribir el proveedor.
+            thread["in_reply_to"] = inbound_ids[-1] if inbound_ids else references[-1]
+        return thread
+
     @staticmethod
     def _queue(ticket, template_key, dedup_suffix, context_builder, payload_extra=None):
         brand, to_email = OutboundEmailService._recipient(ticket)
@@ -230,6 +274,7 @@ class OutboundEmailService:
             "body_html": rendered["body_html"],
             "body_text": rendered["body_text"],
             "language": language,
+            "thread": OutboundEmailService._thread(ticket, brand, template_key),
         }
         if template_key == OutboundEmailService.TEMPLATE_AGENT_REPLY:
             payload["cc_emails"] = OutboundEmailService._valid_cc_emails(
@@ -343,47 +388,63 @@ class OutboundEmailService:
         )
 
     @staticmethod
+    def _mime(log, attachments, extra_headers):
+        """Mensaje MIME completo con las cabeceras del hilo (#21389).
+
+        En JSON, Graph solo admite cabeceras X-; en MIME se respetan In-Reply-To y
+        References, que son las que agrupan la respuesta en el hilo del cliente.
+        """
+        brand = log.brand
+        payload = log.payload or {}
+        thread = payload.get("thread") or {}
+        message = EmailMessage(policy=SMTP)
+        message["From"] = formataddr((brand.from_name or brand.name or "", brand.support_email))
+        message["To"] = log.to_email
+        cc_emails = OutboundEmailService._cc_emails(log)
+        if cc_emails:
+            message["Cc"] = ", ".join(cc_emails)
+        message["Subject"] = " ".join((log.subject or "").split())
+        message["Date"] = formatdate(usegmt=True)
+        if thread.get("message_id"):
+            message["Message-ID"] = thread["message_id"]
+        if thread.get("in_reply_to"):
+            message["In-Reply-To"] = thread["in_reply_to"]
+        if thread.get("references"):
+            message["References"] = " ".join(thread["references"])
+        for name, value in extra_headers:
+            message[name] = value
+        message.set_content(payload.get("body_text") or "")
+        message.add_alternative(payload.get("body_html") or "", subtype="html")
+        for item in attachments:
+            maintype, _, subtype = (item["content_type"] or "").partition("/")
+            if not maintype or not subtype:
+                maintype, subtype = "application", "octet-stream"
+            message.add_attachment(item["content"], maintype=maintype, subtype=subtype, filename=item["name"])
+        return message.as_bytes()
+
+    @staticmethod
     def _send_via_ses(log):
-        # SESv2 con boto3: autentica con el rol IAM del pod (como SQS/SSM),
-        # sin credenciales SMTP que gestionar/rotar; devuelve MessageId y
-        # permite la cabecera Auto-Submitted (Graph no).
+        # SESv2 con boto3: autentica con el rol IAM del pod (como SQS/SSM), sin
+        # credenciales SMTP que gestionar/rotar, y devuelve MessageId. Mensaje Raw
+        # para poder llevar las cabeceras del hilo y las anti-bucle.
         import boto3
 
         brand = log.brand
-        payload = log.payload or {}
         client = boto3.client("sesv2", region_name=getattr(settings, "AWS_SES_REGION", "eu-west-1"))
-        kwargs = {
-            "FromEmailAddress": f"{brand.from_name or brand.name} <{brand.support_email}>",
-            "Destination": {"ToAddresses": [log.to_email]},
-            "Content": {
-                "Simple": {
-                    "Subject": {"Data": log.subject, "Charset": "UTF-8"},
-                    "Body": {
-                        "Html": {"Data": payload.get("body_html") or "", "Charset": "UTF-8"},
-                        "Text": {"Data": payload.get("body_text") or "", "Charset": "UTF-8"},
-                    },
-                    "Headers": [
-                        {"Name": "Auto-Submitted", "Value": "auto-generated"},
-                        {"Name": "X-Auto-Response-Suppress", "Value": "All"},
-                    ],
-                }
-            },
-        }
+        attachments = OutboundEmailService._attachments(log)
+        raw = OutboundEmailService._mime(log, attachments, [
+            ("Auto-Submitted", "auto-generated"),
+            ("X-Auto-Response-Suppress", "All"),
+        ])
+        destination = {"ToAddresses": [log.to_email]}
         cc_emails = OutboundEmailService._cc_emails(log)
         if cc_emails:
-            kwargs["Destination"]["CcAddresses"] = cc_emails
-        attachments = OutboundEmailService._attachments(log)
-        if attachments:
-            kwargs["Content"]["Simple"]["Attachments"] = [
-                {
-                    "RawContent": item["content"],
-                    "ContentDisposition": "ATTACHMENT",
-                    "FileName": item["name"],
-                    "ContentType": item["content_type"],
-                    "ContentTransferEncoding": "BASE64",
-                }
-                for item in attachments
-            ]
+            destination["CcAddresses"] = cc_emails
+        kwargs = {
+            "FromEmailAddress": formataddr((brand.from_name or brand.name or "", brand.support_email)),
+            "Destination": destination,
+            "Content": {"Raw": {"Data": raw}},
+        }
         config_set = getattr(settings, "SES_CONFIGURATION_SET", "")
         if config_set:
             kwargs["ConfigurationSetName"] = config_set
@@ -392,47 +453,35 @@ class OutboundEmailService:
 
     @staticmethod
     def _send_via_graph(log):
-        # Graph sendMail con las credenciales MSAL ya usadas para leer buzones.
-        # Requiere el permiso de aplicación Mail.Send (ver docs/email-integration-setup.md).
-        # Las cabeceras custom de Graph deben empezar por X-, así que la
-        # protección anti-bucle aquí es X-Auto-Response-Suppress (Exchange la honra).
+        # Graph sendMail en MIME con las credenciales MSAL ya usadas para leer
+        # buzones; basta el permiso de aplicación Mail.Send. Exchange honra
+        # X-Auto-Response-Suppress como protección anti-bucle.
         import requests
 
         from app.services.msgraph import GRAPH_BASE, get_graph_token
 
         brand = log.brand
-        payload = log.payload or {}
         token = get_graph_token()
-        message = {
-            "subject": log.subject,
-            "body": {"contentType": "HTML", "content": payload.get("body_html") or ""},
-            "toRecipients": [{"emailAddress": {"address": log.to_email}}],
-            "internetMessageHeaders": [
-                {"name": "X-Auto-Response-Suppress", "value": "All"},
-            ],
-        }
-        cc_emails = OutboundEmailService._cc_emails(log)
-        if cc_emails:
-            message["ccRecipients"] = [{"emailAddress": {"address": email}} for email in cc_emails]
         attachments = OutboundEmailService._attachments(log)
-        simple_limit = getattr(settings, "GRAPH_SIMPLE_ATTACHMENT_MAX_BYTES", 3 * 1024 * 1024)
-        if attachments and sum(len(item["content"]) for item in attachments) > simple_limit:
-            return OutboundEmailService._send_via_graph_draft(
-                brand, message, attachments, token,
+        anti_loop = [("X-Auto-Response-Suppress", "All")]
+        raw = OutboundEmailService._mime(log, attachments, anti_loop)
+        # sendMail admite 4 MB por petición y el MIME viaja en base64 (+33 %).
+        mime_limit = getattr(settings, "GRAPH_SENDMAIL_MIME_MAX_BYTES", 2_900_000)
+        if attachments and len(raw) > mime_limit:
+            OutboundEmailService._send_via_graph_draft(
+                brand, OutboundEmailService._mime(log, [], anti_loop), attachments, token,
             )
-        if attachments:
-            message["attachments"] = [
-                OutboundEmailService._graph_attachment_json(item)
-                for item in attachments
-            ]
-        response = requests.post(
-            f"{GRAPH_BASE}/users/{brand.support_email}/sendMail",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"message": message, "saveToSentItems": True},
-            timeout=30,
-        )
-        response.raise_for_status()
-        return None  # Graph devuelve 202 sin message id; la copia queda en Enviados
+        else:
+            response = requests.post(
+                f"{GRAPH_BASE}/users/{brand.support_email}/sendMail",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "text/plain"},
+                data=base64.b64encode(raw),
+                timeout=30,
+            )
+            response.raise_for_status()
+        # Graph responde 202 sin id: se guarda el Message-ID propio, que es el que
+        # citan las respuestas siguientes. La copia queda en Enviados.
+        return ((log.payload or {}).get("thread") or {}).get("message_id")
 
     @staticmethod
     def _graph_attachment_json(item):
@@ -444,11 +493,13 @@ class OutboundEmailService:
         }
 
     @staticmethod
-    def _send_via_graph_draft(brand, message, attachments, token):
-        """Usa borrador/sesión para no superar el límite JSON de sendMail.
+    def _send_via_graph_draft(brand, mime, attachments, token):
+        """Usa borrador/sesión para no superar el límite de sendMail.
 
-        Este camino requiere Mail.ReadWrite además de Mail.Send. Los adjuntos de
-        hasta 3 MB se añaden al borrador de una vez; los mayores se trocean.
+        El borrador se crea desde el MIME sin adjuntos, así conserva las
+        cabeceras del hilo. Este camino requiere Mail.ReadWrite además de
+        Mail.Send. Los adjuntos de hasta 3 MB se añaden de una vez; los mayores
+        se trocean.
         """
         import requests
 
@@ -458,7 +509,12 @@ class OutboundEmailService:
         base = f"{GRAPH_BASE}/users/{brand.support_email}"
         draft_id = None
         try:
-            response = requests.post(f"{base}/messages", headers=headers, json=message, timeout=30)
+            response = requests.post(
+                f"{base}/messages",
+                headers={**headers, "Content-Type": "text/plain"},
+                data=base64.b64encode(mime),
+                timeout=30,
+            )
             response.raise_for_status()
             draft_id = response.json()["id"]
             simple_limit = getattr(settings, "GRAPH_SIMPLE_ATTACHMENT_MAX_BYTES", 3 * 1024 * 1024)
