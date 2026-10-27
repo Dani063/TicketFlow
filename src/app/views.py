@@ -4,6 +4,7 @@ Definition of views.
 # -*- coding: utf-8 -*-
 from django.db import transaction
 from django.db.models import Q, OuterRef, Subquery, Count, Max, Case, When, IntegerField, F
+from django.db.models.functions import Coalesce
 from django.utils.dateparse import parse_datetime
 from datetime import datetime, timedelta
 from collections import deque
@@ -42,6 +43,7 @@ from .services.notifications import NotificationService
 from .services.satisfaction import SatisfactionService
 from .services.sla import SLAService
 from .services.tickets import TicketService
+from .services.ticket_trash import TicketTrashService
 from .services.user_admin import UserAdminService
 
 logger = logging.getLogger('app.views')
@@ -76,7 +78,7 @@ _TICKET_QUEUE_VIEWS = {
     'unsolved_no_tareas', 'all_unsolved_no_tareas', 'unassigned', 'pendientes',
     'unsolved_groups', 'internos_comuny', 'abiertos_ecomfax', 'recordia_sgsd',
     'sus_pendientes', 'espera', 'abiertos', 'sus_no_cerrados', 'no_resueltos',
-    'new_in_groups', 'open', 'no_update_48h', 'sla_breached', 'sla_at_risk',
+    'new_in_groups', 'open', 'no_update_48h', 'sla_breached', 'sla_at_risk', 'trash',
 }
 
 _TICKET_SORT_FIELDS = {
@@ -128,6 +130,7 @@ _TICKET_GROUP_BY = {
 }
 
 _TICKET_VIEW_LABELS = {
+    'trash': 'Tickets eliminados',
     'mis_tickets': 'Todos tus tickets',
     'telefonica_mes': 'Tickets Telefónica último mes',
     'unsolved_no_tareas': 'Tus tickets no resueltos (sin tareas)',
@@ -396,12 +399,15 @@ def _view_uses_date_range(view):
 
 def _ticket_listing_queryset(request, *, view=None):
     """Query base de /tickets con empresa y fechas aplicadas una sola vez."""
-    base_qs = _base_tickets_queryset(request.user)
+    view = (request.GET.get('view') or '') if view is None else view
+    if view == 'trash':
+        base_qs = Ticket.objects.filter(is_deleted=True, merged_into__isnull=True) if _is_agent(request.user) else Ticket.objects.none()
+    else:
+        base_qs = _base_tickets_queryset(request.user)
     brand_id = _as_int_or_none(request.GET.get('brand_id'))
     date_from, date_to, start_dt, end_dt = _parse_filter_date_range(request.GET)
     if brand_id:
         base_qs = base_qs.filter(brand_id=brand_id)
-    view = (request.GET.get('view') or '') if view is None else view
     if _view_uses_date_range(view):
         base_qs = base_qs.filter(created_at__range=(start_dt, end_dt))
     return base_qs, brand_id, date_from, date_to
@@ -440,6 +446,10 @@ def _my_tickets_queryset(base_qs, user):
 
 def _tickets_for_view(base_qs, view, user):
     now = timezone.now()
+    if view == 'trash':
+        return base_qs.filter(is_deleted=True).annotate(
+            trash_date=Coalesce('deleted_at', 'updated_at'),
+        ).order_by('-trash_date', '-id')
 
     # --- Vistas del dashboard (home) -------------------------------------
     # Siempre acotadas al usuario: _base_tickets_queryset devuelve TODOS los
@@ -643,6 +653,8 @@ def filter_tickets(request):
     Parámetros: view, page (1-based), counts=1 (opcional, activa el cálculo de contadores).
     """
     view = request.GET.get("view")
+    if view == 'trash' and not _is_agent(request.user):
+        return json_error('forbidden', 'Solo agentes pueden ver la papelera.', status=403)
     compute_counts = request.GET.get("counts", "0") == "1"
     counts_only = request.GET.get("counts_only", "0") == "1"
     force_counts = request.GET.get("force_counts", "0") == "1"
@@ -808,6 +820,10 @@ def filter_tickets(request):
             "sla_at_risk":        n_sla_at_risk,
         }
 
+    if filtros and _is_agent(request.user):
+        trash_qs = _ticket_listing_queryset(request, view='trash')[0]
+        filtros = {**filtros, 'trash': trash_qs.count()}
+
     if _counts_cache_key and filtros and not _counts_loaded_from_cache:
         cache.set(_counts_cache_key, filtros, _TICKET_FILTER_COUNTS_TTL)
 
@@ -828,6 +844,9 @@ def filter_tickets(request):
     # Si el usuario ha pedido ordenar por una columna, desactivamos la agrupación
     # para mostrar la tabla plana ordenada por su criterio en el resto de vistas.
     elif db_sort_signed:
+        group_by = None
+        group_sort = None
+    elif view == 'trash':
         group_by = None
         group_sort = None
     elif fast_pagination:
@@ -853,6 +872,8 @@ def filter_tickets(request):
 
     offset = (page - 1) * page_size
     page_qs = tickets.select_related('requester', 'assignee', 'assigned_group', 'brand')
+    if view == 'trash':
+        page_qs = page_qs.select_related('deleted_by')
 
     # La columna "Val." solo existe en la tabla de la home. Se anota únicamente
     # para esas vistas para no meter una subconsulta por fila en /tickets/.
@@ -1022,6 +1043,8 @@ def filter_tickets(request):
             "sla": _sla_payload(t),
             "satisfaction": getattr(t, 'satisfaction_score', None) or "",
             "description": (t.description or "")[:200],
+            "deleted_at": t.deleted_at.strftime('%d/%m/%Y %H:%M') if t.deleted_at else None,
+            "deleted_by": (t.deleted_by.name or t.deleted_by.email) if view == 'trash' and t.deleted_by_id else None,
             "group_value": _group_value(t),
             "last_comment": {
                 "author": lc.user.name if lc and lc.user else "",
@@ -1071,7 +1094,7 @@ def _ticket_export_queryset(request):
             )
         else:
             qs = qs.order_by(f'-{db_sort}' if sort_dir == 'desc' else db_sort)
-    else:
+    elif view != 'trash':
         qs = qs.order_by('-created_at', '-id')
 
     qs = qs.select_related('brand', 'requester')
@@ -1130,6 +1153,8 @@ def tickets_export_csv(request):
     import csv
     from django.http import StreamingHttpResponse
 
+    if request.GET.get('view') == 'trash' and not _is_agent(request.user):
+        return json_error('forbidden', 'Solo agentes pueden ver la papelera.', status=403)
     qs, metadata = _ticket_export_queryset(request)
 
     class _Echo:
@@ -1167,6 +1192,8 @@ def tickets_export_pdf(request):
     """Exporta el mismo conjunto del CSV como fichas de tickets paginadas."""
     from .services.ticket_exports import build_tickets_pdf
 
+    if request.GET.get('view') == 'trash' and not _is_agent(request.user):
+        return json_error('forbidden', 'Solo agentes pueden ver la papelera.', status=403)
     qs, metadata = _ticket_export_queryset(request)
     pdf_bytes = build_tickets_pdf(qs.iterator(chunk_size=500), metadata)
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
@@ -1263,7 +1290,7 @@ def customer_profile(request):
         Q(requester__id=customer.id) | Q(assignee__id=customer.id) |
         Q(ccs__id=customer.id) | Q(created_by_id=customer.id)
     ).distinct()
-    ctx = _profile_tickets_context(request, base_qs)
+    ctx = _profile_tickets_context(request, base_qs.filter(is_deleted=False))
     ctx["customer"] = customer
     return render(request, "tickets/customer_profile.html", ctx)
 
@@ -1474,7 +1501,7 @@ def profile(request):
         Q(requester__id=user.id) | Q(assignee__id=user.id) |
         Q(ccs__id=user.id) | Q(created_by_id=user.id)
     ).distinct()
-    ctx = _profile_tickets_context(request, base_qs)
+    ctx = _profile_tickets_context(request, base_qs.filter(is_deleted=False))
     ctx["user"] = user
     return render(request, "tickets/profile.html", ctx)
 
@@ -1767,7 +1794,7 @@ def create_ticket(request):
         ).order_by('-created_at').values('content')[:1]
 
         related = (Ticket.objects
-                   .filter(requester_id=ticket_obj.requester_id)
+                   .filter(requester_id=ticket_obj.requester_id, is_deleted=False)
                    .select_related('requester', 'assignee')
                    .annotate(last_pub_content=Subquery(last_comment_sub))
                    .order_by('-updated_at')[:30])
@@ -1793,6 +1820,7 @@ def create_ticket(request):
         'status': 'estado', 'assignee_id': 'asignado', 'group_id': 'grupo',
         'priority': 'prioridad', 'tags': 'tags', 'subject': 'asunto',
         'requester_id': 'solicitante', 'product_line_id': 'producto / servicio',
+        'deleted': 'eliminación', 'restored': 'restauración',
     }
     if ticket_obj:
         if _is_agent(request.user):
@@ -1838,6 +1866,7 @@ def create_ticket(request):
         'username': request.user.name,
         'email': request.user.email,
         'ticket': ticket_obj,
+        'ticket_locked': bool(ticket_obj and (ticket_obj.is_deleted or ticket_obj.status == 'closed')),
         'feed': feed,
         'can_use_internal': _is_agent(request.user),
         'user_timeline': user_timeline,
@@ -1902,10 +1931,12 @@ def take_ticket(request, ticket_id):
     ticket = get_object_or_404(Ticket, id=ticket_id)
     if not can_update_ticket(request.user, ticket):
         return json_error('forbidden', 'Permiso denegado', status=403, success=False)
-    if ticket.assignee_id == request.user.id:
-        return JsonResponse({'ok': False, 'success': False, 'error': 'already_assigned'})
     with transaction.atomic():
         ticket = Ticket.objects.select_for_update().get(id=ticket_id)
+        if ticket.is_deleted or ticket.status == 'closed':
+            return json_error('ticket_locked', 'El ticket está eliminado o cerrado.', status=409)
+        if ticket.assignee_id == request.user.id:
+            return JsonResponse({'ok': False, 'success': False, 'error': 'already_assigned'})
         prev = str(ticket.assignee_id) if ticket.assignee_id else None
         ticket.assignee = request.user
         ticket.save(update_fields=['assignee'])
@@ -2081,6 +2112,8 @@ def ai_suggest_reply(request, ticket_id):
     ticket = get_object_or_404(Ticket, id=ticket_id)
     if not permission_is_agent(request.user):
         return json_error("forbidden", "Solo agentes pueden usar la asistencia de IA.", status=403)
+    if ticket.is_deleted or ticket.status == 'closed':
+        return json_error('ticket_locked', 'El ticket está eliminado o cerrado.', status=409)
     if not TicketReplyService.can_use(request.user):
         return json_error("ai_disabled", "La asistencia de respuesta IA no está disponible.", status=503)
     try:
@@ -2226,6 +2259,8 @@ def upload_attachment(request, ticket_id):
     ticket = get_object_or_404(Ticket, id=ticket_id)
     if not can_view_ticket(request.user, ticket):
         return json_error('forbidden', 'No tienes acceso a este ticket.', status=403)
+    if ticket.is_deleted or ticket.status == 'closed':
+        return json_error('ticket_locked', 'El ticket está eliminado o cerrado.', status=409)
     try:
         att = AttachmentService.upload(_single_attachment_file(request), request.user, ticket=ticket,
                                        upload_key=request.POST.get('upload_key'), draft_key=request.POST.get('draft_key'))
@@ -2505,17 +2540,33 @@ def merge_ticket(request, ticket_id):
 @require_POST
 def bulk_delete(request):
     if not _is_agent(request.user):
-        return JsonResponse({'error': 'Permiso denegado'}, status=403)
+        return json_error('forbidden', 'Solo agentes pueden gestionar la papelera.', status=403)
     try:
-        ids = json.loads(request.body).get('ids', [])
-    except (json.JSONDecodeError, AttributeError):
-        return JsonResponse({'error': 'Payload inválido'}, status=400)
-    if not ids or not isinstance(ids, list):
-        return JsonResponse({'error': 'ids requerido'}, status=400)
-    updated = Ticket.objects.filter(
-        id__in=ids, merged_into__isnull=True, is_deleted=False
-    ).update(is_deleted=True)
+        ids = _ticket_trash_request_ids(request)
+        updated = TicketTrashService.delete(request.user, ids)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
     return JsonResponse({'ok': True, 'deleted': updated})
+
+
+@api_login_required
+@require_POST
+def bulk_restore(request):
+    if not _is_agent(request.user):
+        return json_error('forbidden', 'Solo agentes pueden gestionar la papelera.', status=403)
+    try:
+        ids = _ticket_trash_request_ids(request)
+        updated = TicketTrashService.restore(request.user, ids)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+    return JsonResponse({'ok': True, 'restored': updated})
+
+
+def _ticket_trash_request_ids(request):
+    data = parse_json_body(request)
+    if not isinstance(data, dict):
+        raise APIValidationError('invalid_json', 'Se requiere un objeto JSON.', status=400)
+    return data.get('ids')
 
 
 @api_login_required

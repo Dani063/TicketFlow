@@ -22,6 +22,7 @@ urlpatterns = [
     path('tickets/<int:ticket_id>/take/', views.take_ticket, name='take_ticket'),
     path('tickets/<int:ticket_id>/merge/', views.merge_ticket, name='merge_ticket'),
     path('tickets/bulk_delete/', views.bulk_delete, name='bulk_delete'),
+    path('tickets/bulk_restore/', views.bulk_restore, name='bulk_restore'),
     path('tickets/bulk_merge/', views.bulk_merge, name='bulk_merge'),
     path('api/tickets/<int:ticket_id>/', views.ticket_detail_api, name='ticket_detail_api'),
     path('api/tickets/<int:ticket_id>/live/', views.ticket_live, name='ticket_live'),

@@ -14,6 +14,16 @@
     </a>
 </div>
 {% endif %}
+{% if ticket.is_deleted %}
+<div class="tf-trash-banner" role="status">
+    <strong><i class="fas fa-trash"></i> Ticket eliminado</strong>
+    {% if ticket.deleted_at %}<span>El {{ ticket.deleted_at|date:"d/m/Y H:i" }}</span>{% endif %}
+    {% if ticket.deleted_by %}<span>por {{ ticket.deleted_by.name|default:ticket.deleted_by.email }}</span>{% endif %}
+    {% if can_use_internal and not ticket.merged_into %}
+    <button type="button" class="tf-btn tf-btn--secondary tf-btn--sm" data-restore-ticket="{{ ticket.id }}">Restaurar</button>
+    {% endif %}
+</div>
+{% endif %}
 <div class="title-bar">
     <h1>{% if ticket %}{{ ticket.subject }}{% else %}Nuevo ticket{% endif %}</h1>
     {% if ticket %}
@@ -24,12 +34,12 @@
         <span class="meta-sep">·</span>
         <span title="Última actualización">Actualizado: <strong data-tf-updated>{{ ticket.updated_at|date:"d/m/Y H:i" }}</strong></span>
     </span>
-    {% if can_use_internal and ticket.assignee_id != current_user_id %}
+    {% if can_use_internal and not ticket_locked and ticket.assignee_id != current_user_id %}
     <button type="button" id="take-it-btn" class="take-it-btn" data-ticket-id="{{ ticket.id }}" aria-label="Asignarme este ticket">
         <i class="fas fa-hand-point-right"></i> Asignarme
     </button>
     {% endif %}
-    {% if can_use_internal and not ticket.merged_into %}
+    {% if can_use_internal and not ticket_locked and not ticket.merged_into %}
     <button type="button" id="merge-btn" class="merge-btn" data-ticket-id="{{ ticket.id }}" aria-label="Fusionar este ticket">
         <i class="fas fa-code-branch"></i> Fusionar
     </button>

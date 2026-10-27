@@ -336,6 +336,10 @@
         if (page === undefined) page = 1;
         if (updateUrl === undefined) updateUrl = true;
 
+        if (view === 'trash' && _currentView !== view) {
+            _sortBy = '';
+            _sortDir = 'desc';
+        }
         _currentView = view;
         _currentPage = page;
         _totalRequestSeq++;
@@ -382,7 +386,7 @@
                         fragment.appendChild(headerRow);
                         _prevGroup = t.group_value;
                     }
-                    const isClosed = (t.status === 'closed');
+                    const isClosed = t.status === 'closed' && view !== 'trash';
                     const row = document.createElement("tr");
                     row.dataset.ticketId = t.id;
                     row.dataset.status = t.status;
@@ -438,6 +442,12 @@
                     `;
                     row.insertBefore(cbCell, row.firstChild);
                     row.cells[2].appendChild(subjectSpan);
+                    if (view === 'trash') {
+                        const audit = document.createElement('small');
+                        audit.className = 'tf-trash-meta';
+                        audit.textContent = `Eliminado: ${t.deleted_at || 'fecha no registrada'} · Por: ${t.deleted_by || 'usuario no registrado'}`;
+                        row.cells[2].appendChild(audit);
+                    }
                     fragment.appendChild(row);
                 });
                 tbody.appendChild(fragment);
@@ -817,7 +827,7 @@
                     loadTickets(_currentView, _currentPage);
                     refreshFilterCounts(true);
                 } else {
-                    window.toast.error(json.error || 'Error al eliminar');
+                    window.toast.error(json.detail || json.error?.message || 'Error al eliminar');
                 }
             } catch (e) { window.toast.error('Error de red'); }
         });
@@ -826,6 +836,24 @@
         if (_elActionMerge) _elActionMerge.addEventListener('click', () => {
             if (_selectedIds.size === 0) return;
             openBulkMergeModal();
+        });
+
+        document.getElementById('actionRestore')?.addEventListener('click', async () => {
+            if (_currentView !== 'trash' || !_selectedIds.size) return;
+            try {
+                const response = await fetch('/tickets/bulk_restore/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+                    body: JSON.stringify({ids: [..._selectedIds]}),
+                });
+                const json = await response.json();
+                if (!response.ok || !json.ok) throw new Error(json.detail || 'No se pudieron restaurar los tickets.');
+                window.toast.success(`${json.restored} ticket(s) restaurado(s)`);
+                await loadTickets(_currentView, _currentPage);
+                await refreshFilterCounts(true);
+            } catch (error) {
+                window.toast.error(error.message || 'Error de red al restaurar.');
+            }
         });
 
         const _elBmmClose = document.getElementById('bmmClose');
@@ -881,6 +909,13 @@
     }
 
     function updateActionBar() {
+        const trash = _currentView === 'trash';
+        for (const id of ['actionMerge', 'actionDelete']) {
+            const button = document.getElementById(id);
+            if (button) button.hidden = trash;
+        }
+        const restore = document.getElementById('actionRestore');
+        if (restore) restore.hidden = !trash;
         const count = _selectedIds.size;
         const countEl = document.getElementById('tabActionCount');
         if (countEl) countEl.textContent = count;
