@@ -16,6 +16,7 @@ Resolved es un estado independiente y no controla ese plazo.
 | Base de Claude y otros cambios locales | `Feature/init` @ `1e7055a` |
 | Parte de Codex incorporada | `feat/21377-vistas-papelera` @ `014c238` |
 | Integración y reglas finales de On-hold | `2b989b8` |
+| Integración posterior incorporada desde Feature/init | `4bb73b0` |
 | Python compartido | `C:\repo\TicketFlow.UI\.venv\Scripts\python.exe` |
 | Aplicación | <http://127.0.0.1:8010/> |
 | Entrada sin SSO | <http://127.0.0.1:8010/dev-login/> |
@@ -25,7 +26,9 @@ La rama de revisión contiene ambas partes y las correcciones de integración.
 La migración 0070 depende de la 0069: hay una sola cadena hasta la 0073.
 Se conserva la versión más reciente de `create_ticket.js` y se cargan los
 módulos de presencia y papelera.
-La rama de revisión queda en local, sin push ni despliegue.
+Ramas de publicación tras la validación de Daniel: `Feature/init` y
+`review/21377-local` en `origin` (Azure Repos). Ambas conservan las reglas
+finales de On-hold y la corrección del rango de fechas.
 
 Esta revisión usa datos sintéticos: **no se conecta a RDS, no consulta AWS SSM
 y no envía correo**. Los adjuntos se guardan en `.review-local\media`.
@@ -340,6 +343,10 @@ papelera, filtros de empresa y paginación correctos. Chrome verifica rangos
 rápidos y manuales, «Todo», persistencia al recargar, contadores, CSV real y
 descarte de respuestas antiguas al cambiar rápido de rango. Los controles y la
 paginación siguen accesibles en los anchos de escritorio comprobados.
+
+Antes de publicar la integración con `Feature/init`: 72 tests correctos en
+109,400 segundos (On-hold, estados, SLA, vistas, exportaciones, papelera, IA y
+home); `check` sin incidencias y migraciones sin cambios pendientes.
 
 Logs de esta comprobación, fuera de Git:
 `C:\repo\.codex-tmp\21377-review-full.log` y

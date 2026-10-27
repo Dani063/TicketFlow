@@ -15,7 +15,7 @@ from app.services import ai
 logger = logging.getLogger(__name__)
 
 MAX_TEXT_CHARS = 4000
-RESOLVED_STATUSES = ("resolved", "closed")
+RESOLVED_STATUSES = ("resolved", "on_hold", "closed")
 
 
 def _content_text(ticket):
