@@ -337,6 +337,8 @@ class Attachment(models.Model):
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
     draft = models.ForeignKey(AttachmentDraft, on_delete=models.PROTECT, null=True, blank=True)
+    content_id = models.TextField(blank=True, default='', db_default='')
+    is_inline = models.BooleanField(default=False, db_default=False)
 
     @property
     def filename(self):

@@ -109,3 +109,49 @@ def sanitize_email_html(html):
     )
     cleaned = re.sub(r"<span\s*>\s*</span>", "", cleaned)
     return cleaned
+
+
+def resolve_inline_cids(source, previews):
+    """Sustituye CID por rutas autorizadas antes de sanear; nunca permite CID globalmente."""
+    from html import escape
+    from html.parser import HTMLParser
+    from urllib.parse import unquote
+
+    class Images(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=False)
+            self.parts = []
+
+        def start(self, tag, attrs, closing='>'):
+            resolved = []
+            for key, value in attrs:
+                if key in {'src', 'href'} and value and value.strip().lower().startswith('cid:'):
+                    content_id = unquote(value.strip()[4:]).strip().strip('<>')
+                    value = previews.get(content_id)
+                    if not value:
+                        continue
+                resolved.append(' ' + key + (f'="{escape(value, quote=True)}"' if value is not None else ''))
+            self.parts.append('<' + tag + ''.join(resolved) + closing)
+
+        def handle_starttag(self, tag, attrs):
+            self.start(tag, attrs)
+
+        def handle_startendtag(self, tag, attrs):
+            self.start(tag, attrs, '/>')
+
+        def handle_endtag(self, tag):
+            self.parts.append(f'</{tag}>')
+
+        def handle_data(self, data):
+            self.parts.append(data)
+
+        def handle_entityref(self, name):
+            self.parts.append(f'&{name};')
+
+        def handle_charref(self, name):
+            self.parts.append(f'&#{name};')
+
+    parser = Images()
+    parser.feed(source)
+    parser.close()
+    return sanitize_email_html(''.join(parser.parts))

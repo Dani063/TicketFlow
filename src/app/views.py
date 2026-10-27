@@ -1837,7 +1837,7 @@ def create_ticket(request):
         feed = []
         for c in prepare_comments(comments_list):
             c.attachment_cards = [AttachmentService.metadata(a) for a in c.attachment_set.all()
-                                  if a.ticket_id == ticket_obj.id]
+                                  if a.ticket_id == ticket_obj.id and not a.is_inline]
             feed.append({'item_type': 'comment', 'obj': c})
         for e in events_list:
             feed.append({'item_type': 'event', 'obj': e,
@@ -2006,6 +2006,7 @@ def _comment_payload(comment, ticket):
         'is_public': comment.is_public,
         'attachments': [
             AttachmentService.metadata(a) for a in comment.attachment_set.order_by('id')
+            if a.ticket_id == ticket.id and not a.is_inline
         ],
     }
 
