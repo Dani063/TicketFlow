@@ -29,6 +29,8 @@ class TicketService:
         "agentia365": "agentia365",
         "agentia_365": "agentia365",
         "agentia-365": "agentia365",
+        "cognitia": "cognitia",
+        "rightfax": "rightfax",
     }
     EVENT_FIELDS = [
         ("status", "status"),

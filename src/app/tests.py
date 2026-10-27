@@ -1688,7 +1688,7 @@ class ReportingTests(_BaseFixture):
         payload = self.client.get(reverse("reporting_data"), {"section": "executive"}).json()
         self.assertTrue(payload["ok"])
         self.assertIn("comparison", payload)
-        self.assertEqual(len(payload["matrix"]), 7)
+        self.assertEqual(len(payload["matrix"]), 9)
         self.assertTrue(all("comparison" in row for row in payload["matrix"]))
         self.assertTrue(all("previous" in kpi for kpi in payload["kpis"]))
 
