@@ -385,3 +385,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Datos y archivos sintéticos de la revisión local conjunta.
+/.review-local/
