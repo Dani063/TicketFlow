@@ -206,8 +206,9 @@ def fetch_attachments(mailbox, message_id, headers):
     archivos de la galería. Los tipos o tamaños no admitidos no bloquean el correo.
     """
     base = f'{_user_path(mailbox)}/messages/{quote(message_id, safe="")}/attachments'
+    # contentId pertenece al tipo derivado, no a attachment.
     response = _request('GET', base, headers, params={
-        '$select': 'id,name,contentType,size,isInline,contentId', '$top': '25',
+        '$select': 'id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId', '$top': '25',
     })
     items = []
     while True:
