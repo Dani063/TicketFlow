@@ -35,7 +35,8 @@ class GraphInlineTests(SimpleTestCase):
             result = fetch_attachments('help@example.test', 'message-id', {})
         self.assertEqual(sum(a['is_inline'] for a in result), 6)
         self.assertEqual(sum(not a['is_inline'] for a in result), 5)
-        self.assertIn('contentId', fetch.call_args_list[0].kwargs['params']['$select'])
+        self.assertIn('microsoft.graph.fileAttachment/contentId',
+                      fetch.call_args_list[0].kwargs['params']['$select'].split(','))
         self.assertEqual(result[0]['content_id'], 'cid-0')
 
     def test_cid_rewriting_accepts_encoded_ids_and_keeps_sanitization(self):
