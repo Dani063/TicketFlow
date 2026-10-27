@@ -641,6 +641,8 @@
 .status-dot.status-on_hold         { background: #8b5cf6; }
 .tf-trash-meta { display: block; font-size: .8rem; color: var(--color-text-secondary); margin-top: .25rem; }
 .tf-trash-banner { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; padding: .75rem 1rem; margin-bottom: 1rem; border: 1px solid var(--color-danger); border-radius: .5rem; }
+.tf-ticket-presence { flex-basis: 100%; font-size: .85rem; color: var(--color-text-secondary); }
+.ticket-pane > .title-bar { flex-wrap: wrap; }
 .upd-item .tl-badge.status-resolved { background: #22c55e; }
 .upd-item .tl-badge.status-closed   { background: #6b7280; }
 

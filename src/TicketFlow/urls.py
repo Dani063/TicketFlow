@@ -26,6 +26,7 @@ urlpatterns = [
     path('tickets/bulk_merge/', views.bulk_merge, name='bulk_merge'),
     path('api/tickets/<int:ticket_id>/', views.ticket_detail_api, name='ticket_detail_api'),
     path('api/tickets/<int:ticket_id>/live/', views.ticket_live, name='ticket_live'),
+    path('api/tickets/<int:ticket_id>/presence/', views.ticket_presence, name='ticket_presence'),
     path('api/tickets/<int:ticket_id>/ai-suggest-reply/', views.ai_suggest_reply, name='ai_suggest_reply'),
     path("tickets/filter/", views.filter_tickets, name="filter_tickets"),
     path("tickets/export.csv", views.tickets_export_csv, name="tickets_export_csv"),
