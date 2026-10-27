@@ -2005,6 +2005,21 @@ def add_comment(request, ticket_id):
         if not isinstance(data, dict):
             raise APIValidationError('invalid_json', 'Se requiere un objeto JSON.', status=400)
         ticket = get_object_or_404(Ticket, id=ticket_id)
+        # Sin mensaje ni adjuntos pero con estado: es un cambio de estado a secas
+        # (poner en pendiente una alarma no exige escribir nada).
+        status_only = (
+            data.get('new_status')
+            and not data.get('attachment_ids')
+            and not str(data.get('content') or '').strip()
+            and not str(data.get('html_body') or '').strip()
+        )
+        if status_only:
+            ticket = TicketService.change_status(request.user, ticket.id, data.get('new_status'))
+            return JsonResponse({
+                'status_only': True,
+                'new_status': ticket.status,
+                'ticket': _ticket_header_payload(ticket),
+            })
         comment, applied_status = CommentService.add_comment(
             ticket=ticket,
             actor=request.user,

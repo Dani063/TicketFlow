@@ -489,10 +489,18 @@ window.initTicketPane = function (root, ctx) {
         const content = (textarea?.value || '').trim();
         const newStatus = (rootEl.querySelector('#selected-status')?.textContent || 'open').trim().toLowerCase();
         if (!content && !attachments.hasFiles()) {
-            if (!updateFields || !hasTicketFieldChanges()) { warnMessageRequired('publicar'); return; }
+            // El estado no es un campo del formulario: cambiarlo a secas también
+            // es un cambio que se puede guardar sin escribir mensaje.
+            const serverStatus = rootEl.__tfLive?.serverStatus;
+            const statusChanged = !!serverStatus && newStatus !== serverStatus;
+            const fieldsChanged = hasTicketFieldChanges();
+            if (!updateFields || (!fieldsChanged && !statusChanged)) { warnMessageRequired('publicar'); return; }
             setSubmissionBusy(true);
             try {
-                if (await saveTicketFields(newStatus)) window.toast.success('Cambios del ticket guardados.');
+                // Con otros campos cambiados el formulario ya lleva el estado; sin
+                // ellos, la ruta de solo estado no exige producto.
+                const saved = fieldsChanged ? await saveTicketFields(newStatus) : await saveStatusOnly(newStatus);
+                if (saved) window.toast.success('Cambios del ticket guardados.');
             } finally { setSubmissionBusy(false); }
             return;
         }
@@ -592,6 +600,26 @@ window.initTicketPane = function (root, ctx) {
         } catch (err) {
             console.error('Error guardando los campos del ticket:', err);
             window.toast.error('Error de red al guardar los cambios del ticket.');
+            return false;
+        }
+    }
+
+    async function saveStatusOnly(status) {
+        try {
+            const res = await fetch('/tickets/' + ctx.ticketId + '/add_comment/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken')},
+                body: JSON.stringify({new_status: status}),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                window.toast.error(responseError(data, 'No se pudo cambiar el estado del ticket.'));
+                return false;
+            }
+            window.tfApplyTicketHeader?.(rootEl, data.ticket);
+            return true;
+        } catch (_) {
+            window.toast.error('Error de red al cambiar el estado del ticket.');
             return false;
         }
     }

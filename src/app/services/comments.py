@@ -4,13 +4,14 @@ from django.db import transaction
 from django.utils import timezone
 
 from app.api import APIValidationError
-from app.models import Attachment, Comment, Ticket, TicketEvent
-from app.permissions import can_comment_ticket, can_update_ticket, is_agent
+from app.models import Attachment, Comment, Ticket
+from app.permissions import can_comment_ticket, is_agent
 from app.sanitizers import sanitize_email_html
 from app.services.metrics import record_metric
 from app.services.attachments import AttachmentService, retry_attachment_mutation
 from app.services.notifications import NotificationService
 from app.services.sla import SLAService
+from app.services.ticket_status import apply_status
 
 
 logger = logging.getLogger(__name__)
@@ -77,36 +78,10 @@ class CommentService:
             email_message_id=email_message_id,
         )
 
-        applied_status = ticket.status
-        new_status = (new_status or "").lower()
-        if new_status and new_status != ticket.status:
-            if not can_update_ticket(actor, ticket):
-                raise APIValidationError("forbidden_status_change", "No puedes cambiar el estado.", status=403)
-            if new_status not in {"open", "pending", "resolved", "closed"}:
-                raise APIValidationError("invalid_status", "Estado no valido.", status=400)
-            prev = ticket.status
-            ticket.status = new_status
-            ticket.closed_at = now if new_status == "closed" else ticket.closed_at
-            # Ver TicketService.update_ticket: resolved_at es el reloj de la encuesta
-            # de satisfacción y se refresca en cada entrada en 'resolved'.
-            if new_status == "resolved":
-                ticket.resolved_at = now
-            elif new_status == "closed" and not ticket.resolved_at:
-                ticket.resolved_at = now
-            ticket.updated_at = now
-            ticket.save(update_fields=["status", "updated_at", "closed_at", "resolved_at"])
-            TicketEvent.objects.create(
-                ticket=ticket,
-                actor=actor,
-                field_name="status",
-                old_value=prev,
-                new_value=new_status,
-                created_at=now,
-            )
-            applied_status = new_status
-        else:
+        if not apply_status(ticket, actor, new_status, now):
             ticket.updated_at = now
             ticket.save(update_fields=["updated_at"])
+        applied_status = ticket.status
 
         if attachments:
             Attachment.objects.filter(id__in=attachment_ids).update(comment=comment)

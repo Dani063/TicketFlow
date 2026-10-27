@@ -13,6 +13,7 @@ from app.services.attachments import AttachmentService, retry_attachment_mutatio
 from app.services.metrics import record_metric
 from app.services.notifications import NotificationService
 from app.services.sla import SLAService
+from app.services.ticket_status import apply_status
 
 
 class TicketService:
@@ -331,9 +332,11 @@ class TicketService:
         }
         old_tags = set(ticket.tags.values_list("name", flat=True))
 
+        # Sin "description": es el cuerpo con el que se abrió el ticket, y el
+        # mensaje del formulario es un comentario nuevo (se publica más abajo).
+        # Copiarlo aquí vaciaba la descripción en cada guardado sin comentario.
         for field in (
             "subject",
-            "description",
             "status",
             "priority",
             "brand",
@@ -420,6 +423,23 @@ class TicketService:
             )
         AutomationService.run_for_ticket(ticket, actor=actor, event="ticket_updated")
         record_metric("tickets.updated", labels={"ticket_id": ticket.id})
+        return ticket
+
+    @staticmethod
+    @transaction.atomic
+    def change_status(actor, ticket_id, new_status):
+        """Cambia solo el estado, sin comentario ni el resto del formulario.
+
+        Poner en pendiente una alarma o un hilo interno no lleva mensaje, y pasar
+        por update_ticket exigiría el producto, que los tickets de correo no traen.
+        """
+        ticket = Ticket.objects.select_for_update().get(id=ticket_id)
+        if not apply_status(ticket, actor, new_status, timezone.now()):
+            raise APIValidationError("empty_comment", "El mensaje no puede estar vacío.", status=400)
+        SLAService.apply_policy(ticket)
+        NotificationService.notify_ticket_users(ticket, f"Ticket #{ticket.id} actualizado", actor=actor)
+        AutomationService.run_for_ticket(ticket, actor=actor, event="ticket_updated")
+        record_metric("tickets.status_changed", labels={"ticket_id": ticket.id})
         return ticket
 
     @staticmethod
