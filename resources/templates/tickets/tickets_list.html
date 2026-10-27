@@ -84,7 +84,7 @@
 <aside class="left-column ticket-filters-panel" id="ticketFiltersPanel">
     <h2 class="filters-header">
         Filtros
-        <button type="button" id="refreshFilters" title="Actualizar filtros" aria-label="Actualizar contadores de filtros">
+        <button type="button" id="refreshFilters" title="Actualizar tickets y contadores" aria-label="Actualizar tickets y contadores">
             <i id="refreshIcon" class="fas fa-sync-alt"></i>
         </button>
     </h2>
@@ -352,5 +352,5 @@
 <script>
 window.__ticketsData = { createTicketUrl: "{% url 'create_ticket' %}" };
 </script>
-<script src="{% static 'tickets/tickets_list.js' %}?v=s6.6"></script>
+<script src="{% static 'tickets/tickets_list.js' %}?v=s6.7"></script>
 {% endblock %}

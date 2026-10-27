@@ -24,6 +24,7 @@
     let _brandId     = '';
     let _fromDate    = '';
     let _toDate      = '';
+    let _relativeDays = null;
     let _lastExactTotal = null;
     let _selectedIds = new Set();
     let _lastRenderedCount = 0;
@@ -466,7 +467,12 @@
     window.loadTickets = loadTickets;
 
     function init() {
-        document.getElementById("refreshFilters").addEventListener("click", () => refreshFilterCounts(true));
+        document.getElementById("refreshFilters").addEventListener("click", async () => {
+            if (_relativeDays !== null) setPreset(_relativeDays);
+            _lastExactTotal = null;
+            await loadTickets(_currentView, _currentPage);
+            await refreshFilterCounts(true);
+        });
 
         const viewFilters = document.querySelectorAll("#filters li[data-view]");
         const filterSections = Array.from(document.querySelectorAll(
@@ -649,6 +655,7 @@
 
         const presetButtons = document.querySelectorAll('.tf-ticket-presets button');
         function setActivePreset(days) {
+            _relativeDays = days;
             presetButtons.forEach(button => {
                 const active = days !== null && parseInt(button.dataset.days, 10) === days;
                 button.classList.toggle('is-active', active);
@@ -999,6 +1006,15 @@
     // ---- Subject hover preview ----
     const _card = document.getElementById("ticket-preview-card");
     let _hoverTimer = null;
+    // La SPA vuelve a ejecutar este fichero al regresar a Vistas. Retirar los
+    // listeners y el temporizador anteriores evita conservar nodos ya desmontados.
+    if (window.__tfTicketListHoverDispose) window.__tfTicketListHoverDispose();
+    const hoverController = new AbortController();
+    window.__tfTicketListHoverDispose = () => {
+        hoverController.abort();
+        clearTimeout(_hoverTimer);
+        if (_card) _card.style.display = 'none';
+    };
 
     function _showCard(span, e) {
         const s = span.dataset;
@@ -1036,21 +1052,23 @@
 
     document.addEventListener("mouseover", function(e) {
         const span = e.target.closest(".subject-text");
-        if (!span) return;
+        if (!span || !span.closest('#ticketsTableBody') || !_card?.isConnected) return;
         clearTimeout(_hoverTimer);
-        _hoverTimer = setTimeout(() => _showCard(span, e), 250);
-    });
+        _hoverTimer = setTimeout(() => {
+            if (span.isConnected && _card.isConnected) _showCard(span, e);
+        }, 250);
+    }, { signal: hoverController.signal });
 
     document.addEventListener("mouseout", function(e) {
         const span = e.target.closest(".subject-text");
-        if (!span) return;
+        if (!span || !span.closest('#ticketsTableBody') || !_card?.isConnected) return;
         clearTimeout(_hoverTimer);
         _card.style.display = "none";
-    });
+    }, { signal: hoverController.signal });
 
     document.addEventListener("mousemove", function(e) {
-        if (_card.style.display === "block") _positionCard(e);
-    });
+        if (_card?.isConnected && _card.style.display === "block") _positionCard(e);
+    }, { signal: hoverController.signal });
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
