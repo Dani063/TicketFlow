@@ -1249,3 +1249,15 @@ class TicketStatusInterval(models.Model):
 
     def __str__(self):
         return f"#{self.ticket_id} {self.status} desde {self.started_at}"
+
+
+class TicketPresence(models.Model):
+    """Latidos compartidos entre procesos; no se guardan en la caché local."""
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='presences')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='ticket_presences')
+    last_seen = models.DateTimeField(db_index=True)
+    composing = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['ticket', 'user'], name='ticket_presence_user_unique')]
+        indexes = [models.Index(fields=['ticket', 'last_seen'], name='ticket_presence_seen_idx')]

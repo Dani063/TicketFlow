@@ -44,6 +44,7 @@ from .services.satisfaction import SatisfactionService
 from .services.sla import SLAService
 from .services.tickets import TicketService
 from .services.ticket_trash import TicketTrashService
+from .services.presence import heartbeat as ticket_presence_heartbeat
 from .services.user_admin import UserAdminService
 
 logger = logging.getLogger('app.views')
@@ -3356,3 +3357,40 @@ def satisfaction_survey(request, token):
     if requested not in ('good', 'bad'):
         requested = rating.score if rating.is_answered else None
     return _render('form', score=requested)
+
+
+@api_login_required
+@require_POST
+def ticket_presence(request, ticket_id):
+    if not _is_agent(request.user):
+        return json_error('forbidden', 'La presencia solo está disponible para agentes.', status=403)
+    ticket = get_object_or_404(Ticket, pk=ticket_id)
+    try:
+        if request.content_type == 'application/json':
+            data = parse_json_body(request)
+            if not isinstance(data, dict):
+                raise APIValidationError('invalid_json', 'Se requiere un objeto JSON.', status=400)
+            composing = data.get('composing', False)
+        else:
+            data = request.POST
+            raw = data.get('composing', 'false')
+            if raw not in ('true', 'false', '1', '0'):
+                raise APIValidationError('invalid_composing', 'composing debe ser un booleano.', status=400)
+            composing = raw in ('true', '1')
+        action = data.get('action', 'heartbeat')
+        if action not in ('heartbeat', 'leave'):
+            raise APIValidationError('invalid_action', 'Acción de presencia no válida.', status=400)
+        seen_at = None
+        if action == 'leave' and data.get('seen_at'):
+            raw = data['seen_at']
+            try:
+                seen_at = parse_datetime(raw) if isinstance(raw, str) else None
+            except ValueError:
+                seen_at = None
+            if seen_at is None or timezone.is_naive(seen_at):
+                raise APIValidationError('invalid_seen_at', 'seen_at debe incluir fecha, hora y zona.', status=400)
+        payload = ticket_presence_heartbeat(ticket, request.user, composing=composing,
+                                            leave=action == 'leave', seen_at=seen_at)
+    except APIValidationError as exc:
+        return json_error(exc.code, exc.message, status=exc.status)
+    return json_ok(payload)
