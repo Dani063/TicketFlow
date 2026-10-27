@@ -512,7 +512,11 @@ window.initTicketPane = function (root, ctx) {
         payload.request_id = requestIdFor(payload);
         setSubmissionBusy(true);
         try {
-            if (updateFields && !await saveTicketFields(newStatus)) return;
+            // El botón de enviar también guarda los campos: un CC añadido a mano
+            // tiene que estar en el ticket antes de encolar la respuesta o no la
+            // recibe. Ese botón no cambia el estado, así que viaja el del servidor.
+            const fieldsStatus = updateFields ? newStatus : (rootEl.__tfLive?.serverStatus || newStatus);
+            if (!await saveTicketFields(fieldsStatus)) return;
             const response = await fetch('/tickets/' + ctx.ticketId + '/add_comment/', {
                 method:'POST',
                 headers:{'Content-Type':'application/json','X-CSRFToken':getCookie('csrftoken')},
