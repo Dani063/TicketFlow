@@ -507,15 +507,17 @@ window.initTicketPane = function (root, ctx) {
             const fieldsChanged = hasTicketFieldChanges();
             if (!updateFields || (!fieldsChanged && !statusChanged)) { warnMessageRequired('publicar'); return; }
             setSubmissionBusy(true);
+            let saved = false;
             try {
                 // Con otros campos cambiados el formulario ya lleva el estado; sin
                 // ellos, la ruta de solo estado no exige producto.
-                const saved = fieldsChanged ? await saveTicketFields(newStatus) : await saveStatusOnly(newStatus);
+                saved = fieldsChanged ? await saveTicketFields(newStatus) : await saveStatusOnly(newStatus);
                 if (saved) {
                     rootEl.querySelector('#selected-status').textContent = tfPublishStatusFor(newStatus);
                     window.toast.success('Cambios del ticket guardados.');
                 }
             } finally { setSubmissionBusy(false); }
+            if (saved) returnToQueue(newStatus);
             return;
         }
         const payload = {
@@ -525,6 +527,7 @@ window.initTicketPane = function (root, ctx) {
         if (updateFields) payload.new_status = newStatus;
         payload.request_id = requestIdFor(payload);
         setSubmissionBusy(true);
+        let publishedStatus = null;
         try {
             // El botón de enviar también guarda los campos: un CC añadido a mano
             // tiene que estar en el ticket antes de encolar la respuesta o no la
@@ -548,9 +551,27 @@ window.initTicketPane = function (root, ctx) {
             lastAttempt = null;
             if (data.new_status) rootEl.querySelector('#selected-status').textContent = tfPublishStatusFor(data.new_status);
             window.tfApplyTicketHeader?.(rootEl, data.ticket);
+            publishedStatus = data.new_status || newStatus;
         } catch (_) {
             window.toast.error('No se pudo confirmar la publicación. Reintenta; no se duplicará el mensaje.');
         } finally { setSubmissionBusy(false); }
+        // El botón de enviar es para conversar: solo "Publicar como" actualiza el
+        // ticket y devuelve a la cola.
+        if (publishedStatus && updateFields) returnToQueue(publishedStatus);
+    }
+
+    // #21382: tras actualizar un ticket se vuelve a «Todos los tickets no
+    // resueltos». Si queda pendiente, resuelto u on-hold ya no hace falta tenerlo
+    // abierto, así que además se cierra su pestaña.
+    function returnToQueue(status) {
+        if (!window.Tabs?.navigate) return;
+        const listUrl = ((window.urls && window.urls.tickets_list) || '/tickets/') + '?view=all_unsolved_no_tareas';
+        if (['pending', 'resolved', 'on_hold'].includes(status)) {
+            const tabUrl = ((window.urls && window.urls.create_ticket) || '/tickets/create/') + '?id=' + ctx.ticketId;
+            window.Tabs.closeTab(tabUrl, {navigateTo: listUrl});
+        } else {
+            window.Tabs.navigate(listUrl);
+        }
     }
 
     const sendMessage = ev => submitComment(ev, false);

@@ -730,8 +730,9 @@
         closeButton.className = 'close-tab';
         closeButton.setAttribute('aria-label', 'Cerrar pestaña ' + text);
 
-        closeButton.addEventListener('click', async (e) => {
-            e.stopPropagation();
+        // Cierra esta pestaña. Con `navigateTo`, después muestra esa página en vez
+        // de activar la pestaña vecina (#21382: volver a la lista tras actualizar).
+        const closeThisTab = async ({navigateTo} = {}) => {
             if (closeButton.disabled) return;
             const closedNorm = normalizeUrl(tab.dataset.url || '');
 
@@ -779,6 +780,11 @@
             }
             _paneCache.delete(closedNorm);
 
+            if (navigateTo) {
+                await _navigateAppContent(navigateTo);
+                return;
+            }
+
             // Si no era la activa, no navegamos (solo quitar del DOM)
             if (!wasActive) return;
 
@@ -793,6 +799,11 @@
                     window.location.href = window.urls.tickets_list;
                 }
             }
+        };
+        tab.__tfClose = closeThisTab;
+        closeButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeThisTab();
         });
 
         tab.appendChild(img);
@@ -1597,9 +1608,22 @@
         }
     };
 
+    // Cierra la pestaña de `url` (si está abierta) y, con `navigateTo`, muestra
+    // esa página de la barra lateral.
+    async function closeTab(url, {navigateTo} = {}) {
+        const norm = normalizeUrl(url);
+        const container = getContainer();
+        const tab = container
+            ? [...container.querySelectorAll('.tab')].find(t => normalizeUrl(t.dataset.url || '') === norm)
+            : null;
+        if (tab && tab.__tfClose) return tab.__tfClose({navigateTo});
+        if (navigateTo) return _navigateAppContent(navigateTo);
+    }
+
     window.Tabs = {
         addTab, loadTabs, saveTabs, highlightActiveTab, normalizeUrl,
-        closeDraftNewTicketTabs,
+        closeDraftNewTicketTabs, closeTab,
+        navigate: url => _navigateAppContent(url),
         // Pane-based API (active when window.TF_USE_PANES === true)
         openOrSwitchPane,
         paneCache: _paneCache,
