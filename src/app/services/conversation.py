@@ -30,6 +30,42 @@ SIGNOFF = re.compile(r'^(?:Un saludo[,.]?|Saludos[,.]?|Atentamente[,.]?|Best reg
 CONTACT = re.compile(r'(?:\b(?:email|phone|tel|tlf|soporte|support|avda|avenida|calle)\b|[\w.+-]+@[\w.-]+\.[a-z]{2,}|https?://)', re.I)
 
 
+def _link_attributes(attrs):
+    attrs = [(key, value) for key, value in attrs if key not in {'target', 'rel'}]
+    href = dict(attrs).get('href') or ''
+    if re.match(r'^https?://', href.strip(), re.I):
+        attrs.append(('target', '_blank'))
+    attrs.append(('rel', 'noopener noreferrer'))
+    return ''.join(f' {key}="{html.escape(value, quote=True)}"' for key, value in attrs if value)
+
+
+class _OriginalLinks(HTMLParser):
+    """Ajusta solo los enlaces del original ya saneado, conservando su formato."""
+    def __init__(self, source):
+        super().__init__(convert_charrefs=False)
+        self.parts = []
+        self.feed(source)
+        self.close()
+
+    def handle_starttag(self, tag, attrs):
+        self.parts.append(f'<a{_link_attributes(attrs)}>' if tag == 'a' else self.get_starttag_text())
+
+    def handle_startendtag(self, tag, attrs):
+        self.parts.append(f'<a{_link_attributes(attrs)}/>' if tag == 'a' else self.get_starttag_text())
+
+    def handle_endtag(self, tag):
+        self.parts.append(f'</{tag}>')
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+    def handle_entityref(self, name):
+        self.parts.append(f'&{name};')
+
+    def handle_charref(self, name):
+        self.parts.append(f'&#{name};')
+
+
 def compact(text):
     return re.sub(r'\n[ \t]*\n(?:[ \t]*\n)+', '\n\n', text.replace('\xa0', ' ')).strip()
 
@@ -144,7 +180,7 @@ class Document(HTMLParser):
                 if key in allowed and value:
                     attrs += f' {key}="{html.escape(value, quote=True)}"'
             if tag == 'a':
-                attrs += ' rel="noopener noreferrer"'
+                attrs = _link_attributes([(k, v) for k, v in node.attrs if k in allowed])
             return f'<{tag}{attrs}>' + ('' if tag in VOID else body + f'</{tag}>')
 
         result = walk(self.root)
@@ -259,7 +295,8 @@ def present_comment(comment):
         raw_html = content
     source = raw_html or urlize(content, nofollow=True, autoescape=True).replace('\n', '<br>')
     result = dict(history=[], extras_html='', duplicate_count=0,
-                  original_html=sanitize_email_html(source), html='', footer_html='', text='')
+                  original_html=''.join(_OriginalLinks(sanitize_email_html(source)).parts),
+                  html='', footer_html='', text='')
     try:
         if len(source) > 1000000:
             raise ValueError('Correo demasiado grande para separar')
