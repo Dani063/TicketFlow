@@ -1,7 +1,7 @@
 ﻿{% load static %}
 <nav class="navbar">
     <div class="navbar-left">
-        <button class="add-tab" type="button" aria-label="Añadir ticket">+ Añadir</button>
+        {% if not tf_readonly %}<button class="add-tab" type="button" aria-label="Añadir ticket">+ Añadir</button>{% endif %}
         <button class="tabs-overflow-btn" type="button" hidden
                 aria-haspopup="menu" aria-expanded="false" title="Más pestañas">
             <i class="fas fa-ellipsis-h"></i><span class="badge">0</span>

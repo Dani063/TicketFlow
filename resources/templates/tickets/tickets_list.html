@@ -9,7 +9,7 @@
 
 {% block content %}
 <!-- Bulk merge modal (solo para agentes) -->
-{% if user.role and user.role.role_name|lower not in 'end user,end-user,cliente,customer' %}
+{% if tf_can_edit %}
 <div id="bulkMergeOverlay" class="dialog-backdrop tf-dialog-merge">
     <div class="dialog dialog--lg dialog--form" role="dialog" aria-modal="true">
         <div class="dialog__header">
@@ -42,7 +42,7 @@
 {% endif %}
 
 <!-- Bulk action bar (solo para agentes) -->
-{% if user.role and user.role.role_name|lower not in 'end user,end-user,cliente,customer' %}
+{% if tf_can_edit %}
 <div id="ticketActionBar" class="ticket-action-bar">
     <span class="tab-action-count"><strong id="tabActionCount">0</strong> tickets seleccionados</span>
     <div class="tab-action-buttons">

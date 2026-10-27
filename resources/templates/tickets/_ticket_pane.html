@@ -20,7 +20,7 @@
     <strong><i class="fas fa-trash"></i> Ticket eliminado</strong>
     {% if ticket.deleted_at %}<span>El {{ ticket.deleted_at|date:"d/m/Y H:i" }}</span>{% endif %}
     {% if ticket.deleted_by %}<span>por {{ ticket.deleted_by.name|default:ticket.deleted_by.email }}</span>{% endif %}
-    {% if can_use_internal and not ticket.merged_into %}
+    {% if can_edit and not ticket.merged_into %}
     <button type="button" class="tf-btn tf-btn--secondary tf-btn--sm" data-restore-ticket="{{ ticket.id }}">Restaurar</button>
     {% endif %}
 </div>
@@ -35,12 +35,12 @@
         <span class="meta-sep">·</span>
         <span title="Última actualización">Actualizado: <strong data-tf-updated>{{ ticket.updated_at|date:"d/m/Y H:i" }}</strong></span>
     </span>
-    {% if can_use_internal and not ticket_locked and ticket.assignee_id != current_user_id %}
+    {% if can_edit and not ticket_locked and ticket.assignee_id != current_user_id %}
     <button type="button" id="take-it-btn" class="take-it-btn" data-ticket-id="{{ ticket.id }}" aria-label="Asignarme este ticket">
         <i class="fas fa-hand-point-right"></i> Asignarme
     </button>
     {% endif %}
-    {% if can_use_internal and not ticket_locked and not ticket.merged_into %}
+    {% if can_edit and not ticket_locked and not ticket.merged_into %}
     <button type="button" id="merge-btn" class="merge-btn" data-ticket-id="{{ ticket.id }}" aria-label="Fusionar este ticket">
         <i class="fas fa-code-branch"></i> Fusionar
     </button>
@@ -57,7 +57,7 @@
     {% endif %}
 </div>
 
-<form id="ticket-form" method="post"{% if ticket_locked or ticket.status == "closed" or ticket.is_deleted %} class="is-locked" data-locked="1"{% endif %}
+<form id="ticket-form" method="post"{% if ticket and not can_edit %} class="is-locked" data-locked="readonly"{% elif ticket_locked or ticket.status == "closed" or ticket.is_deleted %} class="is-locked" data-locked="1"{% endif %}
       action="{% url 'create_ticket' %}{% if ticket %}?id={{ ticket.id }}{% elif request.GET.id %}?id={{ request.GET.id }}{% endif %}">
     {% csrf_token %}
     <div class="ticket-form" id="ticketLayout">
@@ -314,7 +314,11 @@
             </div>
             <!-- Resize handle compose -->
             <div class="compose-resize-handle" id="composeResizer"></div>
-            {% if ticket.status == "closed" and not ticket.is_deleted %}
+            {% if ticket and not can_edit %}
+            <div class="ticket-locked-banner"><i class="fas fa-eye"></i>
+                Rol de solo lectura: puedes consultar el ticket, pero no modificarlo.
+            </div>
+            {% elif ticket.status == "closed" and not ticket.is_deleted %}
             <div class="ticket-locked-banner"><i class="fas fa-lock"></i>
                 Ticket cerrado: ya no admite cambios. Si el cliente vuelve a escribir, se abrirá un ticket nuevo.
             </div>

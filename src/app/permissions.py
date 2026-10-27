@@ -13,6 +13,11 @@ AGENT_ROLE_NAMES = {
     "lead",
 } | ADMIN_ROLE_NAMES
 END_USER_ROLE_NAMES = {"end user", "end-user", "cliente", "customer"}
+# Rol de solo lectura (#21378): ve lo mismo que un agente (tickets, notas
+# internas, clientes, reporting) pero no modifica nada. is_agent sigue
+# significando «puede escribir», así que el reparto, el SLA y el reporting por
+# agente no lo cuentan como agente.
+READONLY_ROLE_NAMES = {"solo lectura", "solo-lectura", "lectura", "read only", "read-only", "readonly", "viewer"}
 
 
 def role_name(user):
@@ -40,8 +45,19 @@ def is_end_user(user):
     return role_name(user) in END_USER_ROLE_NAMES
 
 
+def is_readonly(user):
+    if not getattr(user, "is_authenticated", False) or is_agent(user):
+        return False
+    return role_name(user) in READONLY_ROLE_NAMES
+
+
+def can_view_all_tickets(user):
+    """Ve todos los tickets y las notas internas: agentes y solo lectura."""
+    return is_agent(user) or is_readonly(user)
+
+
 def can_view_ticket(user, ticket):
-    if is_agent(user):
+    if can_view_all_tickets(user):
         return True
     if not getattr(user, "is_authenticated", False):
         return False
@@ -57,7 +73,7 @@ def can_update_ticket(user, ticket):
 
 
 def can_comment_ticket(user, ticket):
-    return can_view_ticket(user, ticket)
+    return not is_readonly(user) and can_view_ticket(user, ticket)
 
 
 def can_manage_users(user):

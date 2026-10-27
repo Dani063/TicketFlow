@@ -5,7 +5,7 @@ from django.utils.dateparse import parse_datetime
 from app.api import APIValidationError
 from app.constants import CHANNEL_VALUES, LEGACY_CHANNEL_MAP, LEGACY_TYPE_MAP, TICKET_TYPE_VALUES
 from app.models import Attachment, AttachmentDraft, Brand, Comment, Group, ProductLine, Ticket, TicketEvent, TicketTag, User
-from app.permissions import can_update_ticket, is_agent
+from app.permissions import can_update_ticket, is_agent, is_readonly
 from app.services.assignment import AssignmentService
 from app.services.automations import AutomationService
 from app.services.comments import CommentService
@@ -186,6 +186,8 @@ class TicketService:
     @retry_attachment_mutation
     @transaction.atomic
     def create_ticket(actor, payload):
+        if is_readonly(actor):
+            raise APIValidationError("forbidden", "Tu rol es de solo lectura.", status=403)
         AttachmentService.lock_actor(actor)
         payload = dict(payload)
         attachment_ids = AttachmentService.parse_ids(payload.get('attachment_ids'))

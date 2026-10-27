@@ -32,7 +32,7 @@ from django.views.decorators.http import require_GET
 from django.core.cache import cache
 from .api import APIValidationError, api_login_required, json_error, json_ok, parse_json_body
 from .constants import CHANNEL_CHOICES, SERVICE_CHOICES, SLA_AT_RISK_WINDOW_MINUTES, TICKET_TYPE_CHOICES
-from .permissions import agent_user_filter, can_manage_users, can_update_ticket, can_view_ticket, is_admin as permission_is_admin, is_agent as permission_is_agent
+from .permissions import agent_user_filter, can_manage_users, can_update_ticket, can_view_all_tickets, can_view_ticket, is_admin as permission_is_admin, is_agent as permission_is_agent, is_readonly
 from .sanitizers import sanitize_email_html
 from .services.conversation import prepare_comments
 from .services.assignment import AssignmentService
@@ -408,7 +408,7 @@ def _ticket_listing_queryset(request, *, view=None):
     """Query base de /tickets con empresa y fechas aplicadas una sola vez."""
     view = (request.GET.get('view') or '') if view is None else view
     if view == 'trash':
-        base_qs = Ticket.objects.filter(is_deleted=True, merged_into__isnull=True) if _is_agent(request.user) else Ticket.objects.none()
+        base_qs = Ticket.objects.filter(is_deleted=True, merged_into__isnull=True) if _can_view_all(request.user) else Ticket.objects.none()
     else:
         base_qs = _base_tickets_queryset(request.user)
     brand_id = _as_int_or_none(request.GET.get('brand_id'))
@@ -440,13 +440,13 @@ def _ensure_urgency(qs):
 
 def _base_tickets_queryset(user):
     qs = Ticket.objects.filter(merged_into__isnull=True, is_deleted=False)
-    if _is_agent(user):
+    if _can_view_all(user):
         return qs.order_by('-updated_at')
     return qs.filter(Q(requester=user) | Q(ccs=user)).distinct().order_by('-updated_at')
 
 
 def _my_tickets_queryset(base_qs, user):
-    if _is_agent(user):
+    if _can_view_all(user):
         return base_qs.filter(assignee=user)
     return base_qs.filter(Q(requester=user) | Q(ccs=user)).distinct()
 
@@ -543,7 +543,7 @@ def _tickets_for_view(base_qs, view, user):
     if view == "abiertos":
         return base_qs.filter(status="open")
     if view == "sus_no_cerrados":
-        if _is_agent(user):
+        if _can_view_all(user):
             return base_qs.filter(requester=user).exclude(status="closed")
         return base_qs.exclude(status="closed")
     if view == "ultimos_cerrados":
@@ -660,7 +660,7 @@ def filter_tickets(request):
     Parámetros: view, page (1-based), counts=1 (opcional, activa el cálculo de contadores).
     """
     view = request.GET.get("view")
-    if view == 'trash' and not _is_agent(request.user):
+    if view == 'trash' and not _can_view_all(request.user):
         return json_error('forbidden', 'Solo agentes pueden ver la papelera.', status=403)
     compute_counts = request.GET.get("counts", "0") == "1"
     counts_only = request.GET.get("counts_only", "0") == "1"
@@ -716,7 +716,7 @@ def filter_tickets(request):
         ranged_qs = _ticket_listing_queryset(request, view='mis_tickets')[0]
         _, _, start_dt, end_dt = _parse_filter_date_range(request.GET)
         in_range = Q(created_at__range=(start_dt, end_dt)) if _view_uses_date_range('mis_tickets', request.GET) else Q()
-        mine = Q(assignee=request.user) if _is_agent(request.user) else Q()
+        mine = Q(assignee=request.user) if _can_view_all(request.user) else Q()
 
         # Query 1: aggregate condicional — una sola pasada sobre la tabla base
         # cubre todos los contadores basados en status/type/channel/service/assignee.
@@ -789,7 +789,7 @@ def filter_tickets(request):
             ).count()
 
         sus_no_cerrados_count = (
-            (queue_qs.exclude(status='closed').count() if not _is_agent(request.user)
+            (queue_qs.exclude(status='closed').count() if not _can_view_all(request.user)
              else _user_agg['sus_no_cerrados_agent'])
         )
 
@@ -827,7 +827,7 @@ def filter_tickets(request):
             "sla_at_risk":        n_sla_at_risk,
         }
 
-    if filtros and _is_agent(request.user):
+    if filtros and _can_view_all(request.user):
         trash_qs = _ticket_listing_queryset(request, view='trash')[0]
         filtros = {**filtros, 'trash': trash_qs.count()}
 
@@ -1160,7 +1160,7 @@ def tickets_export_csv(request):
     import csv
     from django.http import StreamingHttpResponse
 
-    if request.GET.get('view') == 'trash' and not _is_agent(request.user):
+    if request.GET.get('view') == 'trash' and not _can_view_all(request.user):
         return json_error('forbidden', 'Solo agentes pueden ver la papelera.', status=403)
     qs, metadata = _ticket_export_queryset(request)
 
@@ -1199,7 +1199,7 @@ def tickets_export_pdf(request):
     """Exporta el mismo conjunto del CSV como fichas de tickets paginadas."""
     from .services.ticket_exports import build_tickets_pdf
 
-    if request.GET.get('view') == 'trash' and not _is_agent(request.user):
+    if request.GET.get('view') == 'trash' and not _can_view_all(request.user):
         return json_error('forbidden', 'Solo agentes pueden ver la papelera.', status=403)
     qs, metadata = _ticket_export_queryset(request)
     pdf_bytes = build_tickets_pdf(qs.iterator(chunk_size=500), metadata)
@@ -1211,7 +1211,7 @@ def tickets_export_pdf(request):
 
 @api_login_required
 def filter_customers(request):
-    if not _is_agent(request.user) and not _is_admin(request.user):
+    if not _can_view_all(request.user) and not _is_admin(request.user):
          return JsonResponse({"error": "No permission"}, status=403)
 
     view = request.GET.get("view")
@@ -1288,7 +1288,7 @@ def filter_customers(request):
 
 @login_required
 def customer_profile(request):
-    if not _is_agent(request.user) and not _is_admin(request.user):
+    if not _can_view_all(request.user) and not _is_admin(request.user):
         return render(request, "tickets/403.html", {"error": "No tienes permisos para ver este perfil."}, status=403)
     customer_id = request.GET.get("id")
     customer = get_object_or_404(User, id=customer_id)
@@ -1310,7 +1310,7 @@ def tags_api(request):
 
 @login_required
 def customers_list(request):
-    if not _is_agent(request.user) and not _is_admin(request.user):
+    if not _can_view_all(request.user) and not _is_admin(request.user):
          return render(request, "tickets/403.html", {"error": "No tienes permisos para ver clientes."}, status=403)
 
     role_qs = Role.objects.all().order_by('role_name')
@@ -1336,7 +1336,7 @@ def customers_list(request):
 
 @login_required
 def reporting(request):
-    if not _is_agent(request.user) and not _is_admin(request.user):
+    if not _can_view_all(request.user) and not _is_admin(request.user):
         return render(request, "tickets/403.html", {"error": "No tienes permisos para ver los reportes."}, status=403)
     agents = [
         user for user in User.objects.filter(is_active=True).select_related('role').order_by('name')
@@ -1382,7 +1382,7 @@ def _reporting_cache_set(key, payload, timeout=60):
 @api_login_required
 def reporting_data(request):
     """KPIs, series y distribuciones por entidad para /reporting/."""
-    if not _is_agent(request.user) and not _is_admin(request.user):
+    if not _can_view_all(request.user) and not _is_admin(request.user):
         return json_error('forbidden', 'No tienes permisos para ver los reportes.', status=403)
 
     section = (request.GET.get('section') or '').strip()
@@ -1433,7 +1433,7 @@ def reporting_export_csv(request):
     import csv
     from django.http import StreamingHttpResponse
 
-    if not _is_agent(request.user) and not _is_admin(request.user):
+    if not _can_view_all(request.user) and not _is_admin(request.user):
         return json_error('forbidden', 'No tienes permisos para exportar.', status=403)
 
     from .services.reporting_metrics import ReportFilters
@@ -1700,7 +1700,7 @@ def users_search_api(request):
     page_size = 30
 
     qs = User.objects.filter(is_active=True).only('id', 'name', 'email').order_by('name')
-    if not _is_agent(request.user) and not _is_admin(request.user):
+    if not _can_view_all(request.user) and not _is_admin(request.user):
         qs = qs.filter(id=request.user.id)
     if q:
         qs = qs.filter(Q(name__icontains=q) | Q(email__icontains=q))
@@ -1743,6 +1743,12 @@ def _is_admin(user):
     return permission_is_admin(user)
 
 
+def _can_view_all(user):
+    """Lectura de todo: agentes y el rol de solo lectura (#21378). Escribir sigue
+    exigiendo _is_agent."""
+    return can_view_all_tickets(user)
+
+
 @login_required
 def legacy_settings_redirect(request):
     """Keep old bookmarks useful without restoring the removed settings screen."""
@@ -1771,6 +1777,9 @@ def create_ticket(request):
         return redirect(url)
 
     # GET .
+    if not (id_param and id_param.isdigit()) and is_readonly(request.user):
+        return render(request, "tickets/403.html",
+                      {"error": "Tu rol es de solo lectura: no puedes crear tickets."}, status=403)
     # Gate: end users only see tickets they are involved in (requester / cc / created_by).
     # Otherwise their tab opens and renders, but the JS XHR /api/tickets/<id>/ fails with
     # 403 and form fields stay empty — which the user perceives as "ticket viewing error".
@@ -1830,7 +1839,7 @@ def create_ticket(request):
         'deleted': 'eliminación', 'restored': 'restauración',
     }
     if ticket_obj:
-        if _is_agent(request.user):
+        if _can_view_all(request.user):
             comments_list = list(
                 ticket_obj.comment_set.select_related('user', 'user__role').prefetch_related('attachment_set').order_by('created_at')
             )
@@ -1875,7 +1884,8 @@ def create_ticket(request):
         'ticket': ticket_obj,
         'ticket_locked': bool(ticket_obj and (ticket_obj.is_deleted or ticket_obj.status == 'closed')),
         'feed': feed,
-        'can_use_internal': _is_agent(request.user),
+        'can_use_internal': _can_view_all(request.user),
+        'can_edit': _is_agent(request.user),
         'user_timeline': user_timeline,
         'ticket_satisfaction': ticket_satisfaction,
         'current_user_id': request.user.id,
@@ -2092,7 +2102,7 @@ def ticket_live(request, ticket_id):
         after = 0
 
     visible = ticket.comment_set.all()
-    if not _is_agent(request.user):
+    if not _can_view_all(request.user):
         visible = visible.filter(is_public=True)
 
     new_ids = set(visible.filter(id__gt=after).values_list('id', flat=True))
@@ -2193,7 +2203,7 @@ def recent_activity_api(request):
     last_public = Comment.objects.filter(
         ticket=OuterRef("pk"), is_public=True,
     ).order_by("-created_at", "-id")
-    if _is_agent(request.user):
+    if _can_view_all(request.user):
         base = base.filter(assignee=request.user)
     else:
         base = base.filter(Q(requester=request.user) | Q(ccs=request.user)).distinct()
@@ -2203,7 +2213,7 @@ def recent_activity_api(request):
         last_comment_user=Subquery(last_public.values("user_id")[:1]),
     ).filter(last_comment_at__gte=recent_cutoff)
 
-    if _is_agent(request.user):
+    if _can_view_all(request.user):
         # La última palabra es del cliente: se excluye a la plantilla entera,
         # no solo a uno mismo, para que la respuesta de un compañero tampoco
         # cuente como pendiente de contestar.
@@ -2430,7 +2440,7 @@ def global_search(request):
 
     ticket_qs = (
         Ticket.objects.filter(merged_into__isnull=True, is_deleted=False)
-        if _is_agent(request.user) else
+        if _can_view_all(request.user) else
         Ticket.objects.filter(merged_into__isnull=True, is_deleted=False)
         .filter(Q(requester=request.user) | Q(ccs=request.user) | Q(created_by=request.user))
         .distinct()
@@ -2481,7 +2491,7 @@ def global_search(request):
     } for t in tickets]
 
     # Users (agents/admins only)
-    if _is_agent(request.user):
+    if _can_view_all(request.user):
         users = list(
             User.objects.filter(
                 Q(name__icontains=q) |
@@ -2794,7 +2804,8 @@ def admin_groups_api(request):
 @_admin_required
 def admin_roles_api(request):
     """CRUD de roles (solo admin)."""
-    _PROTECTED_ROLES = {'admin', 'administrator', 'administrador', 'end user', 'end-user'}
+    # Los permisos dependen del nombre: renombrar uno de estos los rompería.
+    _PROTECTED_ROLES = {'admin', 'administrator', 'administrador', 'end user', 'end-user', 'solo lectura'}
 
     if request.method == 'GET':
         data = [

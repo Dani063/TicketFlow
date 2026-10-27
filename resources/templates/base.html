@@ -69,6 +69,8 @@
         });
     </script>
     <script>
+    // El rol de solo lectura no crea tickets (#21378).
+    window.TF_CAN_CREATE_TICKETS = {{ tf_readonly|yesno:"false,true" }};
     window.urls = {
       create_ticket: "{% url 'create_ticket' %}",
       tickets_list: "{% url 'tickets_list' %}",
@@ -96,13 +98,13 @@
     <script src="{% static 'tickets/toast.js' %}?v=s4.7"></script>
     <script src="{% static 'tickets/dialog.js' %}?v=s4.7"></script>
     <script src="{% static 'tickets/tabs.js' %}?v=s7.4"></script>
-    <script src="{% static 'tickets/theme.js' %}?v=s5.8"></script>
+    <script src="{% static 'tickets/theme.js' %}?v=s5.9"></script>
     <!-- create_ticket.js loaded globally so initTicketPane is available even
          when the user navigates Home → ticket via SPA (no full page reload). -->
     <script src="{% static 'tickets/attachments.js' %}?v=s7.0"></script>
     <script src="{% static 'tickets/merge_review.js' %}?v=s1.0"></script>
     <script src="{% static 'tickets/quick_user.js' %}?v=s1.1"></script>
-    <script src="{% static 'tickets/create_ticket.js' %}?v=s9.3"></script>
+    <script src="{% static 'tickets/create_ticket.js' %}?v=s9.4"></script>
     <script src="{% static 'tickets/ticket_trash.js' %}?v=s1.0"></script>
     <script src="{% static 'tickets/presence.js' %}?v=s1.0"></script>
     <script src="{% static 'tickets/ai_reply.js' %}?v=s4.8"></script>

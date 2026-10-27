@@ -204,6 +204,7 @@
 
             // "c": create ticket
             if (e.key === 'c' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                if (window.TF_CAN_CREATE_TICKETS === false) return;
                 const url = (window.urls && window.urls.create_ticket) || '/tickets/create/';
                 if (window.Tabs && typeof window.Tabs.addTab === 'function') {
                     window.Tabs.addTab('Nuevo ticket', url);

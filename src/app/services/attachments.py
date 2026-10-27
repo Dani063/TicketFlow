@@ -30,7 +30,7 @@ from django.urls import reverse
 
 from app.api import APIValidationError
 from app.models import Attachment, AttachmentDraft, AttachmentRequest, Ticket, User
-from app.permissions import can_view_ticket, is_agent
+from app.permissions import can_view_all_tickets, can_view_ticket, is_readonly
 
 
 _SAFE_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
@@ -198,7 +198,7 @@ class AttachmentService:
             return False
         if attachment.comment_id:
             comment = attachment.comment
-            if comment.ticket_id != attachment.ticket_id or (not comment.is_public and not is_agent(user)):
+            if comment.ticket_id != attachment.ticket_id or (not comment.is_public and not can_view_all_tickets(user)):
                 return False
         elif attachment.uploaded_by_id != user.id:
             return False
@@ -365,6 +365,8 @@ class AttachmentService:
     @staticmethod
     @retry_attachment_mutation
     def upload(uploaded, user, ticket=None, draft_key=None, upload_key=None):
+        if is_readonly(user):
+            raise APIValidationError('forbidden', 'Tu rol es de solo lectura.', status=403)
         if ticket is not None and draft_key is not None:
             raise APIValidationError('invalid_upload_scope', 'Indica ticket o borrador, no ambos.', status=400)
         draft_key = AttachmentService.parse_uuid(draft_key, 'draft_key', required=ticket is None)

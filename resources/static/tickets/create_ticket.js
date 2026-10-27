@@ -491,8 +491,11 @@ window.initTicketPane = function (root, ctx) {
         if (ev) { ev.preventDefault(); ev.stopPropagation(); }
         if (submissionBusy) return;
         if (!ctx.ticketId) return createTicketWithAttachments();
-        if (rootEl.querySelector('#ticket-form')?.dataset.locked) {
-            window.toast.warning('El ticket está cerrado y ya no admite cambios.');
+        const lock = rootEl.querySelector('#ticket-form')?.dataset.locked;
+        if (lock) {
+            window.toast.warning(lock === 'readonly'
+                ? 'Tu rol es de solo lectura: no puedes modificar el ticket.'
+                : 'El ticket está cerrado y ya no admite cambios.');
             return;
         }
         if (!attachmentsReady()) return;
