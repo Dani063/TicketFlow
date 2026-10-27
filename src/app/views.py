@@ -290,7 +290,7 @@ def _attach_last_comments(ticket_list):
     for t in ticket_list:
         lc = lc_map.get(t.id)
         t.lc_author   = lc.user.name if lc and lc.user else ''
-        t.lc_date     = lc.created_at.strftime('%d/%m/%Y %H:%M') if lc else ''
+        t.lc_date     = timezone.localtime(lc.created_at).strftime('%d/%m/%Y %H:%M') if lc else ''
         t.lc_body     = (lc.content or '')[:300] if lc else ''
         t.lc_internal = bool(lc and not lc.is_public)
 
@@ -1019,7 +1019,7 @@ def filter_tickets(request):
             and _payload_now < next_due <= _payload_now + _risk_window
         )
         return {
-            "next_due": next_due.strftime("%d/%m/%Y %H:%M") if next_due else None,
+            "next_due": timezone.localtime(next_due).strftime("%d/%m/%Y %H:%M") if next_due else None,
             "breached": breached,
             "at_risk": at_risk,
         }
@@ -1031,7 +1031,7 @@ def filter_tickets(request):
             "id": t.id,
             "subject": t.subject,
             "requester": t.requester.name if t.requester else "-",
-            "updated_at": t.updated_at.strftime("%d/%m/%Y %H:%M"),
+            "updated_at": timezone.localtime(t.updated_at).strftime("%d/%m/%Y %H:%M"),
             "service": t.service or "-",
             "assignee": t.assignee.name if t.assignee else "-",
             "status": t.status,
@@ -1045,7 +1045,7 @@ def filter_tickets(request):
             "group_value": _group_value(t),
             "last_comment": {
                 "author": lc.user.name if lc and lc.user else "",
-                "date": lc.created_at.strftime("%d/%m/%Y %H:%M") if lc else "",
+                "date": timezone.localtime(lc.created_at).strftime("%d/%m/%Y %H:%M") if lc else "",
                 "body": (lc.content or "")[:300] if lc else "",
                 "is_internal": bool(lc and not lc.is_public),
             } if lc else None,
@@ -1251,7 +1251,7 @@ def filter_customers(request):
             "name": u.name,
             "email": u.email,
             "status": "Suspendido" if (u.group and u.group.group_name == "Suspended") else "Activo",
-            "created_at": u.created_at.strftime("%d/%m/%Y %H:%M"),
+            "created_at": timezone.localtime(u.created_at).strftime("%d/%m/%Y %H:%M"),
             "role": u.role.role_name if u.role else "-",
             "group": u.group.group_name if u.group else "-",
         }
@@ -1470,8 +1470,8 @@ def reporting_export_csv(request):
                 t.channel or '',
                 t.requester.name if t.requester else '',
                 t.assignee.name if t.assignee else '',
-                t.created_at.strftime('%d/%m/%Y %H:%M') if t.created_at else '',
-                t.closed_at.strftime('%d/%m/%Y %H:%M') if t.closed_at else '',
+                timezone.localtime(t.created_at).strftime('%d/%m/%Y %H:%M') if t.created_at else '',
+                timezone.localtime(t.closed_at).strftime('%d/%m/%Y %H:%M') if t.closed_at else '',
                 {True: 'si', False: 'no'}.get(t.first_response_met, ''),
                 'si' if t.sla_breached_at else 'no',
                 t.satisfaction or '',
@@ -1802,7 +1802,7 @@ def create_ticket(request):
                 'zendesk_id': t.zendesk_id,
                 'subject': t.subject,
                 'status': t.status,
-                'updated_at': t.updated_at.strftime('%d/%m/%Y %H:%M'),
+                'updated_at': timezone.localtime(t.updated_at).strftime('%d/%m/%Y %H:%M'),
                 'description': desc_snippet,
                 'last_comment': snippet,
             })
@@ -1984,7 +1984,7 @@ def _comment_payload(comment, ticket):
             'tickets/_conversation_body.html', {'conversation': comment.conversation},
         ),
         'speaker_kind': comment.speaker_kind,
-        'created_at': comment.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+        'created_at': timezone.localtime(comment.created_at).strftime('%Y-%m-%d %H:%M:%S'),
         'created_at_iso': comment.created_at.isoformat(),
         'ticket_id': ticket.id,
         'user_id': author.id if author else None,

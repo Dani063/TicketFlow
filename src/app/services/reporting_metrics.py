@@ -2160,7 +2160,7 @@ def build_legacy_overview(brand_id, date_from, date_to, start_dt, end_dt):
             'subject': t.subject,
             'status': t.status,
             'assignee': t.assignee.name if t.assignee else None,
-            'created': t.created_at.strftime('%Y-%m-%d') if t.created_at else None,
+            'created': timezone.localtime(t.created_at).strftime('%Y-%m-%d') if t.created_at else None,
             'age_days': (timezone.now() - t.created_at).days if t.created_at else None,
         }
         for t in live.filter(status__in=('open', 'pending'))

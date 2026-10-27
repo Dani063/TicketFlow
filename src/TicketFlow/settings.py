@@ -353,7 +353,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/2.1/topics/i18n/
 LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+# Hora española en pantallas, exportaciones y correos. En BBDD se sigue
+# guardando en UTC (USE_TZ); la conversión se hace al mostrar.
+TIME_ZONE = 'Europe/Madrid'
 USE_I18N = True
 USE_L10N = True
 USE_TZ = True

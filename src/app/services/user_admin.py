@@ -3,6 +3,7 @@
 import re
 
 from django.db.models import Q
+from django.utils import timezone
 
 from app.api import APIValidationError
 from app.models import Comment, Group, Role, Ticket, User
@@ -25,7 +26,7 @@ class UserAdminService:
             'group_id': u.group_id,
             'group_name': u.group.group_name if u.group else None,
             'is_active': bool(u.is_active),
-            'created_at': u.created_at.strftime('%d/%m/%Y') if u.created_at else '',
+            'created_at': timezone.localtime(u.created_at).strftime('%d/%m/%Y') if u.created_at else '',
         }
 
     @staticmethod

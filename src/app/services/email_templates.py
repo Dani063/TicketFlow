@@ -2,6 +2,7 @@
 
 from django.template import engines
 from django.utils.html import escape, linebreaks, strip_tags
+from django.utils import timezone
 
 from app.constants import normalize_language
 from app.models import ResponseTemplate
@@ -89,7 +90,7 @@ class ResponseTemplateService:
             # El cliente final no accede a la aplicacion interna. El correo le
             # devuelve al centro publico y la conversacion continua respondiendo.
             "ticket_url": f"{base_url}/help/{center.slug}/{locale}/" if base_url and center else "",
-            "created_at": ticket.created_at.strftime("%d/%m/%Y %H:%M") if ticket.created_at else "",
+            "created_at": timezone.localtime(ticket.created_at).strftime("%d/%m/%Y %H:%M") if ticket.created_at else "",
         }
 
     CLOSING_NOTICE = {
@@ -144,7 +145,7 @@ class ResponseTemplateService:
             "agent_name": comment.user.name if comment.user_id and comment.user else "",
             "reply_html": reply_html,
             "reply_text": reply_text,
-            "responded_at": comment.created_at.strftime("%d/%m/%Y %H:%M") if comment.created_at else "",
+            "responded_at": timezone.localtime(comment.created_at).strftime("%d/%m/%Y %H:%M") if comment.created_at else "",
         })
         return context
 
