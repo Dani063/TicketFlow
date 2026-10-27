@@ -491,7 +491,8 @@ class MailboxSweep:
                                    self.mailbox, log_id(row.message_id))
                     return
             attachments = []
-            if message.get('hasAttachments') and _sender_is_valid(message):
+            has_inline = 'cid:' in (message.get('body', {}).get('content') or '').lower()
+            if (message.get('hasAttachments') or has_inline) and _sender_is_valid(message):
                 attachments = msgraph_mail.fetch_attachments(self.mailbox, message['id'], self.headers)
             self.renew_lease()
             row.payload = message

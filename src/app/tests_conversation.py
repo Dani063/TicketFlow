@@ -161,6 +161,14 @@ class ConversationTests(SimpleTestCase):
         code = present_comment(comment(html_body='<pre>if ok:\n    run()\n\n    done()</pre>'))
         self.assertIn('\n    run()', code['html'])
 
+    def test_empty_outlook_blocks_keep_the_blank_line_between_paragraphs(self):
+        for source, expected in [
+            ('<div>Primero</div><div><br></div><div>Segundo</div>', '<div>Primero</div><br><div>Segundo</div>'),
+            ('<p>Primero</p><p>&nbsp;</p><p>Segundo</p>', '<p>Primero</p><br><p>Segundo</p>'),
+        ]:
+            with self.subTest(source=source):
+                self.assertEqual(present_comment(comment(html_body=source))['html'], expected)
+
     def test_plain_text_links_remain_clickable(self):
         result = present_comment(comment('Consulta https://example.test/report o escribe a a@example.test'))
         self.assertIn('href="https://example.test/report"', result['html'])

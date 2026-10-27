@@ -171,6 +171,8 @@ class Document(HTMLParser):
             if tag not in KEEP:
                 return body
             if tag not in VOID | {'td', 'th'} and not re.sub(r'<[^>]+>|\s|&nbsp;', '', body) and '<img' not in body:
+                if tag in {'p', 'div'}:
+                    return body if '<br>' in body else '<br>'
                 return ''
             # Solo semántica: las dimensiones y fuentes del correo no gobiernan la UI.
             attrs = ''

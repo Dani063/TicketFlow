@@ -604,7 +604,7 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 .msg-body p { margin: 0 0 6px; }
 .msg-body p:last-child { margin-bottom: 0; }
 .msg-body div { margin-bottom: 2px; }
-.msg-body div:empty { display: none; }
+.msg-body div:empty { min-height: 1em; }
 .msg-body a { color: #5b67ca; text-decoration: underline; }
 .msg-body img { max-width: 100%; border-radius: 4px; height: auto; }
 .msg-body table { font-size: 12px; max-width: 100%; border-collapse: collapse; }
@@ -619,7 +619,7 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 }
 .msg-body .email-html p { margin: 0 0 6px; }
 .msg-body .email-html div { margin-bottom: 3px; }
-.msg-body .email-html div:empty { display: none; }
+.msg-body .email-html div:empty { min-height: 1em; }
 .msg-body .email-html table {
     border-collapse: collapse;
     max-width: 100%;
@@ -678,7 +678,7 @@ a.msg-author:hover { color: #5b67ca; text-decoration: underline; }
 .msg-body .conversation-text pre,
 .msg-body .conversation-text code { font-family: var(--font-mono, monospace); }
 .msg-body .conversation-text p { margin: 0 0 .65em; }
-.msg-body .conversation-text div { margin: 0; }
+.msg-body .conversation-text div { margin: 0 0 .35em; }
 .msg-body .conversation-text > :first-child { margin-top: 0; }
 .msg-body .conversation-text > :last-child { margin-bottom: 0; }
 .msg-body .conversation-text blockquote,
