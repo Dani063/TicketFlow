@@ -25,6 +25,7 @@
     let _fromDate    = '';
     let _toDate      = '';
     let _relativeDays = null;
+    let _dateRangeApplied = true;
     let _lastExactTotal = null;
     let _selectedIds = new Set();
     let _lastRenderedCount = 0;
@@ -37,6 +38,7 @@
         twitter: 'Twitter', twitter_dm: 'Twitter DM', twitter_like: 'Twitter Like', internal: 'Interno',
     };
     function channelLabel(c) { return CHANNEL_LABELS[c] || c || '-'; }
+    const STATUS_LABELS = { open: 'Open', pending: 'Pending', on_hold: 'On-hold', resolved: 'Resolved', closed: 'Closed' };
 
     function slaBadge(sla) {
         if (!sla) return '-';
@@ -108,7 +110,8 @@
         const totalLabel = Number.isFinite(_lastExactTotal)
             ? `${_lastExactTotal} ticket${_lastExactTotal === 1 ? '' : 's'}`
             : 'Calculando tickets';
-        summary.textContent = `${totalLabel} · ${brandLabel} · ${viewLabel} · ${_fromDate} → ${_toDate}`;
+        const dates = _dateRangeApplied ? `${_fromDate} → ${_toDate}` : 'Sin límite de fecha';
+        summary.textContent = `${totalLabel} · ${brandLabel} · ${viewLabel} · ${dates}`;
     }
 
     function getUrlParam(name) {
@@ -349,6 +352,10 @@
             if (_sortBy) url += `&sort_by=${_sortBy}&sort_dir=${_sortDir}`;
             const response = await fetch(url);
             const json = await response.json();
+            _dateRangeApplied = json.applied_filters?.date_range_applied !== false;
+            document.querySelectorAll('.tf-ticket-presets button, #ticketsFrom, #ticketsTo').forEach(el => {
+                el.disabled = !_dateRangeApplied;
+            });
             _lastRenderedCount = Array.isArray(json.tickets) ? json.tickets.length : 0;
 
             if (!json.tickets || json.tickets.length === 0) {
@@ -420,7 +427,7 @@
 
                     row.innerHTML = `
                       <td>${t.id}</td>
-                      <td><span class="status-dot status-${t.status}"></span></td>
+                      <td><span class="status-dot status-${t.status}" title="${STATUS_LABELS[t.status] || t.status}"></span></td>
                       <td>${t.requester}</td>
                       <td>${t.updated_at}</td>
                       <td>${t.service}</td>
@@ -1018,7 +1025,7 @@
 
     function _showCard(span, e) {
         const s = span.dataset;
-        _card.querySelector(".tpc-status").textContent = s.status;
+        _card.querySelector(".tpc-status").textContent = STATUS_LABELS[s.status] || s.status;
         _card.querySelector(".tpc-status").className = "tpc-status status-" + s.status;
         _card.querySelector(".tpc-subject").textContent = s.subject;
         _card.querySelector(".tpc-priority").textContent = s.priority ? "(" + s.priority + ")" : "";

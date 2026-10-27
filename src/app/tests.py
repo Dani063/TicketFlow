@@ -677,7 +677,7 @@ class BalancedUnresolvedTicketPaginationTests(_BaseFixture):
         agent.save(update_fields=["role"])
         return agent
 
-    def test_active_assignment_members_receive_equal_per_agent_pages(self):
+    def test_all_assignees_and_unassigned_tickets_are_paginated_without_omissions(self):
         agent_b = self._make_agent("Agent B", "agent-b@example.com")
         agent_c = self._make_agent("Agent C", "agent-c@example.com")
         outsider = self._make_agent("Agent Outside", "outside@example.com")
@@ -688,17 +688,17 @@ class BalancedUnresolvedTicketPaginationTests(_BaseFixture):
             AssignmentRuleMember.objects.create(rule=rule, user=agent, active=True)
         AssignmentRuleMember.objects.create(rule=rule, user=inactive_member, active=False)
 
-        expected_ids = {self.agent.name: [], agent_b.name: [], agent_c.name: []}
+        expected_ids = {a.name: [] for a in (self.agent, agent_b, agent_c, outsider, inactive_member)}
+        expected_ids['Sin asignar'] = []
         for agent, amount in ((self.agent, 8), (agent_b, 8), (agent_c, 1)):
             for index in range(amount):
                 ticket = self.make_ticket(subject=f"{agent.name} {index}", assignee=agent)
                 expected_ids[agent.name].append(ticket.id)
 
-        # Ninguno de estos tickets debe consumir filas del filtro balanceado.
-        self.make_ticket(subject="Fuera de regla 1", assignee=outsider)
-        self.make_ticket(subject="Fuera de regla 2", assignee=outsider)
-        self.make_ticket(subject="Miembro desactivado", assignee=inactive_member)
-        self.make_ticket(subject="Sin asignar", assignee=None)
+        for name, agent in [('Fuera de regla 1', outsider), ('Fuera de regla 2', outsider),
+                            ('Miembro desactivado', inactive_member), ('Sin asignar', None)]:
+            ticket = self.make_ticket(subject=name, assignee=agent)
+            expected_ids[agent.name if agent else 'Sin asignar'].append(ticket.id)
         self.make_ticket(subject="Tarea", assignee=self.agent, type="task")
         self.make_ticket(subject="Resolved", assignee=self.agent, status="resolved")
         self.make_ticket(subject="Closed", assignee=self.agent, status="closed")
@@ -709,48 +709,38 @@ class BalancedUnresolvedTicketPaginationTests(_BaseFixture):
 
         first = self.client.get(f"{endpoint}?{query}&page=1").json()
         second = self.client.get(f"{endpoint}?{query}&page=2").json()
+        third = self.client.get(f"{endpoint}?{query}&page=3").json()
 
-        self.assertEqual(first["pagination"]["total"], 17)
-        self.assertEqual(first["pagination"]["total_pages"], 2)
+        self.assertEqual(first["pagination"]["total"], 21)
+        self.assertEqual(first["pagination"]["total_pages"], 3)
         self.assertTrue(first["pagination"]["exact"])
         self.assertEqual(first["group_by"], "assignee")
         self.assertTrue(first["balanced_assignment"]["enabled"])
 
-        first_by_agent = {}
-        second_by_agent = {}
-        for row in first["tickets"]:
-            first_by_agent.setdefault(row["assignee"], []).append(row["id"])
-        for row in second["tickets"]:
-            second_by_agent.setdefault(row["assignee"], []).append(row["id"])
-
-        # C solo tiene un ticket; el resto de su cupo se redistribuye A/B.
-        self.assertEqual({name: len(ids) for name, ids in first_by_agent.items()}, {
-            "Agent": 5, "Agent B": 4, "Agent C": 1,
-        })
-        self.assertEqual({name: len(ids) for name, ids in second_by_agent.items()}, {
-            "Agent": 3, "Agent B": 4,
-        })
-        self.assertEqual(first_by_agent["Agent"], expected_ids["Agent"][:5])
-        self.assertEqual(second_by_agent["Agent"], expected_ids["Agent"][5:])
-        self.assertEqual(first_by_agent["Agent B"], expected_ids["Agent B"][:4])
-        self.assertEqual(second_by_agent["Agent B"], expected_ids["Agent B"][4:])
+        actual = {}
+        for page in (first, second, third):
+            for row in page['tickets']:
+                actual.setdefault(row['group_value'], []).append(row['id'])
+        self.assertEqual(actual, expected_ids)
+        self.assertEqual(len(first['tickets']), 10)
+        self.assertEqual(len(second['tickets']), 10)
+        self.assertEqual(len(third['tickets']), 1)
 
         exact_total = self.client.get(
             f"{endpoint}?view=all_unsolved_no_tareas&page_size=10&total_only=1"
         ).json()
-        self.assertEqual(exact_total["pagination"]["total"], 17)
+        self.assertEqual(exact_total["pagination"]["total"], 21)
 
         counts = self.client.get(
             f"{endpoint}?counts=1&counts_only=1&force_counts=1&page_size=10"
         ).json()["filtros"]
-        self.assertEqual(counts["all_unsolved_no_tareas"], 17)
+        self.assertEqual(counts["all_unsolved_no_tareas"], 21)
 
-        # El cambio está encapsulado: la otra vista no resuelta sigue usando su
-        # conjunto global y conserva los tickets fuera de las reglas.
+        # La vista personal solo incluye el trabajo asignado al agente actual.
         global_unsolved = self.client.get(
             f"{endpoint}?view=unsolved_no_tareas&page_size=10&total_only=1"
         ).json()
-        self.assertEqual(global_unsolved["pagination"]["total"], 21)
+        self.assertEqual(global_unsolved["pagination"]["total"], 8)
 
     def test_more_agents_than_rows_continue_on_the_next_page(self):
         rule = AssignmentRule.objects.create(name="Many agents", active=True)
