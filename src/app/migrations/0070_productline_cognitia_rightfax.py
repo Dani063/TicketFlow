@@ -22,5 +22,5 @@ def unseed_products(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-    dependencies = [('app', '0067_inbound_ids_case_sensitive')]
+    dependencies = [('app', '0069_seed_on_hold_templates')]
     operations = [migrations.RunPython(seed_products, unseed_products)]

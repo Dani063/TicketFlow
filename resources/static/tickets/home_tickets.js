@@ -209,7 +209,7 @@
     }
 
     function buildRow(t) {
-        const isClosed = (t.status === 'closed' || t.status === 'resolved');
+        const isClosed = (t.status === 'closed' || t.status === 'resolved' || t.status === 'on_hold');
         const row = document.createElement('tr');
         row.dataset.ticketId = t.id;
         row.dataset.status = t.status;

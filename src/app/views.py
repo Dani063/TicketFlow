@@ -38,6 +38,8 @@ from .services.conversation import prepare_comments
 from .services.assignment import AssignmentService
 from .services.attachments import AttachmentService
 from .services.comments import CommentService
+# «No resuelto» = fuera de estos estados; on_hold cuenta como resuelto (#21384).
+from .services.ticket_status import SOLVED_STATUSES
 from .services.merge import MergeService
 from .services.notifications import NotificationService
 from .services.satisfaction import SatisfactionService
@@ -184,9 +186,9 @@ _CUSTOMER_SORT_FIELDS = {
 
 _PROFILE_STATUS_FILTERS = {
     'all':     None,
-    'open':    {'exclude': ['closed', 'resolved']},
+    'open':    {'exclude': list(SOLVED_STATUSES)},
     'pending': {'filter': ['pending']},
-    'solved':  {'filter': ['closed', 'resolved']},
+    'solved':  {'filter': list(SOLVED_STATUSES)},
 }
 
 
@@ -485,10 +487,10 @@ def _tickets_for_view(base_qs, view, user):
             ).distinct()
         if view == "home_solventado":
             return mine.filter(
-                status__in=["closed", "resolved"], updated_at__gte=cutoff_60
+                status__in=SOLVED_STATUSES, updated_at__gte=cutoff_60
             )
         # home_all replica «Tus tickets no resueltos (sin tareas)».
-        return mine.exclude(status__in=["closed", "resolved"]).exclude(type='task')
+        return mine.exclude(status__in=SOLVED_STATUSES).exclude(type='task')
 
     if view == "mis_tickets":
         return base_qs
@@ -498,12 +500,12 @@ def _tickets_for_view(base_qs, view, user):
             created_at__gte=now - timedelta(days=30),
         )
     if view == "unsolved_no_tareas":
-        return _my_tickets_queryset(base_qs, user).filter(~Q(status__in=["closed", "resolved"]), ~Q(type="task"))
+        return _my_tickets_queryset(base_qs, user).filter(~Q(status__in=SOLVED_STATUSES), ~Q(type="task"))
     if view == "unassigned":
         return base_qs.filter(assignee__isnull=True)
     if view == "all_unsolved_no_tareas":
         return base_qs.filter(
-            ~Q(status__in=["closed", "resolved"]),
+            ~Q(status__in=SOLVED_STATUSES),
             ~Q(type="task"),
         )
     if view == "recently_updated":
@@ -515,7 +517,7 @@ def _tickets_for_view(base_qs, view, user):
     if view == "tareas":
         return base_qs.filter(type="task")
     if view == "unsolved_groups":
-        return base_qs.filter(~Q(status__in=["closed", "resolved"]), assignee__group=user.group)
+        return base_qs.filter(~Q(status__in=SOLVED_STATUSES), assignee__group=user.group)
     if view == "rated_last7":
         since = now - timedelta(days=7)
         rated_ids = SatisfactionRating.objects.filter(
@@ -543,7 +545,7 @@ def _tickets_for_view(base_qs, view, user):
     if view == "ultimos_cerrados":
         return base_qs.filter(status="closed")
     if view == "no_resueltos":
-        return base_qs.exclude(status__in=["resolved", "closed"])
+        return base_qs.exclude(status__in=SOLVED_STATUSES)
     if view == "twitter":
         return base_qs.filter(channel="twitter")
     if view == "twitter_dm":
@@ -561,10 +563,10 @@ def _tickets_for_view(base_qs, view, user):
     if view == "no_update_48h":
         return base_qs.filter(updated_at__lte=now - timedelta(hours=48))
     if view == "sla_breached":
-        return base_qs.filter(sla_breached_at__isnull=False).exclude(status__in=["closed", "resolved"])
+        return base_qs.filter(sla_breached_at__isnull=False).exclude(status__in=SOLVED_STATUSES)
     if view == "sla_at_risk":
         return SLAService.annotate_urgency(
-            base_qs.filter(sla_breached_at__isnull=True).exclude(status__in=["closed", "resolved"])
+            base_qs.filter(sla_breached_at__isnull=True).exclude(status__in=SOLVED_STATUSES)
         ).filter(
             sla_next_due__gt=now,
             sla_next_due__lte=now + timedelta(minutes=SLA_AT_RISK_WINDOW_MINUTES),
@@ -588,7 +590,7 @@ def _home_stats(user):
 
     cutoff_60  = timezone.now() - timedelta(days=60)
     solventado = tickets_qs.filter(
-        status__in=["closed", "resolved"],
+        status__in=SOLVED_STATUSES,
         updated_at__gte=cutoff_60,
     ).count()
 
@@ -596,7 +598,7 @@ def _home_stats(user):
     # /tickets/filter/?view=home_* con paginación y orden, igual que /tickets/.
     # Aquí solo hace falta el total para el encabezado, y el propio JS lo
     # refresca con el que devuelve la API en cada carga.
-    pendientes_count = tickets_qs.exclude(status__in=['closed', 'resolved']).exclude(type='task').count()
+    pendientes_count = tickets_qs.exclude(status__in=SOLVED_STATUSES).exclude(type='task').count()
 
     # Personal bien/mal: tickets del usuario, últimos 60 días
     user_ratings_60 = SatisfactionRating.objects.filter(
@@ -726,25 +728,25 @@ def filter_tickets(request):
             n_twitter_dm     = Count('id', filter=in_range & Q(channel='twitter_dm')),
             n_twitter_like   = Count('id', filter=in_range & Q(channel='twitter_like')),
             n_on_hold        = Count('id', filter=Q(status='on_hold')),
-            n_mine_unsolved  = Count('id', filter=mine & ~Q(status__in=['closed', 'resolved']) & ~Q(type='task')),
+            n_mine_unsolved  = Count('id', filter=mine & ~Q(status__in=SOLVED_STATUSES) & ~Q(type='task')),
             n_comuny         = Count(Case(When(service='internocomuny',  status='open', then=1), output_field=IntegerField())),
             n_ecomfax        = Count(Case(When(service='ecomfax',        status='open', then=1), output_field=IntegerField())),
             n_recordia       = Count(Case(When(service='recordia',       status='open', then=1), output_field=IntegerField())),
             n_unassigned     = Count(Case(When(assignee__isnull=True,    then=1), output_field=IntegerField())),
             n_unsolved_notarea = Count(Case(
-                When(~Q(status__in=['closed', 'resolved']) & ~Q(type='task'), then=1),
+                When(~Q(status__in=SOLVED_STATUSES) & ~Q(type='task'), then=1),
                 output_field=IntegerField()
             )),
-            n_no_resueltos   = Count('id', filter=~Q(status__in=['closed', 'resolved'])),
+            n_no_resueltos   = Count('id', filter=~Q(status__in=SOLVED_STATUSES)),
             n_sla_breached   = Count(Case(
-                When(Q(sla_breached_at__isnull=False) & ~Q(status__in=['closed', 'resolved']), then=1),
+                When(Q(sla_breached_at__isnull=False) & ~Q(status__in=SOLVED_STATUSES), then=1),
                 output_field=IntegerField()
             )),
         )
 
         # SLA en riesgo requiere la anotación sla_next_due — query propia pequeña.
         n_sla_at_risk = _ensure_urgency(
-            queue_qs.filter(sla_breached_at__isnull=True).exclude(status__in=['closed', 'resolved'])
+            queue_qs.filter(sla_breached_at__isnull=True).exclude(status__in=SOLVED_STATUSES)
         ).filter(
             sla_next_due__gt=_now,
             sla_next_due__lte=_now + timedelta(minutes=SLA_AT_RISK_WINDOW_MINUTES),
@@ -774,7 +776,7 @@ def filter_tickets(request):
         n_new_in_groups   = 0
         if _user_group:
             n_unsolved_groups = queue_qs.filter(
-                ~Q(status__in=['closed', 'resolved']),
+                ~Q(status__in=SOLVED_STATUSES),
                 assignee__group=_user_group,
             ).count()
             n_new_in_groups = queue_qs.filter(
@@ -1014,10 +1016,10 @@ def filter_tickets(request):
     def _sla_payload(t):
         dues = [d for d in (t.first_response_due_at, t.resolution_due_at) if d]
         next_due = min(dues) if dues else None
-        breached = bool(t.sla_breached_at) and t.status not in ('closed', 'resolved')
+        breached = bool(t.sla_breached_at) and t.status not in SOLVED_STATUSES
         at_risk = bool(
             next_due and not breached
-            and t.status not in ('closed', 'resolved')
+            and t.status not in SOLVED_STATUSES
             and _payload_now < next_due <= _payload_now + _risk_window
         )
         return {
@@ -1044,7 +1046,7 @@ def filter_tickets(request):
             "sla": _sla_payload(t),
             "satisfaction": getattr(t, 'satisfaction_score', None) or "",
             "description": (t.description or "")[:200],
-            "deleted_at": t.deleted_at.strftime('%d/%m/%Y %H:%M') if t.deleted_at else None,
+            "deleted_at": timezone.localtime(t.deleted_at).strftime('%d/%m/%Y %H:%M') if t.deleted_at else None,
             "deleted_by": (t.deleted_by.name or t.deleted_by.email) if view == 'trash' and t.deleted_by_id else None,
             "group_value": _group_value(t),
             "last_comment": {

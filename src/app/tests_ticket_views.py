@@ -52,11 +52,13 @@ class TicketViewConsistencyTests(TestCase):
         cc = self.ticket(assignee=self.other)
         cc.ccs.add(self.agent)
         self.ticket(is_deleted=True)
+        # on_hold es el cierre de los agentes y cuenta como resuelto (#21384).
         for view in ['home_all', 'unsolved_no_tareas']:
             payload = self.rows(view)
-            self.assertCountEqual([t['id'] for t in payload['tickets']], [old.id, hold.id])
+            self.assertCountEqual([t['id'] for t in payload['tickets']], [old.id])
+            self.assertNotIn(hold.id, [t['id'] for t in payload['tickets']])
             self.assertFalse(payload['applied_filters']['date_range_applied'])
-        self.assertEqual(self.client.get('/api/home-stats/').json()['pendientes_count'], 2)
+        self.assertEqual(self.client.get('/api/home-stats/').json()['pendientes_count'], 1)
 
     def test_queue_counts_rows_and_csv_ignore_creation_range_and_keep_brand(self):
         old = self.ticket(status='pending', service='ecomfax')
@@ -95,15 +97,15 @@ class TicketViewConsistencyTests(TestCase):
         self.assertEqual(payload['pagination']['total'], 3)
         self.assertEqual(next(t for t in payload['tickets'] if t['id'] == unassigned.id)['group_value'], 'Sin asignar')
 
-    def test_on_hold_is_unresolved_and_has_its_own_queue_and_counter(self):
+    def test_on_hold_counts_as_solved_and_has_its_own_queue_and_counter(self):
         hold = self.ticket(status='on_hold')
         self.ticket(status='resolved')
         self.ticket(status='closed')
         self.assertEqual([t['id'] for t in self.rows('espera')['tickets']], [hold.id])
-        self.assertEqual([t['id'] for t in self.rows('no_resueltos')['tickets']], [hold.id])
+        self.assertEqual(self.rows('no_resueltos')['tickets'], [])
         counts = self.client.get('/tickets/filter/', {'counts': 1, 'counts_only': 1, 'force_counts': 1}).json()['filtros']
         self.assertEqual(counts['espera'], 1)
-        self.assertEqual(counts['no_resueltos'], 1)
+        self.assertEqual(counts['no_resueltos'], 0)
 
     def test_end_user_personal_queue_keeps_requester_and_cc_visibility(self):
         own = self.ticket(assignee=self.other)
