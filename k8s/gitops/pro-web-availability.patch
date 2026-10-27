@@ -1,0 +1,69 @@
+diff --git a/PRO/Recordia/Manifests/TicketFlow.UI/deployment-web.yaml b/PRO/Recordia/Manifests/TicketFlow.UI/deployment-web.yaml
+index 5df38b9..082f1ec 100644
+--- a/PRO/Recordia/Manifests/TicketFlow.UI/deployment-web.yaml
++++ b/PRO/Recordia/Manifests/TicketFlow.UI/deployment-web.yaml
+@@ -10,7 +10,13 @@ metadata:
+     app.kubernetes.io/name: TicketFlow.UI.Web
+ spec:
+   revisionHistoryLimit: 3
+-  # replicas: 0
++  replicas: 2
++  minReadySeconds: 15
++  strategy:
++    type: RollingUpdate
++    rollingUpdate:
++      maxSurge: 1
++      maxUnavailable: 0
+   selector:
+     matchLabels:
+       app: TicketFlow.UI.Web
+@@ -24,11 +30,26 @@ spec:
+     spec:
+       nodeSelector:
+         layer: arm-application-rds-access
++      # La retirada de un nodo no debe llevarse las dos réplicas web.
++      affinity:
++        podAntiAffinity:
++          requiredDuringSchedulingIgnoredDuringExecution:
++            - labelSelector:
++                matchLabels:
++                  app: TicketFlow.UI.Web
++                  role: web
++              topologyKey: kubernetes.io/hostname
+       serviceAccountName: ticketflow-ui
++      terminationGracePeriodSeconds: 60
+       containers:
+         - name: ticketflow-ui
+           image: 679818922288.dkr.ecr.eu-west-1.amazonaws.com/recordia/ticketflow.ui:2.2.37
+           imagePullPolicy: Always
++          lifecycle:
++            preStop:
++              exec:
++                # Dar tiempo al balanceador a retirar el destino antes de SIGTERM.
++                command: ["sh", "-c", "sleep 20"]
+           resources:
+             limits:
+               memory: "800Mi"
+diff --git a/PRO/Recordia/Manifests/TicketFlow.UI/pdb-web.yaml b/PRO/Recordia/Manifests/TicketFlow.UI/pdb-web.yaml
+new file mode 100644
+index 0000000..b85587f
+--- /dev/null
++++ b/PRO/Recordia/Manifests/TicketFlow.UI/pdb-web.yaml
+@@ -0,0 +1,17 @@
++apiVersion: policy/v1
++kind: PodDisruptionBudget
++metadata:
++  name: ticketflow-ui-web
++  namespace: recordia
++  annotations:
++    app.kubernetes.io/description: "Conservar al menos una web disponible durante retiradas voluntarias de nodos."
++    # Instalar la protección antes del Job de migración y del cambio de réplicas.
++    argocd.argoproj.io/sync-wave: "-2"
++  labels:
++    app: TicketFlow.UI.Web
++spec:
++  minAvailable: 1
++  selector:
++    matchLabels:
++      app: TicketFlow.UI.Web
++      role: web

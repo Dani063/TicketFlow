@@ -1,0 +1,2 @@
+# Keep Git patches applicable to LF-normalized manifests on Windows.
+*.patch text eol=lf
