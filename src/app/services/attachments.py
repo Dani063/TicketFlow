@@ -206,6 +206,27 @@ class AttachmentService:
             return can_view_ticket(user, attachment.ticket)
         return attachment.comment_id is None and attachment.uploaded_by_id == user.id
 
+    INLINE_PREVIEW_RE = re.compile(r'/attachments/(\d+)/preview/')
+
+    @staticmethod
+    def mark_inline(comment, html_body):
+        """Marca como inline los adjuntos del comentario que aparecen dentro del texto.
+
+        El compositor inserta las imágenes pegadas en el HTML con su URL de vista
+        previa (#21525). Así no se repiten en la galería y el correo las lleva
+        dentro del cuerpo, referenciadas por su Content-ID.
+        """
+        referenced = {int(value) for value in AttachmentService.INLINE_PREVIEW_RE.findall(html_body or '')}
+        if not referenced:
+            return []
+        marked = []
+        for attachment in Attachment.objects.filter(comment=comment, id__in=referenced, is_inline=False):
+            attachment.is_inline = True
+            attachment.content_id = attachment.content_id or f'tf-att-{attachment.id}'
+            attachment.save(update_fields=['is_inline', 'content_id'])
+            marked.append(attachment.id)
+        return marked
+
     @staticmethod
     def metadata(attachment):
         """Pure metadata: no network, blob reads or remote URL signing during SSR."""

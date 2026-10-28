@@ -94,6 +94,7 @@ class CommentService:
 
         if attachments:
             Attachment.objects.filter(id__in=attachment_ids).update(comment=comment)
+            AttachmentService.mark_inline(comment, html_body)
 
         SLAService.record_first_response(ticket, actor, comment_is_public=final_is_public)
 

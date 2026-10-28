@@ -638,6 +638,46 @@
             pending.replaceChildren(summary, notice, list);
         }
         if (composer) composer.classList.add('tf-att-composer');
+
+        // Imágenes dentro del texto (#21525): se suben como cualquier adjunto y,
+        // al terminar, se insertan en el editor donde estaba el cursor en vez de
+        // quedarse en la lista. Siguen siendo adjuntos del comentario por debajo.
+        function editorQuill() {
+            return root.querySelector('#quill-editor')?.__quillComposer?.quill || null;
+        }
+        function previewPath(item) {
+            return '/attachments/' + encodeURIComponent(item.meta.id) + '/preview/';
+        }
+        function inEditor(item) {
+            const quill = editorQuill();
+            if (!quill || !item.meta.id) return false;
+            return Array.from(quill.root.querySelectorAll('img')).some(img => (img.getAttribute('src') || '').endsWith(previewPath(item)));
+        }
+        function counted(item) {
+            // Una imagen ya insertada solo cuenta mientras siga en el texto.
+            return !(item.inline && item.state === 'uploaded') || inEditor(item);
+        }
+        function insertInline(item) {
+            const quill = editorQuill();
+            if (!quill || !item.meta.preview_url) { item.inline = false; return; }
+            const length = quill.getLength();
+            let at = Math.min(Number.isInteger(item.insertAt) ? item.insertAt : length - 1, length - 1);
+            // La imagen va en su propia línea y se sigue escribiendo debajo, como
+            // al pegar una captura en Outlook o en Word.
+            let added = 2;
+            if (at > 0 && quill.getText(at - 1, 1) !== '\n') {
+                quill.insertText(at, '\n', 'user');
+                at += 1;
+                added += 1;
+            }
+            quill.insertEmbed(at, 'image', previewPath(item), 'user');
+            quill.insertText(at + 1, '\n', 'user');
+            quill.setSelection(at + 2, 0, 'user');
+            // Las siguientes imágenes de la misma tanda van detrás de esta.
+            items.forEach(other => {
+                if (other !== item && other.inline && other.state !== 'uploaded' && Number.isInteger(other.insertAt) && other.insertAt >= at - (added - 2)) other.insertAt += added;
+            });
+        }
         const originalAccept = input?.getAttribute('accept');
         if (input && extensions.length) input.setAttribute('accept', extensions.join(','));
 
@@ -676,6 +716,11 @@
 
         function updateCard(item) {
             const old = item.element;
+            if (item.inline && item.state === 'uploaded') {
+                old?.remove();
+                item.element = null;
+                return;
+            }
             const focused = old && old.contains(document.activeElement) ? document.activeElement.dataset.action : null;
             const view = makeCard(item, gallery);
             item.element = view.card;
@@ -722,14 +767,15 @@
         function changed(item) {
             if (disposed) return;
             if (item) updateCard(item);
-            const done = items.filter(entry => entry.state === 'uploaded').length;
-            summary.textContent = items.length
-                ? items.length + (items.length === 1 ? ' archivo · ' : ' archivos · ') + sizeLabel(totals()) + ' / ' + sizeLabel(limits.total) + ' · ' + done + ' de ' + items.length + ' listos'
+            const shown = items.filter(entry => !(entry.inline && entry.state === 'uploaded'));
+            const done = shown.filter(entry => entry.state === 'uploaded').length;
+            summary.textContent = shown.length
+                ? shown.length + (shown.length === 1 ? ' archivo · ' : ' archivos · ') + sizeLabel(totals()) + ' / ' + sizeLabel(limits.total) + ' · ' + done + ' de ' + shown.length + ' listos'
                 : '';
-            summary.hidden = !items.length;
-            list.hidden = !items.length;
+            summary.hidden = !shown.length;
+            list.hidden = !shown.length;
             notice.hidden = !noticeText;
-            pending?.classList.toggle('tf-att-has-files', !!items.length);
+            pending?.classList.toggle('tf-att-has-files', !!shown.length);
             emit('change', { instance: api, ready: api.ready(), ids: api.ids(), count: items.length, size: totals() });
         }
 
@@ -872,6 +918,7 @@
                 item.meta = meta;
                 item.state = 'uploaded';
                 item.error = '';
+                if (item.inline) insertInline(item);
                 finish();
             });
             xhr.addEventListener('error', () => fail('Error de conexión. Reintenta la subida.'));
@@ -891,8 +938,10 @@
             } catch (_) { fail('Error: no se pudo iniciar la subida. Reintenta.'); }
         }
 
-        function enqueue(files) {
+        function enqueue(files, inline) {
             if (disposed || locked) return;
+            const quill = inline ? editorQuill() : null;
+            let insertAt = quill ? (quill.getSelection()?.index ?? quill.getLength() - 1) : null;
             if (!pending) { report('No se encontró el área de adjuntos. Recarga la página.'); return; }
             const rejected = [];
             for (const file of files) {
@@ -904,6 +953,7 @@
                 if (totals() + file.size > limits.total) { rejected.push('El total no puede superar ' + sizeLabel(limits.total) + '.'); continue; }
                 const kind = localKind(file);
                 const item = {
+                    inline: !!quill && kind === 'image', insertAt: quill && kind === 'image' ? insertAt++ : null,
                     key: uuid(), draftKey, file, state: 'queued', attempted: false, published: false,
                     cancelRequested: false, xhr: null, loaded: 0, total: 0, error: '',
                     meta: metadata({ filename: file.name, size: file.size, file_type: file.type, preview_kind: kind }),
@@ -938,9 +988,9 @@
         }
 
         const api = {
-            hasFiles: () => items.length > 0,
+            hasFiles: () => items.some(counted),
             ready: () => items.every(item => item.state === 'uploaded' && !item.cancelRequested),
-            ids: () => items.filter(item => item.state === 'uploaded' && !item.cancelRequested).map(item => item.meta.id),
+            ids: () => items.filter(item => item.state === 'uploaded' && !item.cancelRequested && counted(item)).map(item => item.meta.id),
             get draftKey() { return draftKey; },
             clear() {
                 if (disposed) return false;
@@ -1013,7 +1063,7 @@
             const files = transferFiles(event.clipboardData);
             if (!files.length) return;
             stopFiles(event);
-            enqueue(files);
+            enqueue(files, true);
         }, true);
         listen(composer, 'dragenter', event => {
             if (!isFileDrag(event)) return;
@@ -1037,7 +1087,8 @@
             stopFiles(event);
             dragDepth = 0;
             composer.classList.remove('tf-att-dragover');
-            enqueue(transferFiles(event.dataTransfer));
+            // Soltar sobre el texto inserta las imágenes ahí; fuera, son adjuntos.
+            enqueue(transferFiles(event.dataTransfer), !!event.target.closest?.('.ql-editor'));
         }, true);
         listen(window, 'beforeunload', event => {
             if (!items.length) return;

@@ -354,11 +354,28 @@ class OutboundEmailService:
                     f"Los adjuntos superan el máximo de correo de {max_total // (1024 * 1024)} MB"
                 )
             result.append({
+                "id": attachment.id,
                 "name": attachment.original_name or f"attachment-{attachment.id}",
                 "content_type": attachment.file_type or "application/octet-stream",
                 "content": content,
+                "inline_cid": attachment.content_id if attachment.is_inline and attachment.content_id else "",
             })
         return result
+
+    @staticmethod
+    def _split_inline(log, attachments):
+        """(imágenes dentro del texto, adjuntos normales) para este correo.
+
+        Solo va en línea lo que el cuerpo referencia de verdad (#21525); un adjunto
+        marcado inline que el HTML ya no cita sale como adjunto normal.
+        """
+        html = (log.payload or {}).get("body_html") or ""
+        inline = [
+            item for item in attachments
+            if item.get("inline_cid") and f"/attachments/{item['id']}/preview/" in html
+        ]
+        regular = [item for item in attachments if item not in inline]
+        return inline, regular
 
     @staticmethod
     def _valid_cc_emails(emails, to_email):
@@ -413,8 +430,24 @@ class OutboundEmailService:
             message["References"] = " ".join(thread["references"])
         for name, value in extra_headers:
             message[name] = value
+        inline, attachments = OutboundEmailService._split_inline(log, attachments)
+        body_html = payload.get("body_html") or ""
+        for item in inline:
+            # Las imágenes del texto apuntan a la vista previa protegida de
+            # TicketFlow; en el correo se sustituye por su parte cid: (#21525).
+            body_html = body_html.replace(f"/attachments/{item['id']}/preview/", f"cid:{item['inline_cid']}")
         message.set_content(payload.get("body_text") or "")
-        message.add_alternative(payload.get("body_html") or "", subtype="html")
+        message.add_alternative(body_html, subtype="html")
+        if inline:
+            html_part = message.get_body(preferencelist=("html",))
+            for item in inline:
+                maintype, _, subtype = (item["content_type"] or "").partition("/")
+                if maintype != "image" or not subtype:
+                    maintype, subtype = "image", "png"
+                html_part.add_related(
+                    item["content"], maintype=maintype, subtype=subtype,
+                    cid=f"<{item['inline_cid']}>", filename=item["name"],
+                )
         for item in attachments:
             maintype, _, subtype = (item["content_type"] or "").partition("/")
             if not maintype or not subtype:
@@ -468,8 +501,11 @@ class OutboundEmailService:
         # sendMail admite 4 MB por petición y el MIME viaja en base64 (+33 %).
         mime_limit = getattr(settings, "GRAPH_SENDMAIL_MIME_MAX_BYTES", 2_900_000)
         if attachments and len(raw) > mime_limit:
+            # Las imágenes del texto viajan dentro del MIME del borrador (las cita
+            # el HTML); el resto se sube aparte.
+            inline, regular = OutboundEmailService._split_inline(log, attachments)
             OutboundEmailService._send_via_graph_draft(
-                brand, OutboundEmailService._mime(log, [], anti_loop), attachments, token,
+                brand, OutboundEmailService._mime(log, inline, anti_loop), regular, token,
             )
         else:
             response = requests.post(

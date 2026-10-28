@@ -49,7 +49,9 @@
             : (el, v) => { el.setAttribute('value', v); };
 
         const _getText = () => quill.getText().replace(/\n+$/, '');
-        const _isEmpty = () => _getText().trim().length === 0;
+        // Una imagen dentro del texto también es contenido aunque no haya letras (#21525).
+        const _hasImages = () => quill.getContents().ops.some(op => op.insert && op.insert.image);
+        const _isEmpty = () => _getText().trim().length === 0 && !_hasImages();
         const _getHtml = () => {
             if (_isEmpty()) return '';
             const temp = document.createElement('div');
