@@ -984,7 +984,9 @@
         const badge = document.querySelector(".notifications .badge");
         const bell = document.querySelector(".navbar-right .notifications");
         if (!badge) return;
-        badge.textContent = count;
+        badge.textContent = count > 99 ? '99+' : count;
+        if (bell) bell.setAttribute('aria-label', `Notificaciones: ${count} sin leer`);
+        badge.title = `${count} sin leer`;
         badge.style.display = count > 0 ? "inline-block" : "none";
         if (bell) {
             const previo = _lastUnread === null ? count : _lastUnread;
@@ -1026,6 +1028,7 @@
             const data = await res.json();
             if (data.cleared) {
                 setBadge(unreadFrom(data));
+
                 refreshUpdates();
             }
         } catch (err) {
@@ -1178,6 +1181,13 @@
                 notifList.innerHTML = "";
                 setBadge(unreadFrom(data));
 
+                const readAll = document.getElementById('readAllNotifications');
+                if (readAll) readAll.disabled = unreadFrom(data) === 0;
+                const summary = document.getElementById('notificationsSummary');
+                if (summary) summary.textContent = unreadFrom(data) > data.notifications.length
+                    ? `Mostrando las ${data.notifications.length} últimas de ${unreadFrom(data)}`
+                    : `${unreadFrom(data)} sin leer`;
+
                 if (!data.notifications.length) {
                     notifList.innerHTML = "<li class='notif-empty'><i class='far fa-bell' aria-hidden='true'></i>" +
                         "<strong>Estás al día</strong><span>No hay notificaciones nuevas.</span></li>";
@@ -1221,6 +1231,30 @@
 
         // Delegación global: funciona aunque la navbar se re-renderice
         document.addEventListener('click', (e) => {
+            const readAll = e.target.closest('#readAllNotifications');
+            if (readAll) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (readAll.disabled) return;
+                readAll.disabled = true;
+                void (async () => {
+                    try {
+                        const response = await fetch('/api/notifications/read-all/', {
+                            method: 'POST', headers: { 'X-CSRFToken': getCsrfToken() },
+                        });
+                        if (!response.ok) throw new Error('No se pudieron marcar las notificaciones');
+                        const data = await response.json();
+                        setBadge(unreadFrom(data));
+                        await loadNotifications();
+                        refreshUpdates();
+                    } catch (error) {
+                        readAll.disabled = false;
+                        const summary = document.getElementById('notificationsSummary');
+                        if (summary) summary.textContent = 'No se pudo completar. Vuelve a intentarlo.';
+                    }
+                })();
+                return;
+            }
             const notifPop = getNotifPop();
             const userPop  = getUserPop();
             const notifBtn = e.target.closest('.notifications');

@@ -55,9 +55,24 @@ class TicketViewConsistencyTests(TestCase):
         self.ticket(is_deleted=True)
         for view in ['home_all', 'unsolved_no_tareas']:
             payload = self.rows(view)
-            self.assertCountEqual([t['id'] for t in payload['tickets']], [old.id])
+            self.assertCountEqual([t['id'] for t in payload['tickets']], [old.id, hold.id])
             self.assertFalse(payload['applied_filters']['date_range_applied'])
-        self.assertEqual(self.client.get('/api/home-stats/').json()['pendientes_count'], 1)
+        self.assertEqual(self.client.get('/api/home-stats/').json()['pendientes_count'], 2)
+
+    def test_on_hold_is_in_unsolved_rows_counts_and_exports(self):
+        hold = self.ticket(status='on_hold')
+        self.ticket(status='resolved')
+        self.ticket(status='closed')
+        counts = self.client.get('/tickets/filter/', {
+            'counts': 1, 'counts_only': 1, 'force_counts': 1,
+        }).json()['filtros']
+        for view in ['unsolved_no_tareas', 'all_unsolved_no_tareas', 'no_resueltos', 'unsolved_groups']:
+            with self.subTest(view=view):
+                self.assertEqual([t['id'] for t in self.rows(view)['tickets']], [hold.id])
+                self.assertEqual(counts[view], 1)
+                response = self.client.get('/tickets/export.csv', {'view': view})
+                rows = csv.reader(io.StringIO(b''.join(response.streaming_content).decode('utf-8-sig')))
+                self.assertEqual([int(row[0]) for row in rows if len(row) == 11 and row[0].isdigit()], [hold.id])
 
     def test_queue_counts_rows_and_csv_ignore_creation_range_and_keep_brand(self):
         old = self.ticket(status='pending', service='ecomfax')
@@ -172,17 +187,16 @@ class TicketViewConsistencyTests(TestCase):
         self.assertEqual(payload['pagination']['total'], 3)
         self.assertEqual(next(t for t in payload['tickets'] if t['id'] == unassigned.id)['group_value'], 'Sin asignar')
 
-    def test_on_hold_is_solved_and_has_its_own_queue_and_counter(self):
+    def test_on_hold_keeps_its_own_queue_and_is_also_visible_in_unsolved(self):
         hold = self.ticket(status='on_hold')
         self.ticket(status='resolved')
         self.ticket(status='closed')
         self.assertEqual([t['id'] for t in self.rows('espera')['tickets']], [hold.id])
-        self.assertEqual(self.rows('no_resueltos')['tickets'], [])
-        self.assertEqual(self.rows('unsolved_no_tareas')['tickets'], [])
-        self.assertEqual(self.rows('home_all')['tickets'], [])
+        for view in ['no_resueltos', 'unsolved_no_tareas', 'home_all']:
+            self.assertEqual([t['id'] for t in self.rows(view)['tickets']], [hold.id])
         counts = self.client.get('/tickets/filter/', {'counts': 1, 'counts_only': 1, 'force_counts': 1}).json()['filtros']
         self.assertEqual(counts['espera'], 1)
-        self.assertEqual(counts['no_resueltos'], 0)
+        self.assertEqual(counts['no_resueltos'], 1)
 
     def test_end_user_personal_queue_keeps_requester_and_cc_visibility(self):
         own = self.ticket(assignee=self.other)

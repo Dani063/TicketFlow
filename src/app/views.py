@@ -44,6 +44,9 @@ from .services.satisfaction import SatisfactionService
 from .services.sla import SLAService
 from .services.tickets import TicketService
 from .services.ticket_status import SOLVED_STATUSES
+
+# En las colas de trabajo, on-hold sigue visible hasta su cierre definitivo.
+QUEUE_FINISHED_STATUSES = ("resolved", "closed")
 from .services.ticket_trash import TicketTrashService
 from .services.presence import heartbeat as ticket_presence_heartbeat
 from .services.user_admin import UserAdminService
@@ -367,7 +370,7 @@ def _balanced_agent_page(agent_counts, page, page_size):
 def _ticket_filter_counts_cache_key(user, brand_id=None, date_from=None, date_to=None, date_mode=None):
     role_name = (getattr(getattr(user, 'role', None), 'role_name', '') or '').lower()
     return (
-        f"tickets:filter-counts:v5:user:{user.id}:"
+        f"tickets:filter-counts:v6:user:{user.id}:"
         f"role:{role_name}:group:{user.group_id or 0}:brand:{brand_id or 0}:"
         f"from:{date_from}:to:{date_to}:mode:{date_mode or 'default'}"
     )
@@ -494,7 +497,7 @@ def _tickets_for_view(base_qs, view, user):
                 status__in=SOLVED_STATUSES, updated_at__gte=cutoff_60
             )
         # home_all replica «Tus tickets no resueltos (sin tareas)».
-        return mine.exclude(status__in=SOLVED_STATUSES).exclude(type='task')
+        return mine.exclude(status__in=QUEUE_FINISHED_STATUSES).exclude(type='task')
 
     if view == "mis_tickets":
         return base_qs
@@ -504,12 +507,12 @@ def _tickets_for_view(base_qs, view, user):
             created_at__gte=now - timedelta(days=30),
         )
     if view == "unsolved_no_tareas":
-        return _my_tickets_queryset(base_qs, user).filter(~Q(status__in=SOLVED_STATUSES), ~Q(type="task"))
+        return _my_tickets_queryset(base_qs, user).filter(~Q(status__in=QUEUE_FINISHED_STATUSES), ~Q(type="task"))
     if view == "unassigned":
         return base_qs.filter(assignee__isnull=True)
     if view == "all_unsolved_no_tareas":
         return base_qs.filter(
-            ~Q(status__in=SOLVED_STATUSES),
+            ~Q(status__in=QUEUE_FINISHED_STATUSES),
             ~Q(type="task"),
         )
     if view == "recently_updated":
@@ -521,7 +524,7 @@ def _tickets_for_view(base_qs, view, user):
     if view == "tareas":
         return base_qs.filter(type="task")
     if view == "unsolved_groups":
-        return base_qs.filter(~Q(status__in=SOLVED_STATUSES), assignee__group=user.group)
+        return base_qs.filter(~Q(status__in=QUEUE_FINISHED_STATUSES), assignee__group=user.group)
     if view == "rated_last7":
         since = now - timedelta(days=7)
         rated_ids = SatisfactionRating.objects.filter(
@@ -549,7 +552,7 @@ def _tickets_for_view(base_qs, view, user):
     if view == "ultimos_cerrados":
         return base_qs.filter(status="closed")
     if view == "no_resueltos":
-        return base_qs.exclude(status__in=SOLVED_STATUSES)
+        return base_qs.exclude(status__in=QUEUE_FINISHED_STATUSES)
     if view == "twitter":
         return base_qs.filter(channel="twitter")
     if view == "twitter_dm":
@@ -602,7 +605,7 @@ def _home_stats(user):
     # /tickets/filter/?view=home_* con paginación y orden, igual que /tickets/.
     # Aquí solo hace falta el total para el encabezado, y el propio JS lo
     # refresca con el que devuelve la API en cada carga.
-    pendientes_count = tickets_qs.exclude(status__in=SOLVED_STATUSES).exclude(type='task').count()
+    pendientes_count = tickets_qs.exclude(status__in=QUEUE_FINISHED_STATUSES).exclude(type='task').count()
 
     # Personal bien/mal: tickets del usuario, últimos 60 días
     user_ratings_60 = SatisfactionRating.objects.filter(
@@ -732,16 +735,16 @@ def filter_tickets(request):
             n_twitter_dm     = Count('id', filter=in_range & Q(channel='twitter_dm')),
             n_twitter_like   = Count('id', filter=in_range & Q(channel='twitter_like')),
             n_on_hold        = Count('id', filter=Q(status='on_hold')),
-            n_mine_unsolved  = Count('id', filter=mine & ~Q(status__in=SOLVED_STATUSES) & ~Q(type='task')),
+            n_mine_unsolved  = Count('id', filter=mine & ~Q(status__in=QUEUE_FINISHED_STATUSES) & ~Q(type='task')),
             n_comuny         = Count(Case(When(service='internocomuny',  status='open', then=1), output_field=IntegerField())),
             n_ecomfax        = Count(Case(When(service='ecomfax',        status='open', then=1), output_field=IntegerField())),
             n_recordia       = Count(Case(When(service='recordia',       status='open', then=1), output_field=IntegerField())),
             n_unassigned     = Count(Case(When(assignee__isnull=True,    then=1), output_field=IntegerField())),
             n_unsolved_notarea = Count(Case(
-                When(~Q(status__in=SOLVED_STATUSES) & ~Q(type='task'), then=1),
+                When(~Q(status__in=QUEUE_FINISHED_STATUSES) & ~Q(type='task'), then=1),
                 output_field=IntegerField()
             )),
-            n_no_resueltos   = Count('id', filter=~Q(status__in=SOLVED_STATUSES)),
+            n_no_resueltos   = Count('id', filter=~Q(status__in=QUEUE_FINISHED_STATUSES)),
             n_sla_breached   = Count(Case(
                 When(Q(sla_breached_at__isnull=False) & ~Q(status__in=SOLVED_STATUSES), then=1),
                 output_field=IntegerField()
@@ -780,7 +783,7 @@ def filter_tickets(request):
         n_new_in_groups   = 0
         if _user_group:
             n_unsolved_groups = queue_qs.filter(
-                ~Q(status__in=SOLVED_STATUSES),
+                ~Q(status__in=QUEUE_FINISHED_STATUSES),
                 assignee__group=_user_group,
             ).count()
             n_new_in_groups = queue_qs.filter(
@@ -2277,6 +2280,14 @@ def mark_notification_read(request, notif_id):
     notif.read = True
     notif.save()
     return JsonResponse({"ok": True, "unread": NotificationService.unread_count(request.user)})
+
+
+@api_login_required
+@require_POST
+def mark_all_notifications_read(request):
+    cleared = Notification.objects.filter(user=request.user, read=False).update(read=True)
+    return JsonResponse({"ok": True, "cleared": cleared,
+                         "unread": NotificationService.unread_count(request.user)})
 
 
 @api_login_required

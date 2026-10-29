@@ -1532,6 +1532,30 @@ body, html {
         cursor: default;
     }
 
+.notifications-tools {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--color-divider);
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+.notifications-tools button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border: 1px solid var(--color-divider-strong);
+    border-radius: 7px;
+    background: var(--color-primary-soft);
+    color: var(--color-text);
+    font: inherit;
+    cursor: pointer;
+}
+.notifications-tools button:disabled { opacity: .5; cursor: default; }
+.notifications-tools button:focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
 .notifications-popup {
     position: absolute;
     top: 55px;
