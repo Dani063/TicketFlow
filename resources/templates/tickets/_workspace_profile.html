@@ -1,0 +1,98 @@
+<div class="workspace-profile profile-pane" data-workspace-profile data-pane-type="profile" data-tab-title="Mis ajustes">
+    {{ user.workspace_preferences|json_script:"workspace-page-preferences" }}
+    <aside class="wp-nav" aria-label="Secciones de tu cuenta">
+        <div class="wp-nav-title">Tu espacio de trabajo</div>
+        <button type="button" data-wp-section="info-section" class="is-active"><i class="far fa-user" aria-hidden="true"></i> Mi perfil</button>
+        <button type="button" data-wp-section="preferences-section"><i class="fas fa-sliders-h" aria-hidden="true"></i> Preferencias</button>
+        <button type="button" data-wp-section="notifications-section"><i class="far fa-bell" aria-hidden="true"></i> Notificaciones</button>
+        <button type="button" data-wp-section="signature-section"><i class="fas fa-signature" aria-hidden="true"></i> Firma de correo</button>
+        <button type="button" data-wp-section="activity-section"><i class="fas fa-chart-line" aria-hidden="true"></i> Mi actividad</button>
+        <button type="button" data-wp-section="tickets-section"><i class="fas fa-ticket-alt" aria-hidden="true"></i> Tickets asociados</button>
+        <a href="{% url 'logout' %}" class="wp-logout"><i class="fas fa-sign-out-alt" aria-hidden="true"></i> Cerrar sesión</a>
+    </aside>
+    <div class="wp-main">
+        <header class="wp-identity">
+            {% if user.photo_url %}<img src="{{ user.photo_url }}" alt="" class="wp-avatar">{% else %}<span class="wp-avatar wp-initial" aria-hidden="true">{{ user.name|slice:':1'|upper }}</span>{% endif %}
+            <div><h1 data-wp-display-name>{{ user.name }}</h1><p>{{ user.email }}</p></div>
+            <span class="wp-role">{{ user.role.role_name|default:'Usuario' }}</span>
+        </header>
+        <form id="workspace-profile-form">
+            {% csrf_token %}
+            <section id="info-section" class="wp-section">
+                <div class="wp-section-heading"><h2>Mi perfil</h2><p>Los datos que acompañan tus conversaciones con el equipo.</p></div>
+                <div class="wp-card">
+                    <div class="wp-fields">
+                        <label>Nombre visible<input name="name" value="{{ user.name }}" maxlength="255" required autocomplete="name"></label>
+                        <label>Teléfono<input name="phone" value="{{ user.phone|default:'' }}" maxlength="64" type="tel" autocomplete="tel" placeholder="Añadir teléfono"></label>
+                        <div class="wp-wide wp-photo-field">
+                            <span class="wp-photo-label">Foto de perfil <span class="wp-optional">Opcional</span></span>
+                            <div class="wp-photo-picker">
+                                <div class="wp-photo-avatar">
+                                    <span data-wp-photo-initial {% if user.photo_url %}hidden{% endif %}>{{ user.name|slice:':1'|upper }}</span>
+                                    <img data-wp-photo-preview data-current-photo="{{ user.photo_url|default:'' }}" class="wp-photo-image" {% if user.photo_url %}src="{{ user.photo_url }}"{% else %}hidden{% endif %} alt="Foto de perfil">
+                                </div>
+                                <div class="wp-photo-controls">
+                                    <div class="wp-photo-buttons">
+                                        <button type="button" class="wp-secondary" data-wp-change-photo><i class="fas fa-camera" aria-hidden="true"></i> Cambiar foto</button>
+                                        <button type="button" class="wp-photo-cancel" data-wp-cancel-photo hidden>Cancelar cambio</button>
+                                    </div>
+                                    <small>JPG, PNG o WebP. Máximo 5 MB.</small>
+                                    <span class="wp-photo-status" data-wp-photo-status role="status">Se actualizará al guardar los cambios.</span>
+                                </div>
+                            </div>
+                            <input name="photo" type="file" accept="image/jpeg,image/png,image/webp" aria-label="Seleccionar foto de perfil" hidden>
+                        </div>
+                    </div>
+                </div>
+                <div class="wp-card wp-account-facts">
+                    <div><span>Rol</span><strong>{{ user.role.role_name|default:'—' }}</strong></div>
+                    <div><span>Grupo</span><strong>{{ user.group.group_name|default:'Sin grupo' }}</strong></div>
+                    <div><span>Cuenta creada</span><strong>{{ user.created_at|date:'d/m/Y' }}</strong></div>
+                </div>
+            </section>
+            <section id="preferences-section" class="wp-section" hidden>
+                <div class="wp-section-heading"><h2>Hazlo a tu manera</h2><p>Ajusta la apariencia para trabajar con comodidad. El espaciado y el tamaño del texto solo afectan a las tablas de tickets.</p></div>
+                <div class="wp-card">
+                    <fieldset class="wp-theme-picker"><legend>Tema de la aplicación</legend>
+                        <label><input type="radio" name="theme" value="light"><span><i class="far fa-sun" aria-hidden="true"></i> Claro</span></label>
+                        <label><input type="radio" name="theme" value="dark"><span><i class="far fa-moon" aria-hidden="true"></i> Oscuro</span></label>
+                        <label><input type="radio" name="theme" value="system"><span><i class="fas fa-desktop" aria-hidden="true"></i> Sistema</span></label>
+                    </fieldset>
+                    <div class="wp-fields">
+                        <label>Espaciado de las tablas<select name="density"><option value="comfortable">Cómodo</option><option value="compact">Compacto</option></select></label>
+                        <label>Texto de las tablas<select name="text_size"><option value="normal">Normal</option><option value="large">Grande</option></select></label>
+                    </div>
+                </div>
+            </section>
+            <section id="notifications-section" class="wp-section" hidden>
+                <div class="wp-section-heading"><h2>Notificaciones</h2><p>Elige cómo quieres enterarte de las novedades.</p></div>
+                <div class="wp-card">
+                    <label class="wp-setting"><span><strong>Sonido de nuevos avisos</strong><small>Un sonido breve cuando llegan notificaciones mientras tienes la aplicación abierta.</small></span><input type="checkbox" name="notification_sound" class="wp-switch"></label>
+                    <label class="wp-setting"><span><strong>Animación de la campana</strong><small>Destaca las novedades con un movimiento discreto.</small></span><input type="checkbox" name="notification_animation" class="wp-switch"></label>
+                    <div class="wp-setting"><span><strong>Dejar la bandeja al día</strong><small>Marca todos tus avisos actuales como leídos.</small></span><button type="button" class="wp-secondary" data-wp-read-all>Marcar todas como leídas</button></div>
+                </div>
+            </section>
+            <section id="signature-section" class="wp-section" hidden>
+                <div class="wp-section-heading"><h2>Tu firma, lista para responder</h2><p>Insértala cuando la necesites desde el editor de un ticket.</p></div>
+                <div class="wp-signature-grid">
+                    <div class="wp-card"><label>Firma personal<textarea name="signature" rows="8" maxlength="2000" placeholder="Un saludo,&#10;Tu nombre&#10;Equipo de soporte"></textarea></label><small>Se guarda como texto. Puedes revisarla antes de enviar.</small></div>
+                    <div class="wp-card wp-preview"><span class="wp-preview-label">Vista previa</span><p>Gracias por contactar con nosotros.</p><div data-wp-signature-preview></div></div>
+                </div>
+            </section>
+            <section id="activity-section" class="wp-section" hidden>
+                <div class="wp-section-heading"><h2>Mi actividad</h2><p>Un vistazo a tus tickets actuales y al trabajo resuelto.</p></div>
+                <div class="wp-activity">
+                    <a href="/tickets/?view=home_you"><span class="wp-status-dot wp-open"></span> Abiertos<strong>{{ workspace_activity.open }}</strong><small>Ver mis abiertos <span aria-hidden="true">→</span></small></a>
+                    <a href="/tickets/?view=home_pending"><span class="wp-status-dot wp-pending"></span> Pendientes<strong>{{ workspace_activity.pending }}</strong><small>Ver mis pendientes <span aria-hidden="true">→</span></small></a>
+                    <a href="/tickets/?view=home_hold"><span class="wp-status-dot wp-hold"></span> On-hold<strong>{{ workspace_activity.on_hold }}</strong><small>Ver mis tickets en espera <span aria-hidden="true">→</span></small></a>
+                    <a href="/tickets/?view=home_solventado"><span class="wp-status-dot wp-resolved"></span> Resueltos<strong>{{ workspace_activity.resolved }}</strong><small>Últimos 60 días <span aria-hidden="true">→</span></small></a>
+                </div>
+            </section>
+            <div class="wp-savebar"><span id="workspace-save-status" role="status" aria-live="polite">Los cambios se guardan en tu cuenta.</span><button type="submit" class="wp-primary">Guardar cambios</button></div>
+        </form>
+        <section id="tickets-section" class="wp-section" hidden>
+            <div class="wp-section-heading"><h2>Tickets asociados</h2><p>Conversaciones en las que has participado.</p></div>
+            {% include 'tickets/_profile_tickets.html' %}
+        </section>
+    </div>
+</div>

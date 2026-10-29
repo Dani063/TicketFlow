@@ -49,7 +49,7 @@
         <div id="info-section" class="profile-section">
             <h2>Ficha de cliente</h2>
             <div class="profile-header">
-                <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
+                <img src="{% if customer.photo_url %}{{ customer.photo_url }}{% else %}{% static 'tickets/profile-pic.png' %}{% endif %}" alt="Foto de {{ customer.name }}" class="profile-picture-large">
                 <div>
                     <h3>{{ customer.name }}</h3>
                     <p class="profile-email">{{ customer.email }}</p>

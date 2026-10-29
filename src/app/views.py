@@ -472,6 +472,10 @@ def _tickets_for_view(base_qs, view, user):
         cutoff_60 = now - timedelta(days=60)
         if view == "home_you":
             return mine.filter(status="open")
+        if view == "home_pending":
+            return mine.filter(status="pending")
+        if view == "home_hold":
+            return mine.filter(status="on_hold")
         if view == "home_groups":
             # Ojo: el contador abarca todo el grupo, no solo lo del usuario.
             if not user.group_id:
@@ -1291,6 +1295,12 @@ def filter_customers(request):
 
 @login_required
 def customer_profile(request):
+    if str(request.GET.get('id', '')) == str(request.user.pk):
+        from django.urls import reverse
+        target = reverse('profile')
+        if request.GET.get('fragment') == '1':
+            target += '?fragment=1'
+        return redirect(target)
     if not _can_view_all(request.user) and not _is_admin(request.user):
         return render(request, "tickets/403.html", {"error": "No tienes permisos para ver este perfil."}, status=403)
     customer_id = request.GET.get("id")
@@ -1513,7 +1523,82 @@ def profile(request):
     ).distinct()
     ctx = _profile_tickets_context(request, base_qs.filter(is_deleted=False))
     ctx["user"] = user
+    mine = _my_tickets_queryset(_base_tickets_queryset(user), user)
+    ctx['workspace_activity'] = {
+        'open': mine.filter(status='open').count(),
+        'pending': mine.filter(status='pending').count(),
+        'on_hold': mine.filter(status='on_hold').count(),
+        'resolved': mine.filter(status__in=('resolved', 'closed'),
+                                updated_at__gte=timezone.now() - timedelta(days=60)).count(),
+    }
     return render(request, "tickets/profile.html", ctx)
+
+
+@api_login_required
+@require_POST
+def save_workspace_profile(request):
+    from django.core.validators import URLValidator
+    from django.core.exceptions import ValidationError
+    try:
+        data = (json.loads(request.POST.get('payload', '{}')) if request.content_type == 'multipart/form-data'
+                else parse_json_body(request))
+    except (APIValidationError, ValueError):
+        return json_error('invalid_json', 'Los datos del perfil no son válidos.', status=400)
+    if not isinstance(data, dict):
+        return json_error('invalid_profile', 'Los datos del perfil no son válidos.', status=400)
+    name = data.get('name', request.user.name)
+    phone = data.get('phone', request.user.phone or '')
+    photo = data.get('photo_url', request.user.photo_url or '')
+    prefs = data.get('preferences', {})
+    if (not isinstance(name, str) or not name.strip() or len(name) > 255
+            or not isinstance(phone, str) or len(phone) > 64
+            or not isinstance(photo, str) or len(photo) > 500
+            or not isinstance(prefs, dict)):
+        return json_error('invalid_profile', 'Revisa el nombre, teléfono y foto.', status=400)
+    if photo and 'photo_url' in data:
+        try:
+            URLValidator(schemes=['https'])(photo)
+        except ValidationError:
+            return json_error('invalid_photo', 'La foto debe ser una dirección HTTPS válida.', status=400)
+    if (prefs.get('theme', 'system') not in ('system', 'light', 'dark')
+            or prefs.get('density', 'comfortable') not in ('comfortable', 'compact')
+            or prefs.get('text_size', 'normal') not in ('normal', 'large')):
+        return json_error('invalid_preferences', 'Revisa las preferencias de apariencia.', status=400)
+    signature = prefs.get('signature', '')
+    if not isinstance(signature, str) or len(signature) > 2000:
+        return json_error('invalid_preferences', 'La firma admite hasta 2000 caracteres.', status=400)
+    for key in ('notification_sound', 'notification_animation'):
+        if key in prefs and type(prefs[key]) is not bool:
+            return json_error('invalid_preferences', 'Las preferencias de notificaciones no son válidas.', status=400)
+    clean = {'theme': prefs.get('theme', 'system'), 'density': prefs.get('density', 'comfortable'),
+             'text_size': prefs.get('text_size', 'normal'), 'signature': signature.strip(),
+             'notification_sound': prefs.get('notification_sound', False),
+             'notification_animation': prefs.get('notification_animation', True)}
+    user = request.user
+    upload = request.FILES.get('photo')
+    if upload:
+        import io
+        import uuid
+        from PIL import Image, ImageOps, UnidentifiedImageError
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+        if upload.size > 5 * 1024 * 1024:
+            return json_error('invalid_photo', 'La imagen debe ocupar como máximo 5 MB.', status=400)
+        try:
+            image = Image.open(upload)
+            if image.format not in ('JPEG', 'PNG', 'WEBP') or image.width * image.height > 20_000_000:
+                raise ValueError('Formato o dimensiones no admitidos')
+            image.load()
+            image = ImageOps.fit(ImageOps.exif_transpose(image).convert('RGB'), (256, 256))
+            output = io.BytesIO()
+            image.save(output, format='JPEG', quality=88)
+        except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+            return json_error('invalid_photo', 'Selecciona una imagen JPG, PNG o WebP válida.', status=400)
+        path = default_storage.save(f'profiles/{user.pk}/{uuid.uuid4().hex}.jpg', ContentFile(output.getvalue()))
+        photo = default_storage.url(path)
+    user.name, user.phone, user.photo_url, user.workspace_preferences = name.strip(), phone.strip(), photo, clean
+    user.save(update_fields=['name', 'phone', 'photo_url', 'workspace_preferences', 'updated_at'])
+    return JsonResponse({'ok': True, 'preferences': clean, 'name': user.name, 'photo_url': photo})
 
 @ensure_csrf_cookie
 def login_redirect(request):
@@ -2044,6 +2129,7 @@ def _comment_payload(comment, ticket):
         'ticket_id': ticket.id,
         'user_id': author.id if author else None,
         'username': author.name if author else '',
+        'user_photo_url': author.photo_url if author else '',
         'user_role': author.role.role_name if author and author.role else None,
         'is_public': comment.is_public,
         'attachments': [

@@ -69,6 +69,7 @@ class UserManager(BaseUserManager):
         return user
 
 class User(AbstractBaseUser, PermissionsMixin):
+    workspace_preferences = models.JSONField(default=dict, blank=True)
     email = models.EmailField(verbose_name='Correo electronico', max_length=255, unique=True)
     name = models.CharField(max_length=255)
     zendesk_id = models.BigIntegerField(null=True, blank=True, unique=True, db_index=True)

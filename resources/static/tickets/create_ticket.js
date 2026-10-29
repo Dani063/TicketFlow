@@ -414,6 +414,13 @@ window.initTicketPane = function (root, ctx) {
         const header = element('div', 'msg-header');
         const name = data.username || 'Usuario';
         const avatar = element('div', 'msg-avatar', name.charAt(0).toUpperCase());
+        if (data.user_photo_url) {
+            const photo = document.createElement('img');
+            photo.className = 'msg-avatar-photo'; photo.alt = '';
+            photo.addEventListener('error', () => photo.remove(), {once:true});
+            photo.src = data.user_photo_url;
+            avatar.appendChild(photo);
+        }
         const palette = ['#5b67ca','#e06c75','#56b6c2','#98c379','#d19a66','#c678dd','#61afef','#e5c07b'];
         let hash = 0;
         for (const character of name) hash = character.charCodeAt(0) + ((hash << 5) - hash);
@@ -945,6 +952,11 @@ window.initTicketPane = function (root, ctx) {
         for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
         return palette[Math.abs(hash) % palette.length];
     }
+
+    rootEl.querySelectorAll('.msg-avatar-photo').forEach(photo => {
+        photo.addEventListener('error', () => photo.remove(), {once:true});
+        if (photo.complete && !photo.naturalWidth) photo.remove();
+    });
 
     rootEl.querySelectorAll('.msg-avatar').forEach(el => {
         const authorName = el.closest('.message')?.querySelector('.msg-author')?.textContent.trim() || '?';

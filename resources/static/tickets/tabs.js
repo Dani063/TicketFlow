@@ -1,4 +1,4 @@
-﻿/* ===== Tabs manager (reworked) ===== */
+/* ===== Tabs manager (reworked) ===== */
 (function () {
     // Evita doble inicialización si el script se carga dos veces por error
     if (window.Tabs && window.Tabs.__initialized) return;
@@ -123,7 +123,7 @@
             // them), so we can re-execute them with the page DOM in place.
             const tpl = document.createElement('template');
             tpl.innerHTML = html;
-            const scripts = [...tpl.content.querySelectorAll('script')];
+            const scripts = [...tpl.content.querySelectorAll('script:not([type="application/json"])')];
             scripts.forEach(s => s.remove());
 
             ac.innerHTML = '';
@@ -273,7 +273,7 @@
             const paneEl = tpl.content.querySelector('.ticket-pane, .profile-pane');
             if (!paneEl) throw new Error('No compatible pane in fragment response');
             const isTicketPane = paneEl.classList.contains('ticket-pane');
-            const scripts = isTicketPane ? [] : [...tpl.content.querySelectorAll('script')];
+            const scripts = isTicketPane ? [] : [...tpl.content.querySelectorAll('script:not([type="application/json"])')];
 
             // Ticket scripts are legacy globals and ticket initialization is
             // handled explicitly below. Profile scripts are re-entrant and do
@@ -993,7 +993,8 @@
             if (count > previo) {
                 bell.classList.remove("has-news");
                 void bell.offsetWidth;   // reinicia la animacion si ya estaba puesta
-                bell.classList.add("has-news");
+                if (window.WorkspaceSettings?.get().notification_animation !== false) bell.classList.add("has-news");
+                window.WorkspaceSettings?.notify();
             } else if (count < previo || !count) {
                 // Ha bajado: el agente ya ha atendido algo, deja de reclamar.
                 bell.classList.remove("has-news");

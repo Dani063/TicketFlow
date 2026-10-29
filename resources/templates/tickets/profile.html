@@ -23,73 +23,7 @@
         <div class="tpc-comment-body"></div>
     </div>
 </div>
-<div class="title-bar">
-    <h1>{{ request.user.name|default:"Perfil de usuario" }}</h1>
-</div>
-<div class="profile-layout">
-
-<!-- Columna izquierda -->
-<div class="left-column">
-    <span class="profile-menu-heading">Secciones</span>
-    <ul id="profileMenu">
-        <li data-section="info-section" class="active">
-            <span class="filter-name">Información general</span>
-        </li>
-        <li data-section="tickets-section">
-            <span class="filter-name">Tickets asociados</span>
-        </li>
-    </ul>
-</div>
-
-<!-- Columna derecha -->
-<div class="tabla profile-content">
-    <div class="stats-group profile-surface">
-
-        <!-- 🔹 Información general -->
-        <div id="info-section" class="profile-section">
-            <h2>Tu cuenta</h2>
-
-            <div class="profile-header">
-                <img src="{% static 'tickets/profile-pic.png' %}" alt="Avatar" class="profile-picture-large">
-                <div>
-                    <h3>{{ request.user.name }}</h3>
-                    <p class="profile-email">{{ request.user.email }}</p>
-                </div>
-            </div>
-
-            <div class="profile-details">
-                <div class="detail-card">
-                    <h3>Rol</h3>
-                    <p>{{ request.user.role.role_name|default:"-" }}</p>
-                </div>
-                <div class="detail-card">
-                    <h3>Grupo</h3>
-                    <p>{{ request.user.group.group_name|default:"-" }}</p>
-                </div>
-                <div class="detail-card">
-                    <h3>Cuenta creada</h3>
-                    <p>{{ request.user.created_at|date:"d/m/Y H:i" }}</p>
-                </div>
-                <div class="detail-card">
-                    <h3>Última actualización</h3>
-                    <p>{{ request.user.updated_at|date:"d/m/Y H:i" }}</p>
-                </div>
-            </div>
-
-            <div class="profile-actions">
-                <a href="{% url 'logout' %}" class="logout-link">Cerrar sesión</a>
-            </div>
-        </div>
-
-        <!-- 🔹 Tickets asociados -->
-        <div id="tickets-section" class="profile-section" style="display:none;">
-            <h2>Tickets asociados</h2>
-            {% include 'tickets/_profile_tickets.html' %}
-        </div>
-
-    </div>
-</div>
-</div>
+{% include 'tickets/_workspace_profile.html' %}
 
 <script>
     // ---- Subject hover preview ----

@@ -266,7 +266,7 @@
                 {% with c=item.obj %}
                 <div class="message speaker-{{ c.speaker_kind }}{% if not c.is_public %} internal{% endif %}" data-comment-id="{{ c.pk }}">
                     <div class="msg-header">
-                        <div class="msg-avatar" data-initials="{{ c.user.name|slice:':1'|upper }}">{{ c.user.name|slice:':1'|upper }}</div>
+                        <div class="msg-avatar" data-initials="{{ c.user.name|slice:':1'|upper }}">{{ c.user.name|slice:':1'|upper }}{% if c.user.photo_url %}<img class="msg-avatar-photo" src="{{ c.user.photo_url }}" alt="" loading="lazy">{% endif %}</div>
                         <div class="msg-meta">
                             {% if can_use_internal %}
                             <a class="msg-author" href="{% url 'customer_profile' %}?id={{ c.user.id }}">{{ c.user.name }}</a>
@@ -414,6 +414,9 @@
                            multiple hidden>
                     {% if can_use_internal %}
                     <!-- Asistencia de respuesta IA -->
+                    <div class="workspace-insert" data-workspace-tools>
+                        <button type="button" class="wp-secondary" data-workspace-signature><i class="fas fa-signature" aria-hidden="true"></i> Firma</button>
+                    </div>
                     <button type="button" id="ai-reply-btn" class="ai-reply-btn"
                             data-ticket-id="{{ ticket.id }}" title="Sugerir respuesta con IA" aria-label="Sugerir respuesta con IA">
                         <i class="fas fa-robot"></i> <span>IA</span>

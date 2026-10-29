@@ -35,11 +35,12 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css">
     <!-- create_ticket.css loaded globally so ticket panes are styled even when
          the user navigates to a non-ticket page first (e.g. Home → ticket). -->
-    <link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s8.15">
+    <link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s8.17">
     <link rel="stylesheet" href="{% static 'tickets/attachments.css' %}?v=s7.0">
     <!-- home.css is the shared sidebar-page stylesheet; load globally so
          SPA fragment swaps don't lose styling. -->
     <link rel="stylesheet" href="{% static 'tickets/home.css' %}?v=s6.13">
+    <link rel="stylesheet" href="{% static 'tickets/workspace-profile.css' %}?v=5">
 
     {% block extra_css %}{% endblock %}
 </head>
@@ -97,14 +98,16 @@
     <script src="{% static 'tickets/filters.js' %}?v=s4.7"></script>
     <script src="{% static 'tickets/toast.js' %}?v=s4.7"></script>
     <script src="{% static 'tickets/dialog.js' %}?v=s4.7"></script>
-    <script src="{% static 'tickets/tabs.js' %}?v=s7.5"></script>
+    <script src="{% static 'tickets/tabs.js' %}?v=s7.6"></script>
     <script src="{% static 'tickets/theme.js' %}?v=s5.9"></script>
+    {{ request.user.workspace_preferences|json_script:"workspace-shell-preferences" }}
+    <script src="{% static 'tickets/workspace-profile.js' %}?v=5"></script>
     <!-- create_ticket.js loaded globally so initTicketPane is available even
          when the user navigates Home → ticket via SPA (no full page reload). -->
     <script src="{% static 'tickets/attachments.js' %}?v=s7.3"></script>
     <script src="{% static 'tickets/merge_review.js' %}?v=s1.0"></script>
     <script src="{% static 'tickets/quick_user.js' %}?v=s1.1"></script>
-    <script src="{% static 'tickets/create_ticket.js' %}?v=s9.7"></script>
+    <script src="{% static 'tickets/create_ticket.js' %}?v=s9.8"></script>
     <script src="{% static 'tickets/ticket_trash.js' %}?v=s1.0"></script>
     <script src="{% static 'tickets/presence.js' %}?v=s1.1"></script>
     <script src="{% static 'tickets/ai_reply.js' %}?v=s4.8"></script>

@@ -260,8 +260,10 @@
 .column3:hover .panel-tab,
 .column3.collapsed .panel-tab { opacity: 1; }
 
-/* Label — hidden by default, slides in on button hover */
+/* La etiqueta flota hacia el centro, sin desplazar el botón ni salir del viewport. */
 .panel-tab-label {
+    position: absolute;
+    left: calc(100% + 6px);
     background: #1f2937;
     color: #fff;
     font-size: 12px;
@@ -270,25 +272,28 @@
     font-family: inherit;
     line-height: 1;
     border-radius: 6px;     /* todas las esquinas redondeadas */
-    padding: 5px 0;
-    max-width: 0;
-    overflow: hidden;
+    padding: 6px 10px;
     opacity: 0;
-    margin-right: 6px;      /* separación entre label y círculo */
-    transition: max-width .2s ease, opacity .15s ease, padding .15s ease, margin .15s ease;
+    margin: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity .15s ease, visibility .15s ease;
 }
 
-.panel-tab:hover .panel-tab-label {
-    max-width: 110px;
+.panel-tab:hover .panel-tab-label,
+.panel-tab:focus-visible .panel-tab-label {
     opacity: 1;
-    padding: 5px 10px;
+    visibility: visible;
 }
 
 /* Right panel — label is to the RIGHT of arrow, so margin is on the left */
 .panel-tab-right .panel-tab-label {
-    margin-right: 0;
-    margin-left: 6px;
+    left: auto;
+    right: calc(100% + 6px);
+    margin: 0;
 }
+
+.panel-tab:focus-visible { opacity: 1; outline: 2px solid #a78bfa; outline-offset: 3px; border-radius: 50%; }
 
 /* Round arrow circle */
 .panel-tab-arrow {
@@ -594,6 +599,9 @@ input[type="radio"] {
     flex-shrink: 0;
     background: #888; /* JS lo sobreescribe con color por nombre */
 }
+
+.msg-avatar { position: relative; overflow: hidden; }
+.msg-avatar-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 
 .msg-meta {
     display: flex;
