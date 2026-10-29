@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>TicketFlow · Movimiento del icono</title>
+<style>
+:root{color-scheme:dark;--bg:#17151d;--surface:#1e1b25;--hover:#282330;--ink:#f4f2f7;--muted:#a39eae;--line:#35303f;--purple:#b89cf2;--tile:#26202f;--active:#342842;--speed:1;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+:root[data-theme=light]{color-scheme:light;--bg:#fcfbfd;--surface:#fff;--hover:#f8f6fb;--ink:#292332;--muted:#787080;--line:#e7e2ed;--purple:#8955d3;--tile:#f5effb;--active:#eee5f9}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;font-synthesis:none;transition:background .2s,color .2s}button,a{-webkit-tap-highlight-color:transparent}button{font:inherit;cursor:pointer}button:focus-visible,a:focus-visible{outline:2px solid var(--purple);outline-offset:4px}button:hover{color:var(--ink);background:var(--hover)}
+.page{max-width:1120px;margin:auto;padding:28px 32px 24px}
+header{display:flex;align-items:center;justify-content:space-between;gap:24px;padding-bottom:22px;border-bottom:1px solid var(--line)}
+.wordmark{font-size:16px;letter-spacing:-.4px;font-weight:600;display:flex;align-items:center;gap:10px}.wordmark .mark-host{width:22px;height:24px}.wordmark svg{stroke-width:38}
+.theme{display:flex;gap:3px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:3px}.theme button{border:0;border-radius:5px;padding:6px 11px;font-size:12px;background:transparent;color:var(--muted)}.theme button[aria-pressed=true]{background:var(--active);color:var(--ink)}
+.intro{display:flex;justify-content:space-between;align-items:end;gap:30px;margin:32px 0 22px}.intro h1{font-size:22px;font-weight:500;letter-spacing:-.6px;margin:0 0 7px}.intro p{font-size:13px;line-height:1.65;color:var(--muted);margin:0}.tag{font-size:11px;color:var(--muted);padding:5px 9px;border:1px solid var(--line);border-radius:6px;white-space:nowrap}
+.stage{min-height:370px;display:grid;place-items:center;border:1px solid var(--line);border-radius:14px;background:var(--surface);position:relative;padding:54px 24px 60px}
+.stage-note{position:absolute;top:17px;left:20px;font-size:11px;color:var(--muted)}
+.app{display:flex;align-items:center;flex-direction:column;gap:17px}.app-icon{width:132px;height:132px;display:grid;place-items:center;background:var(--tile);border-radius:30px;border:1px solid color-mix(in srgb,var(--purple) 14%,transparent);padding:0;appearance:none;box-shadow:0 2px 5px #00000008;transition:background .15s,border-color .15s}.app-icon:hover{background:var(--tile);border-color:color-mix(in srgb,var(--purple) 40%,transparent)}.app-icon .mark-host{width:88px;height:90px}.app-label{font-size:15px;letter-spacing:-.3px;font-weight:500}.app-caption{font-size:11px;line-height:1.6;color:var(--muted);margin-top:-10px}
+.mark-host{display:inline-flex;color:var(--purple);flex-shrink:0}.glyph{display:block;width:100%;height:100%;overflow:visible;fill:none;stroke:currentColor;stroke-width:24;stroke-linecap:round;stroke-linejoin:round}.glyph .base{opacity:.22}.glyph .motion path{stroke-dasharray:1;stroke-dashoffset:1;opacity:0;animation:trace-cycle 5.4s cubic-bezier(.45,0,.25,1) infinite both;animation-delay:var(--delay,0s)}
+[data-paused=true] .glyph .motion path,[data-suspended=true] .glyph .motion path{animation-play-state:paused}
+@keyframes trace-cycle{
+0%,100%{stroke-dashoffset:1;opacity:0}
+5%{opacity:1}
+24%,57%{stroke-dashoffset:0;opacity:1}
+83%{stroke-dashoffset:1;opacity:0}
+}
+.controls{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;margin-top:16px}.control{display:inline-flex;gap:7px;align-items:center;border:1px solid var(--line);background:transparent;color:var(--muted);padding:8px 12px;border-radius:7px;font-size:12px}.control svg{width:14px;height:14px}.control[aria-pressed=true]{background:var(--active);border-color:transparent;color:var(--ink)}
+.timing{display:flex;align-items:center;justify-content:center;gap:6px;color:var(--muted);font-size:11px;margin:12px 0 28px}.timing .dot{width:4px;height:4px;border-radius:50%;background:var(--purple);margin-right:2px}
+.examples{border-top:1px solid var(--line);padding-top:22px;display:grid;grid-template-columns:1fr 1fr;gap:28px}.example h2{font-size:12px;font-weight:500;margin:0 0 12px;color:var(--muted)}.example-surface{min-height:82px;border:1px solid var(--line);border-radius:10px;padding:16px 20px;display:flex;align-items:center;gap:18px;background:var(--surface)}
+.sizes{justify-content:space-around}.sample{border:0;background:transparent;padding:5px;display:flex;flex-direction:column;gap:9px;align-items:center;justify-content:center;color:var(--muted);font-size:10px}.sample .mark-host{height:var(--size);width:var(--size)}.sample .glyph{stroke-width:var(--weight,28)}
+.nav-example{width:38px;height:38px;border:0;border-radius:9px;background:var(--tile);display:grid;place-items:center}.nav-example .mark-host{width:25px;height:27px}.nav-example .glyph{stroke-width:34}.nav-copy{flex:1}.nav-copy strong{display:block;font-size:13px;font-weight:500}.nav-copy span{display:block;font-size:11px;color:var(--muted);margin-top:5px}.nav-shortcut{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:3px 6px}
+footer{display:flex;justify-content:space-between;gap:24px;margin-top:24px;color:var(--muted);font-size:11px;line-height:1.7}footer a{color:inherit;text-decoration-color:var(--line);text-underline-offset:3px}
+@media(max-width:680px){.page{padding:20px 18px}.intro{margin-top:24px}.intro h1{font-size:20px}.tag{display:none}.stage{min-height:330px}.examples{grid-template-columns:1fr;gap:20px}.app-icon{width:120px;height:120px;border-radius:28px}footer{flex-direction:column;gap:6px}.controls{gap:6px}.control{padding:8px 10px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.glyph .motion path{stroke-dashoffset:0!important;opacity:1!important}.glyph .base{opacity:0}}
+</style>
+</head>
+<body>
+<template id="glyph-template">
+<svg class="glyph" viewBox="0 0 1027 1044" aria-hidden="true">
+    <path pathLength="1" style="--delay:0s" d="M82 290 493 57 907 293V764L493 1001 80 766Z"/>
+    <path pathLength="1" style="--delay:.12s" d="M82 290H348L493 206 775 368 907 293"/>
+    <path pathLength="1" style="--delay:.25s" d="M348 290 697 632H907"/>
+    <path pathLength="1" style="--delay:.27s" d="M775 368V632"/>
+    <path pathLength="1" style="--delay:.30s" d="M82 422H292L642 764H907"/>
+    <path pathLength="1" style="--delay:.24s" d="M212 422V690L80 766"/>
+    <path pathLength="1" style="--delay:.32s" d="M212 690 494 852 642 764"/>
+</svg>
+</template>
+<div class="page">
+    <header>
+        <div class="wordmark"><span class="mark-host"></span>TicketFlow</div>
+        <div class="theme" aria-label="Tema de la vista previa"><button type="button" data-theme="light" aria-pressed="false">Claro</button><button type="button" data-theme="dark" aria-pressed="true">Oscuro</button></div>
+    </header>
+    <section class="intro"><div><h1>Un movimiento que sigue tu marca.</h1><p>El símbolo se traza, permanece y se recoge. Un ciclo suave, sin cortes.</p></div><span class="tag">Propuesta de icono</span></section>
+    <main>
+        <section class="stage" aria-label="Vista previa de la animación de TicketFlow">
+            <span class="stage-note">Icono de aplicación</span>
+            <div class="app">
+                <div class="app-icon" id="hero" role="img" aria-label="Símbolo animado de TicketFlow"><span class="mark-host"></span></div>
+                <span class="app-label">TicketFlow</span>
+                <span class="app-caption">Movimiento continuo. Sin interacción.</span>
+            </div>
+        </section>
+        <div class="controls">
+            <button type="button" class="control" id="loop" aria-pressed="false">Pausar animación</button>
+            <button type="button" class="control" id="slow" aria-pressed="false">Cámara lenta</button>
+        </div>
+        <p class="timing" id="motion-status" role="status"><span class="dot" aria-hidden="true"></span>Ciclo continuo de 5,4 segundos, con pausa integrada.</p>
+        <div class="examples">
+            <section class="example"><h2>También tiene que funcionar en pequeño</h2><div class="example-surface sizes">
+                <div class="sample" role="img" aria-label="Icono de 24 píxeles" style="--size:24px;--weight:40"><span class="mark-host"></span><span>24 px</span></div>
+                <div class="sample" role="img" aria-label="Icono de 40 píxeles" style="--size:40px;--weight:32"><span class="mark-host"></span><span>40 px</span></div>
+                <div class="sample" role="img" aria-label="Icono de 56 píxeles" style="--size:56px;--weight:28"><span class="mark-host"></span><span>56 px</span></div>
+            </div></section>
+            <section class="example"><h2>En la navegación de la aplicación</h2><div class="example-surface">
+                <div class="nav-example" role="img" aria-label="Símbolo de TicketFlow en navegación"><span class="mark-host"></span></div>
+                <div class="nav-copy"><strong>TicketFlow</strong><span>Tu espacio de trabajo</span></div><span class="nav-shortcut">Inicio</span>
+            </div></section>
+        </div>
+    </main>
+    <footer><span>SVG vectorial · Fondo transparente · Movimiento reducido compatible</span><span>Referencia de movimiento: <a href="https://atlassian.design/foundations/motion" target="_blank" rel="noopener noreferrer">Atlassian Design</a></span></footer>
+</div>
+<script>
+const root=document.documentElement;
+const template=document.getElementById('glyph-template');
+document.querySelectorAll('.mark-host').forEach(host=>{
+    const svg=template.content.cloneNode(true).querySelector('svg');
+    const base=document.createElementNS('http://www.w3.org/2000/svg','g');
+    base.classList.add('base');
+    const motion=document.createElementNS('http://www.w3.org/2000/svg','g');
+    motion.classList.add('motion');
+    [...svg.children].forEach(path=>{base.append(path.cloneNode(true));motion.append(path);});
+    svg.append(base,motion);host.append(svg);
+});
+const reduced=window.matchMedia('(prefers-reduced-motion: reduce)');
+let paused=false,slow=false;
+function status(){
+    document.getElementById('motion-status').textContent=reduced.matches?'Movimiento reducido: el icono permanece estático.':paused?'Animación en pausa. Continúa desde este mismo punto.':slow?'Cámara lenta: mismo ciclo, sin reiniciar el trazado.':'Ciclo continuo de 5,4 segundos, con pausa integrada.';
+}
+document.getElementById('loop').addEventListener('click',event=>{
+    paused=!paused;root.dataset.paused=String(paused);
+    event.currentTarget.setAttribute('aria-pressed',String(paused));
+    event.currentTarget.textContent=paused?'Continuar animación':'Pausar animación';status();
+});
+document.getElementById('slow').addEventListener('click',event=>{
+    slow=!slow;
+    if(document.getAnimations)document.getAnimations().forEach(animation=>animation.updatePlaybackRate(slow?.4:1));
+    event.currentTarget.setAttribute('aria-pressed',String(slow));status();
+});
+document.querySelectorAll('.theme [data-theme]').forEach(button=>button.addEventListener('click',()=>{
+    root.dataset.theme=button.dataset.theme;
+    document.querySelectorAll('.theme button').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
+}));
+document.addEventListener('visibilitychange',()=>{root.dataset.suspended=String(document.hidden);});
+reduced.addEventListener('change',status);status();
+</script>
+</body>
+</html>
