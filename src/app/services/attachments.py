@@ -73,9 +73,9 @@ class AttachmentService:
     @staticmethod
     def limits():
         return {
-            'max_files': getattr(settings, 'PUBLIC_ATTACHMENT_MAX_FILES', 5),
+            'max_files': getattr(settings, 'PUBLIC_ATTACHMENT_MAX_FILES', 10),
             'max_bytes': getattr(settings, 'PUBLIC_ATTACHMENT_MAX_BYTES', 15 * 1024 * 1024),
-            'max_total_bytes': getattr(settings, 'PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES', 25 * 1024 * 1024),
+            'max_total_bytes': getattr(settings, 'PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES', 50 * 1024 * 1024),
             'allowed_extensions': sorted(getattr(settings, 'PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS', set())),
         }
 
@@ -128,9 +128,20 @@ class AttachmentService:
         if (not isinstance(value, list) or any(type(i) is not int or i <= 0 or i > 2**63 - 1 for i in value)
                 or len(set(value)) != len(value)):
             raise APIValidationError('invalid_attachment_ids', 'attachment_ids debe contener IDs enteros únicos.', status=400)
-        if len(value) > getattr(settings, 'PUBLIC_ATTACHMENT_MAX_FILES', 5):
-            raise APIValidationError('too_many_files', 'Demasiados archivos por mensaje.', status=400)
+        max_files = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_FILES', 10)
+        if len(value) > max_files:
+            raise APIValidationError(
+                'too_many_files',
+                f'Demasiados archivos por mensaje: lleva {len(value)} y el máximo es {max_files}. Quita alguno antes de enviar.',
+                status=400,
+            )
         return sorted(value)
+
+    @staticmethod
+    def size_label(size):
+        if size < 1024 * 1024:
+            return f'{max(1, round(size / 1024))} KB'
+        return f'{size / (1024 * 1024):.1f}'.rstrip('0').rstrip('.').replace('.', ',') + ' MB'
 
     @staticmethod
     def lock_actor(actor):
@@ -171,24 +182,76 @@ class AttachmentService:
                                              fingerprint=fingerprint, **result)
 
     @staticmethod
-    def validate_batch(attachments):
-        if len(attachments) > getattr(settings, 'PUBLIC_ATTACHMENT_MAX_FILES', 5):
-            raise APIValidationError('too_many_files', 'Demasiados archivos por mensaje.', status=400)
-        if sum(a.size or 0 for a in attachments) > getattr(settings, 'PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES', 25 * 1024 * 1024):
-            raise APIValidationError('attachments_too_large', 'El conjunto de adjuntos excede el tamaño permitido.', status=400)
-        if any((a.size or 0) > getattr(settings, 'PUBLIC_ATTACHMENT_MAX_BYTES', 15 * 1024 * 1024) for a in attachments):
-            raise APIValidationError('file_too_large', 'Un adjunto excede el tamaño permitido.', status=400)
+    def validate_batch(attachments, adding=None):
+        """Límites de un mensaje. Con adding (el archivo que se está subiendo), los
+        avisos explican qué le pasa a ese archivo en concreto."""
+        max_files = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_FILES', 10)
+        max_total = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES', 50 * 1024 * 1024)
+        max_bytes = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_BYTES', 15 * 1024 * 1024)
+        name = AttachmentService.original_filename(adding.name) if adding is not None else ''
+        label = AttachmentService.size_label
+        if len(attachments) > max_files:
+            files = f'{max_files} archivo' if max_files == 1 else f'{max_files} archivos'
+            message = (f'No se ha añadido «{name}»: este mensaje ya tiene {files}, el máximo por mensaje. '
+                       'Quita alguno para añadir otro.') if adding is not None else (
+                       f'Demasiados archivos por mensaje: lleva {len(attachments)} y el máximo es {max_files}. '
+                       'Quita alguno antes de enviar.')
+            raise APIValidationError('too_many_files', message, status=400)
+        total = sum(a.size or 0 for a in attachments)
+        if total > max_total:
+            message = (f'No se ha añadido «{name}»: con él los adjuntos de este mensaje sumarían {label(total)} '
+                       f'y el máximo es {label(max_total)}.') if adding is not None else (
+                       f'Los adjuntos de este mensaje suman {label(total)} y el máximo es {label(max_total)}.')
+            raise APIValidationError('attachments_too_large', message, status=400)
+        too_big = next((a for a in attachments if (a.size or 0) > max_bytes), None)
+        if too_big is not None:
+            too_big_name = name if too_big is adding else AttachmentService.filename(too_big)
+            raise APIValidationError(
+                'file_too_large',
+                f'«{too_big_name}» ocupa {label(too_big.size)} y el máximo por archivo es {label(max_bytes)}.',
+                status=400,
+            )
+
+    @staticmethod
+    def validate_email_size(attachments):
+        """La respuesta pública viaja por correo, que admite menos que un mensaje."""
+        max_email = getattr(settings, 'OUTBOUND_EMAIL_ATTACHMENT_MAX_BYTES', 25 * 1024 * 1024)
+        total = sum(a.size or 0 for a in attachments)
+        if total > max_email:
+            label = AttachmentService.size_label
+            raise APIValidationError(
+                'email_attachments_too_large',
+                f'Una respuesta pública se envía por correo y el correo admite como máximo {label(max_email)} '
+                f'de adjuntos; este mensaje lleva {label(total)}. Quita adjuntos o publícalo como nota interna.',
+                status=400,
+            )
 
     @staticmethod
     def pending_for_publish(actor, ids, ticket=None, draft=None):
         attachments = list(Attachment.objects.select_for_update().filter(id__in=ids).order_by('id'))
-        if len(attachments) != len(ids) or any(
-            a.uploaded_by_id != actor.id or a.comment_id is not None or not a.storage_key
+        if len(attachments) != len(ids):
+            missing = len(ids) - len(attachments)
+            raise APIValidationError(
+                'invalid_attachments',
+                (f'{missing} de los adjuntos ya no están en el servidor' if missing > 1 else 'Un adjunto ya no está en el servidor')
+                + ': lo subido y no publicado se borra a las 24 horas. Quítalo del mensaje y vuelve a añadirlo.',
+                status=400,
+            )
+        # Lo ajeno va antes que lo publicado para no revelar nombres de otros.
+        if any(
+            a.uploaded_by_id != actor.id or not a.storage_key
             or a.ticket_id != (ticket.id if ticket else None)
             or (draft is not None and a.draft_id != draft.id)
             for a in attachments
         ):
-            raise APIValidationError('invalid_attachments', 'Algún adjunto no existe, no te pertenece o ya está publicado.', status=400)
+            raise APIValidationError('invalid_attachments', 'Algún adjunto no te pertenece o es de otro ticket.', status=400)
+        published = next((a for a in attachments if a.comment_id is not None), None)
+        if published is not None:
+            raise APIValidationError(
+                'invalid_attachments',
+                f'«{AttachmentService.filename(published)}» ya se publicó en otro mensaje. Quítalo y vuelve a añadirlo.',
+                status=400,
+            )
         AttachmentService.validate_batch(attachments)
         return attachments
 
@@ -257,27 +320,41 @@ class AttachmentService:
     @staticmethod
     def validate_files(files):
         files = list(files or [])
-        max_files = getattr(settings, "PUBLIC_ATTACHMENT_MAX_FILES", 5)
+        max_files = getattr(settings, "PUBLIC_ATTACHMENT_MAX_FILES", 10)
         max_bytes = getattr(settings, "PUBLIC_ATTACHMENT_MAX_BYTES", 15 * 1024 * 1024)
-        max_total_bytes = getattr(settings, "PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES", 25 * 1024 * 1024)
+        max_total_bytes = getattr(settings, "PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES", 50 * 1024 * 1024)
         allowed = getattr(settings, "PUBLIC_ATTACHMENT_ALLOWED_EXTENSIONS", set())
+        label = AttachmentService.size_label
         if len(files) > max_files:
-            raise APIValidationError("too_many_files", f"Puedes adjuntar un máximo de {max_files} archivos.", status=400)
-        if sum(getattr(uploaded, "size", 0) for uploaded in files) > max_total_bytes:
-            mb = max_total_bytes // (1024 * 1024)
+            raise APIValidationError(
+                "too_many_files",
+                f"Has elegido {len(files)} archivos y el máximo es {max_files} por mensaje.",
+                status=400,
+            )
+        total = sum(getattr(uploaded, "size", 0) for uploaded in files)
+        if total > max_total_bytes:
             raise APIValidationError(
                 "attachments_too_large",
-                f"El conjunto de adjuntos debe ocupar como máximo {mb} MB.",
+                f"Los adjuntos suman {label(total)} y el máximo por mensaje es {label(max_total_bytes)}.",
                 status=400,
             )
         for uploaded in files:
             name = os.path.basename((uploaded.name or "archivo").replace("\\", "/"))
             ext = os.path.splitext(name)[1].lower().lstrip(".")
             if not ext or ext not in allowed:
-                raise APIValidationError("file_type_not_allowed", f"El tipo de archivo .{ext or '?'} no está permitido.", status=400)
+                raise APIValidationError(
+                    "file_type_not_allowed",
+                    f"«{AttachmentService.original_filename(name)}»: el tipo de archivo .{ext or '?'} no está permitido. "
+                    f"Se admiten: {', '.join(sorted(allowed))}.",
+                    status=400,
+                )
             if uploaded.size > max_bytes:
-                mb = max_bytes // (1024 * 1024)
-                raise APIValidationError("file_too_large", f"Cada archivo debe ocupar como máximo {mb} MB.", status=400)
+                raise APIValidationError(
+                    "file_too_large",
+                    f"«{AttachmentService.original_filename(name)}» ocupa {label(uploaded.size)} "
+                    f"y el máximo por archivo es {label(max_bytes)}.",
+                    status=400,
+                )
         return files
 
     @staticmethod
@@ -385,20 +462,35 @@ class AttachmentService:
 
     @staticmethod
     @retry_attachment_mutation
-    def upload(uploaded, user, ticket=None, draft_key=None, upload_key=None):
+    def upload(uploaded, user, ticket=None, draft_key=None, upload_key=None, pending_ids=None):
+        """Sube un archivo pendiente de publicar.
+
+        pending_ids son los adjuntos que el editor sigue teniendo en este mensaje:
+        el límite se cuenta sobre ellos. Lo que quedó subido en una pestaña cerrada
+        o recargada no se ve, así que no puede bloquear (lo borra la limpieza de
+        huérfanos). Sin pending_ids (clientes antiguos) cuentan todos los pendientes.
+        """
         if is_readonly(user):
             raise APIValidationError('forbidden', 'Tu rol es de solo lectura.', status=403)
         if ticket is not None and draft_key is not None:
             raise APIValidationError('invalid_upload_scope', 'Indica ticket o borrador, no ambos.', status=400)
         draft_key = AttachmentService.parse_uuid(draft_key, 'draft_key', required=ticket is None)
         upload_key = AttachmentService.parse_uuid(upload_key, 'upload_key', required=ticket is None)
+        if pending_ids is not None:
+            pending_ids = AttachmentService.parse_ids(pending_ids, from_post=True)
         scope = {'ticket_id': ticket.pk if ticket else None, 'draft_key': str(draft_key) if draft_key else None}
         AttachmentService.validate_files([uploaded])
         digest, size = hashlib.sha256(), 0
+        max_bytes = getattr(settings, 'PUBLIC_ATTACHMENT_MAX_BYTES', 15 * 1024 * 1024)
         for chunk in uploaded.chunks():
             size += len(chunk)
-            if size > getattr(settings, 'PUBLIC_ATTACHMENT_MAX_BYTES', 15 * 1024 * 1024):
-                raise APIValidationError('file_too_large', 'El archivo excede el tamaño permitido.', status=400)
+            if size > max_bytes:
+                raise APIValidationError(
+                    'file_too_large',
+                    f'«{AttachmentService.original_filename(uploaded.name)}» ocupa más de '
+                    f'{AttachmentService.size_label(max_bytes)}, el máximo por archivo.',
+                    status=400,
+                )
             digest.update(chunk)
         uploaded.seek(0)
         if uploaded.size != size:
@@ -432,8 +524,10 @@ class AttachmentService:
                     draft, _ = AttachmentDraft.objects.get_or_create(uploaded_by=user, key=draft_key)
                     if draft.published_at:
                         raise APIValidationError('draft_already_published', 'Este borrador ya se publicó.', status=409)
-                pending = list(Attachment.objects.filter(uploaded_by=user, ticket=ticket, draft=draft, comment__isnull=True))
-                AttachmentService.validate_batch([*pending, uploaded])
+                pending = Attachment.objects.filter(uploaded_by=user, ticket=ticket, draft=draft, comment__isnull=True)
+                if pending_ids is not None:
+                    pending = pending.filter(id__in=pending_ids)
+                AttachmentService.validate_batch([*pending, uploaded], adding=uploaded)
                 stored = AttachmentService.save(uploaded, ticket, user, draft=draft)
                 AttachmentService.remember(user, 'upload', upload_key, fingerprint, attachment=stored, result={'scope': scope})
             return stored

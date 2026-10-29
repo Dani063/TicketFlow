@@ -314,7 +314,10 @@ window.initTicketPane = function (root, ctx) {
         return lastAttempt.id;
     }
 
-    function responseError(data, fallback) {
+    // Con la respuesta, explica también los fallos sin JSON (WAF, sesión, caída).
+    function responseError(data, fallback, response) {
+        const describe = window.TicketAttachments?.failureMessage;
+        if (response && describe) return describe(response.status, response.headers.get('server'), data, fallback);
         return data?.detail || data?.error?.message
             || (typeof data?.error === 'string' ? data.error : '') || fallback;
     }
@@ -462,7 +465,7 @@ window.initTicketPane = function (root, ctx) {
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok || !data.ticket_id) {
-                window.toast.error(responseError(data, 'No se pudo crear el ticket. Tu borrador se conserva.'));
+                window.toast.error(responseError(data, 'No se pudo crear el ticket', response) + ' Tu borrador se conserva.');
                 return;
             }
             attachments.clear();
@@ -544,7 +547,7 @@ window.initTicketPane = function (root, ctx) {
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) {
-                window.toast.error(responseError(data, 'No se pudo publicar. El texto y los adjuntos se conservan.'));
+                window.toast.error(responseError(data, 'No se pudo publicar', response) + ' El texto y los adjuntos se conservan.');
                 return;
             }
             appendPublishedComment(data);

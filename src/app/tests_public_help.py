@@ -146,6 +146,17 @@ class PublicHelpCenterTests(TestCase):
         self.assertContains(response, "no está permitido")
         self.assertFalse(Ticket.objects.filter(requester__email="bad-file@example.com").exists())
 
+    def test_request_form_and_errors_show_configured_attachment_limits(self):
+        url = reverse("help_request", args=["ecomfax", "es"])
+        self.assertContains(self.client.get(url, HTTP_HOST="localhost"),
+                            "Hasta 10 archivos de 15 MB cada uno (50 MB en total)")
+        url_en = reverse("help_request", args=["ecomfax", "en"])
+        self.assertContains(self.client.get(url_en, HTTP_HOST="localhost"), "Up to 10 files of 15 MB each (50 MB total)")
+        payload = self._valid_payload(url_en, "many-files@example.com")
+        payload["attachments"] = [SimpleUploadedFile(f"{i}.txt", b"x", content_type="text/plain") for i in range(11)]
+        response = self.client.post(url_en, payload, HTTP_HOST="localhost")
+        self.assertContains(response, "You can attach up to 10 files.")
+
     @override_settings(PUBLIC_TICKET_IP_LIMIT=1)
     def test_rate_limit_blocks_second_request(self):
         url = reverse("help_request", args=["ecomfax", "es"])

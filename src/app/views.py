@@ -2281,7 +2281,8 @@ def upload_attachment(request, ticket_id):
         return json_error('ticket_locked', 'El ticket está eliminado o cerrado.', status=409)
     try:
         att = AttachmentService.upload(_single_attachment_file(request), request.user, ticket=ticket,
-                                       upload_key=request.POST.get('upload_key'), draft_key=request.POST.get('draft_key'))
+                                       upload_key=request.POST.get('upload_key'), draft_key=request.POST.get('draft_key'),
+                                       pending_ids=request.POST.get('pending_ids'))
     except APIValidationError as exc:
         return json_error(exc.code, exc.message, status=exc.status)
 
@@ -2300,7 +2301,8 @@ def _single_attachment_file(request):
 def upload_draft_attachment(request):
     try:
         att = AttachmentService.upload(_single_attachment_file(request), request.user,
-                                       draft_key=request.POST.get('draft_key'), upload_key=request.POST.get('upload_key'))
+                                       draft_key=request.POST.get('draft_key'), upload_key=request.POST.get('upload_key'),
+                                       pending_ids=request.POST.get('pending_ids'))
     except APIValidationError as exc:
         return json_error(exc.code, exc.message, status=exc.status)
     return JsonResponse(AttachmentService.metadata(att))

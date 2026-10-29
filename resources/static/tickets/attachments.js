@@ -3,13 +3,17 @@
  *
  * mount(root, { ticketId, getCsrfToken }) is idempotent. Public instance:
  *   hasFiles(), ready(), ids(), draftKey (UUID), clear(), lock(bool), dispose().
- * clear() is for a successful publication ONLY: it never deletes server files.
+ * clear() is for a successful publication ONLY: it never deletes published
+ * files, only the uploads left out of it (images deleted from the text).
  * It returns false while uploads/removals are incomplete. dispose() returns a
  * Promise<boolean>; a failed pending-file cleanup keeps the pane usable.
  *
  * Optional root datasets (byte limits are integers): attachmentMaxFiles,
  * attachmentMaxBytes, attachmentMaxTotalBytes, attachmentAllowedExtensions
- * (CSV), attachmentCancelUrl. Defaults: 5 / 15 MiB / 25 MiB.
+ * (CSV), attachmentCancelUrl. Defaults: 10 / 15 MiB / 50 MiB.
+ * Each upload sends pending_ids, the files this composer still holds: the
+ * server counts the limit on them, never on uploads left by a closed tab.
+ * failureMessage(status, server, data, fallback) describes a failed request.
  * Cancellation POST /attachments/uploads/cancel/ uses JSON
  * { upload_key, ticket_id } OR { upload_key, draft_key }, never both scopes.
  * The server must record a tombstone even
@@ -74,6 +78,22 @@
         if (bytes < 1024) return bytes + ' B';
         const power = Math.min(3, Math.floor(Math.log(bytes) / Math.log(1024)));
         return new Intl.NumberFormat('es', { maximumFractionDigits: 1 }).format(bytes / (1024 ** power)) + ' ' + ['B', 'KB', 'MB', 'GB'][power];
+    }
+
+    // Texto de una respuesta fallida: el mensaje del servidor si lo trae y, si
+    // no, qué capa la ha rechazado. Termina en punto para poder añadir contexto.
+    function failureMessage(status, server, data, fallback) {
+        const own = data && typeof data === 'object'
+            ? data.error?.message || data.detail || (typeof data.error === 'string' ? data.error : '') : '';
+        if (own) return String(own);
+        if (!status) return 'Sin conexión con TicketFlow: la petición no ha llegado al servidor. Comprueba la conexión y reinténtalo.';
+        if (status === 418 || (status === 403 && /awselb/i.test(server || ''))) {
+            return 'El cortafuegos (WAF) ha bloqueado la petición antes de llegar a TicketFlow (HTTP ' + status + '). Avisa a sistemas indicando el ticket y la hora.';
+        }
+        if (status === 413) return 'La petición supera el tamaño máximo que admite el servidor (HTTP 413).';
+        if (status === 401 || status === 403) return 'La sesión ha caducado o no tienes permiso (HTTP ' + status + '). Recarga la página e inicia sesión de nuevo.';
+        if (status >= 500) return 'TicketFlow no ha podido procesarlo ahora mismo (HTTP ' + status + '). Reinténtalo en unos minutos.';
+        return String(fallback || 'No se pudo completar la operación').replace(/\.$/, '') + ' (HTTP ' + status + ').';
     }
 
     function safeId(id) {
@@ -608,9 +628,9 @@
         const uploadUrl = ticketId ? '/tickets/' + encodeURIComponent(ticketId) + '/attachments/upload/' : '/attachments/drafts/upload/';
         const positive = (value, fallback) => Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : fallback;
         const limits = {
-            files: positive(root.dataset.attachmentMaxFiles, 5),
+            files: positive(root.dataset.attachmentMaxFiles, 10),
             bytes: positive(root.dataset.attachmentMaxBytes, 15 * 1024 * 1024),
-            total: positive(root.dataset.attachmentMaxTotalBytes, 25 * 1024 * 1024)
+            total: positive(root.dataset.attachmentMaxTotalBytes, 50 * 1024 * 1024)
         };
         const extensions = (root.dataset.attachmentAllowedExtensions || '.pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp,.txt,.csv,.doc,.docx,.xls,.xlsx,.zip,.log')
             .split(',').map(ext => ext.trim().toLowerCase()).filter(Boolean).map(ext => ext.startsWith('.') ? ext : '.' + ext);
@@ -657,9 +677,23 @@
             // Una imagen ya insertada solo cuenta mientras siga en el texto.
             return !(item.inline && item.state === 'uploaded') || inEditor(item);
         }
+        // Borrar o deshacer una imagen del texto cambia lo que cuenta: el resumen
+        // se recalcula con cada cambio del editor (una vez por fotograma).
+        let watchedQuill = null, recount = 0;
+        function watchEditor(quill) {
+            if (watchedQuill === quill) return;
+            const onChange = () => {
+                if (recount || disposed) return;
+                recount = window.requestAnimationFrame(() => { recount = 0; changed(); });
+            };
+            quill.on('text-change', onChange);
+            unbind.push(() => quill.off('text-change', onChange));
+            watchedQuill = quill;
+        }
         function insertInline(item) {
             const quill = editorQuill();
             if (!quill || !item.meta.preview_url) { item.inline = false; return; }
+            watchEditor(quill);
             const length = quill.getLength();
             let at = Math.min(Number.isInteger(item.insertAt) ? item.insertAt : length - 1, length - 1);
             // La imagen va en su propia línea y se sigue escribiendo debajo, como
@@ -762,15 +796,20 @@
             if (focused) view.card.querySelector('[data-action="' + focused + '"]')?.focus({ preventScroll: true });
         }
 
-        function totals() { return items.reduce((sum, item) => sum + item.file.size, 0); }
+        // Solo cuenta lo que se va a enviar: una imagen borrada del texto no ocupa hueco.
+        function totals() { return items.filter(counted).reduce((sum, item) => sum + item.file.size, 0); }
 
         function changed(item) {
             if (disposed) return;
             if (item) updateCard(item);
             const shown = items.filter(entry => !(entry.inline && entry.state === 'uploaded'));
             const done = shown.filter(entry => entry.state === 'uploaded').length;
+            const used = items.filter(counted);
+            const inText = used.filter(entry => entry.inline && entry.state === 'uploaded').length;
             summary.textContent = shown.length
-                ? shown.length + (shown.length === 1 ? ' archivo · ' : ' archivos · ') + sizeLabel(totals()) + ' / ' + sizeLabel(limits.total) + ' · ' + done + ' de ' + shown.length + ' listos'
+                ? used.length + ' de ' + limits.files + ' archivos' + (inText ? ' (' + inText + ' en el texto)' : '')
+                    + ' · ' + sizeLabel(totals()) + ' de ' + sizeLabel(limits.total)
+                    + ' · ' + done + ' de ' + shown.length + (shown.length === 1 ? ' listo' : ' listos')
                 : '';
             summary.hidden = !shown.length;
             list.hidden = !shown.length;
@@ -805,7 +844,8 @@
 
         function deleteMeta(item, meta) {
             if (item.published || !meta || meta.id === null) return Promise.resolve();
-            return post('/attachments/' + encodeURIComponent(meta.id) + '/pending/delete/', undefined, false, item.cancelRequested);
+            // 404: ya no está en el servidor (limpieza de 24 h, otra pestaña), que es lo que se pedía.
+            return post('/attachments/' + encodeURIComponent(meta.id) + '/pending/delete/', undefined, false, true);
         }
 
         async function cancelUpload(item) {
@@ -891,15 +931,12 @@
                 item.state = 'processing'; changed(item);
             });
             xhr.addEventListener('load', () => {
-                let data;
-                try { data = typeof xhr.response === 'object' && xhr.response ? xhr.response : JSON.parse(xhr.responseText); }
-                catch (_) { fail('Error: el servidor no confirmó la subida. Reintenta.'); return; }
+                // responseType json: una respuesta que no es JSON (WAF, proxy) llega como null.
+                const data = xhr.response && typeof xhr.response === 'object' ? xhr.response : null;
                 if (xhr.status < 200 || xhr.status >= 300 || !safeId(data?.id)) {
-                    const message = xhr.status === 413 ? 'Error: el archivo supera el límite del servidor.'
-                        : [401, 403].includes(xhr.status) ? 'Error: no se pudo autorizar la subida. Comprueba tu sesión y reintenta.'
-                        : xhr.status === 415 ? 'Error: este tipo de archivo no está permitido.'
-                        : 'Error al subir el archivo. Reintenta.';
-                    fail(message); return;
+                    fail(failureMessage(xhr.status, xhr.getResponseHeader('server'), data,
+                        xhr.status >= 200 && xhr.status < 300 ? 'El servidor no confirmó la subida. Reinténtalo' : 'No se pudo subir el archivo'));
+                    return;
                 }
                 const meta = metadata(data);
                 if (item.published) { finish(); return; }
@@ -921,8 +958,8 @@
                 if (item.inline) insertInline(item);
                 finish();
             });
-            xhr.addEventListener('error', () => fail('Error de conexión. Reintenta la subida.'));
-            xhr.addEventListener('timeout', () => fail('Error: la subida tardó demasiado. Reintenta.'));
+            xhr.addEventListener('error', () => fail(failureMessage(0)));
+            xhr.addEventListener('timeout', () => fail('La subida ha tardado más de 3 minutos y se ha cortado. Pulsa Reintentar.'));
             xhr.addEventListener('abort', () => fail('Subida cancelada.'));
             changed(item);
             try {
@@ -934,6 +971,7 @@
                 form.append('file', item.file, item.file.name);
                 if (!ticketId) form.append('draft_key', item.draftKey);
                 form.append('upload_key', item.key);
+                form.append('pending_ids', JSON.stringify(api.ids()));
                 xhr.send(form);
             } catch (_) { fail('Error: no se pudo iniciar la subida. Reintenta.'); }
         }
@@ -947,10 +985,23 @@
             for (const file of files) {
                 if (!(file instanceof window.Blob)) continue;
                 const ext = /\.[^.]+$/.exec(file.name.toLowerCase())?.[0] || '';
-                if (extensions.length && !extensions.includes(ext)) { rejected.push(file.name + ': tipo de archivo no permitido.'); continue; }
-                if (items.length >= limits.files) { rejected.push('Puedes adjuntar hasta ' + limits.files + ' archivos.'); continue; }
-                if (file.size > limits.bytes) { rejected.push(file.name + ': máximo ' + sizeLabel(limits.bytes) + ' por archivo.'); continue; }
-                if (totals() + file.size > limits.total) { rejected.push('El total no puede superar ' + sizeLabel(limits.total) + '.'); continue; }
+                const name = '«' + file.name + '»';
+                if (extensions.length && !extensions.includes(ext)) {
+                    rejected.push(name + ': el tipo de archivo ' + (ext || 'sin extensión') + ' no está permitido. Se admiten: ' + extensions.join(', ') + '.');
+                    continue;
+                }
+                if (items.filter(counted).length >= limits.files) {
+                    rejected.push('No se ha añadido ' + name + ': este mensaje ya tiene ' + limits.files + ' archivos, el máximo por mensaje. Quita alguno para añadir otro.');
+                    continue;
+                }
+                if (file.size > limits.bytes) {
+                    rejected.push(name + ' ocupa ' + sizeLabel(file.size) + ' y el máximo por archivo es ' + sizeLabel(limits.bytes) + '.');
+                    continue;
+                }
+                if (totals() + file.size > limits.total) {
+                    rejected.push('No se ha añadido ' + name + ': con él los adjuntos sumarían ' + sizeLabel(totals() + file.size) + ' y el máximo por mensaje es ' + sizeLabel(limits.total) + '.');
+                    continue;
+                }
                 const kind = localKind(file);
                 const item = {
                     inline: !!quill && kind === 'image', insertAt: quill && kind === 'image' ? insertAt++ : null,
@@ -995,8 +1046,14 @@
             clear() {
                 if (disposed) return false;
                 if (!api.ready()) { report('Espera a que todos los adjuntos estén listos antes de publicar.'); return false; }
-                // No deletion, cancellation request, or abort on a published batch.
-                items.slice().forEach(item => { item.published = true; forget(item); });
+                // Las imágenes borradas del texto no se han publicado: se retiran del
+                // servidor para que no queden pendientes. Lo publicado no se toca.
+                const published = new Set(api.ids());
+                items.slice().forEach(item => {
+                    if (item.meta.id !== null && !published.has(item.meta.id)) void deleteMeta(item, item.meta).catch(() => {});
+                    item.published = true;
+                    forget(item);
+                });
                 draftKey = uuid();
                 report(''); changed();
                 return true;
@@ -1095,6 +1152,17 @@
             event.preventDefault();
             event.returnValue = '';
         });
+        // Al cerrar o recargar la página se retira del servidor lo subido y no
+        // publicado (las peticiones van con keepalive). Si la página se queda en
+        // la caché del navegador (persisted), puede volver y se conserva.
+        listen(window, 'pagehide', event => {
+            if (event.persisted || disposed) return;
+            items.forEach(item => {
+                if (item.published) return;
+                if (item.meta.id !== null) void deleteMeta(item, item.meta).catch(() => {});
+                else if (item.attempted && ['uploading', 'processing'].includes(item.state)) void cancelUpload(item).catch(() => {});
+            });
+        });
         listen(root, 'tf:before-pane-close', event => {
             if (event.target !== root || event.defaultPrevented) return;
             if (!confirmClose()) { event.preventDefault(); return; }
@@ -1112,5 +1180,5 @@
         return api;
     }
 
-    window.TicketAttachments = Object.freeze({ mount, render });
+    window.TicketAttachments = Object.freeze({ mount, render, failureMessage });
 })(window);

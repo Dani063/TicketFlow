@@ -86,7 +86,15 @@ La implementación actual solicita SSE-S3 (`AES256`) en cada escritura.
 - TicketFlow valida permisos sobre el ticket antes de generar una URL S3
   firmada con Signature V4 de cinco minutos para descargar el objeto privado.
   El navegador recibe esa URL temporal, nunca acceso público al bucket.
-- Se admiten hasta 5 archivos, 15 MB por archivo y 25 MB en conjunto.
+- Se admiten hasta 10 archivos, 15 MB por archivo y 50 MB en conjunto por
+  mensaje. El límite se cuenta por ticket (o por borrador de ticket nuevo):
+  lo pendiente en un ticket no resta en otro.
+- El límite se cuenta sobre lo que el editor sigue teniendo (`pending_ids` en
+  cada subida). Lo que quedó subido en una pestaña cerrada o recargada no se ve
+  y por eso no cuenta; el editor además lo retira al cerrar la página.
+- Una respuesta pública viaja por correo, que admite 25 MB de adjuntos
+  (`OUTBOUND_EMAIL_ATTACHMENT_MAX_BYTES`): por encima se rechaza al publicar
+  con un aviso que propone quitar adjuntos o publicarla como nota interna.
 - Una subida pendiente se puede eliminar desde el editor. Las abandonadas se
   borran automáticamente después de 24 horas mediante Celery Beat.
 - Si falla la escritura de base de datos tras subir el objeto, la aplicación
@@ -106,9 +114,9 @@ PUBLIC_ATTACHMENTS_S3_BUCKET=dev-ticketflow-filestorage
 PUBLIC_ATTACHMENTS_S3_REGION=eu-west-1
 HELP_CONTENT_S3_BUCKET=dev-ticketflow-filestorage
 HELP_CONTENT_S3_REGION=eu-west-1
-PUBLIC_ATTACHMENT_MAX_FILES=5
+PUBLIC_ATTACHMENT_MAX_FILES=10
 PUBLIC_ATTACHMENT_MAX_BYTES=15728640
-PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES=26214400
+PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES=52428800
 ATTACHMENT_ORPHAN_MAX_AGE_HOURS=24
 ATTACHMENT_DOWNLOAD_URL_TTL_SECONDS=300
 OUTBOUND_EMAIL_ATTACHMENT_MAX_BYTES=26214400

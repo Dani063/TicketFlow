@@ -132,9 +132,9 @@ const file = (name, content = 'Prueba local de adjuntos\n', mimeType = 'text/pla
     await pane().locator('#attach-input').setInputFiles({name:'demasiado.txt',mimeType:'text/plain',buffer:Buffer.alloc(15*1024*1024+1)});
     assert.equal(await queue().locator('.tf-att-card').count(),0);
     assert((await queue().innerText()).includes('máximo'));
-    await pane().locator('#attach-input').setInputFiles(Array.from({length:6},(_,i)=>file('Límite '+run+' '+i+'.txt')));
-    await ready(5);
-    assert((await queue().innerText()).includes('hasta 5'));
+    await pane().locator('#attach-input').setInputFiles(Array.from({length:11},(_,i)=>file('Límite '+run+' '+i+'.txt')));
+    await ready(10);
+    assert((await queue().innerText()).includes('ya tiene 10 archivos, el máximo por mensaje'));
     await removeAll();
     assert((await ctx.request.get(onlyFiles.attachments[0].download_url)).ok());
     console.log('PASS file limits, pending removal, published file retained');

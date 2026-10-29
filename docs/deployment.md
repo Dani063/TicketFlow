@@ -147,7 +147,7 @@ Todas vienen del ConfigMap `ticketflow-config` y el Secret `ticketflow-secrets`.
 | `ATTACHMENT_STORAGE_BACKEND`, `ATTACHMENT_STORAGE_PREFIX` | ConfigMap | Backend de almacenamiento de adjuntos y prefijo de claves S3 por entorno |
 | `PUBLIC_ATTACHMENTS_S3_BUCKET`, `PUBLIC_ATTACHMENTS_S3_REGION` | ConfigMap | Bucket/región S3 de adjuntos públicos |
 | `HELP_CONTENT_S3_BUCKET`, `HELP_CONTENT_S3_REGION` | ConfigMap | Bucket/región S3 de contenido del Help Center |
-| `PUBLIC_ATTACHMENT_MAX_FILES`, `PUBLIC_ATTACHMENT_MAX_BYTES`, `PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES` | ConfigMap | Límites de adjuntos en formularios públicos |
+| `PUBLIC_ATTACHMENT_MAX_FILES`, `PUBLIC_ATTACHMENT_MAX_BYTES`, `PUBLIC_ATTACHMENT_MAX_TOTAL_BYTES` | ConfigMap | Límites de adjuntos por mensaje (editor y formularios públicos): 10 archivos, 15 MB y 50 MB por defecto |
 | `ATTACHMENT_ORPHAN_MAX_AGE_HOURS` | ConfigMap | Antigüedad a partir de la cual `cleanup_orphan_attachments` borra adjuntos huérfanos |
 | `ATTACHMENT_DOWNLOAD_URL_TTL_SECONDS` | ConfigMap | TTL de las URL firmadas de descarga de adjuntos |
 | `OUTBOUND_EMAIL_ATTACHMENT_MAX_BYTES` | ConfigMap | Límite de tamaño de adjuntos en email saliente |

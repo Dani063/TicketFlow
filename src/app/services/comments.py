@@ -66,6 +66,10 @@ class CommentService:
         attachments = AttachmentService.pending_for_publish(actor, attachment_ids, ticket=ticket)
         if not content and not html_body and not attachments:
             raise APIValidationError('empty_comment', 'El mensaje no puede estar vacío.', status=400)
+        inbound = via_channel == 'email' or bool(email_message_id)
+        if send_requester_email and final_is_public and is_agent(actor) and not inbound:
+            # Mejor avisar ahora que dejar al cliente sin el correo.
+            AttachmentService.validate_email_size(attachments)
         now = timezone.now()
 
         comment = Comment.objects.create(

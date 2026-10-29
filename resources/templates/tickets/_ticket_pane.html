@@ -2,9 +2,9 @@
 {# Ticket pane partial: rendered standalone when ?fragment=1, or included in create_ticket.html for deep-link page loads. #}
 <div class="ticket-pane" data-ticket-id="{{ ticket.id|default:'' }}"
      data-presence-enabled="{{ can_use_internal|yesno:'1,0' }}"
-     data-attachment-max-files="{{ attachment_limits.max_files|default:5 }}"
+     data-attachment-max-files="{{ attachment_limits.max_files|default:10 }}"
      data-attachment-max-bytes="{{ attachment_limits.max_bytes|default:15728640 }}"
-     data-attachment-max-total-bytes="{{ attachment_limits.max_total_bytes|default:26214400 }}"
+     data-attachment-max-total-bytes="{{ attachment_limits.max_total_bytes|default:52428800 }}"
      data-attachment-allowed-extensions="{{ attachment_limits.allowed_extensions|join:',' }}">
 {% if ticket and ticket.merged_into %}
 <div class="merge-banner">

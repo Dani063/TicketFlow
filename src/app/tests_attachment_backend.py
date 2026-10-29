@@ -277,7 +277,7 @@ class AttachmentBackendTests(AttachmentFixtures, TestCase):
         with patch.object(AttachmentService, 'save', side_effect=AssertionError('Must replay')):
             again = self.upload(key=key)
         self.assertEqual(first.id, again.id)
-        with self.assertRaisesMessage(APIValidationError, 'Demasiados archivos'):
+        with self.assertRaisesMessage(APIValidationError, 'ya tiene 1 archivo, el máximo por mensaje'):
             self.upload()
         self.assertEqual(Attachment.objects.count(), 1)
 

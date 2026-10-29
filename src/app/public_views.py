@@ -30,7 +30,7 @@ UI = {
         "try_request": "Si no encuentras la respuesta, envíanos una solicitud.", "home": "Inicio",
         "related": "Artículos relacionados", "request_title": "Contacta con soporte",
         "request_intro": "Describe tu duda o incidencia. Recibirás la confirmación por correo y podrás responder a ese mensaje para aportar más información.",
-        "attachments_help": "Hasta 5 archivos de 15 MB cada uno (25 MB en total). PDF, imágenes, Office, CSV, TXT, ZIP o LOG.",
+        "attachments_help": "Hasta {files} archivos de {file_mb} MB cada uno ({total_mb} MB en total). PDF, imágenes, Office, CSV, TXT, ZIP o LOG.",
         "send": "Enviar solicitud", "sending": "Enviando...", "success_title": "Hemos recibido tu solicitud",
         "success_body": "Nuestro equipo la revisará lo antes posible. Te hemos enviado un correo de confirmación; puedes responder a ese mensaje para añadir información.",
         "reference": "Tu referencia", "back_help": "Volver al centro de ayuda", "language": "Idioma",
@@ -48,7 +48,7 @@ UI = {
         "try_request": "If you cannot find the answer, send us a request.", "home": "Home",
         "related": "Related articles", "request_title": "Contact support",
         "request_intro": "Describe your question or issue. You will receive confirmation by email and can reply to that message with more information.",
-        "attachments_help": "Up to 5 files of 15 MB each (25 MB total). PDF, images, Office, CSV, TXT, ZIP or LOG.",
+        "attachments_help": "Up to {files} files of {file_mb} MB each ({total_mb} MB total). PDF, images, Office, CSV, TXT, ZIP or LOG.",
         "send": "Submit request", "sending": "Sending...", "success_title": "We've received your request",
         "success_body": "Our team will review it as soon as possible. We sent you a confirmation email; reply to it if you need to add information.",
         "reference": "Your reference", "back_help": "Back to help centre", "language": "Language",
@@ -62,13 +62,22 @@ UI = {
 }
 
 PUBLIC_ERROR_EN = {
-    "too_many_files": "You can attach up to five files.",
+    "too_many_files": "You can attach up to {files} files.",
     "file_type_not_allowed": "One of the selected file types is not allowed.",
-    "file_too_large": "Each attachment must be no larger than 15 MB.",
-    "attachments_too_large": "All attachments together must be no larger than 25 MB.",
+    "file_too_large": "Each attachment must be no larger than {file_mb} MB.",
+    "attachments_too_large": "All attachments together must be no larger than {total_mb} MB.",
     "rate_limited": "You have submitted too many requests. Wait a few minutes before trying again.",
     "portal_brand_missing": "This support portal is temporarily unavailable. Please try again later.",
 }
+
+
+def _attachment_limits():
+    limits = AttachmentService.limits()
+    return {
+        "files": limits["max_files"],
+        "file_mb": limits["max_bytes"] // (1024 * 1024),
+        "total_mb": limits["max_total_bytes"] // (1024 * 1024),
+    }
 
 
 def _center_or_404(request, center_slug):
@@ -98,7 +107,7 @@ def _context(request, center, locale, **extra):
     context = {
         "center": center,
         "locale": locale,
-        "ui": UI[locale],
+        "ui": dict(UI[locale], attachments_help=UI[locale]["attachments_help"].format(**_attachment_limits())),
         "canonical_url": canonical,
         "other_locale": "en" if locale == "es" else "es",
         "locale_switch_url": reverse("help_home", args=[center.slug, "en" if locale == "es" else "es"]),
@@ -221,7 +230,8 @@ def help_request(request, center_slug, locale):
                 center, data, request.FILES.getlist("attachments"), _client_ip(request),
             )
         except APIValidationError as exc:
-            form_error = PUBLIC_ERROR_EN.get(exc.code, "We could not submit your request. Please try again.") if locale == "en" else exc.message
+            form_error = PUBLIC_ERROR_EN.get(exc.code, "We could not submit your request. Please try again.").format(
+                **_attachment_limits()) if locale == "en" else exc.message
         else:
             proof = signing.dumps({"ticket": ticket.id, "center": center.slug}, salt="public-ticket-success")
             return redirect("help_request_success", center_slug=center.slug, locale=locale, proof=proof)
