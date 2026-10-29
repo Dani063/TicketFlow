@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="es" data-theme="dark" data-state="loading">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>TicketFlow · Propuesta de carga</title>
+<style>
+:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:dark;--bg:#17151d;--ink:#f4f2f7;--muted:#a39eae;--line:#34303d;--accent:#b69aef;--panel:#201d27;--button:#2b2634;--focus:#c4b5fd}
+:root[data-theme=light]{color-scheme:light;--bg:#fcfbfd;--ink:#282330;--muted:#777080;--line:#e6e2eb;--accent:#8b5cf6;--panel:#fff;--button:#f1eef6;--focus:#7c3aed}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--ink);min-height:100svh;font-synthesis:none;-webkit-font-smoothing:antialiased;transition:background .22s,color .22s}
+button{font:inherit;cursor:pointer}button:focus-visible,a:focus-visible{outline:2px solid var(--focus);outline-offset:4px}button:disabled{cursor:default}
+main{min-height:100svh;display:grid;place-items:center;padding:64px 24px 160px}
+.loading{width:min(100%,310px);text-align:center;animation:appear .45s ease-out both}
+.brand{display:inline-flex;gap:10px;align-items:center;margin-bottom:38px;color:var(--ink);font-size:17px;letter-spacing:-.45px;font-weight:600}
+.brand svg{width:29px;height:32px;color:var(--accent)}
+h1{font-size:20px;line-height:1.4;letter-spacing:-.45px;font-weight:500;margin:0 0 10px}
+.description{transition:opacity .18s ease; font-size:13px;line-height:1.65;color:var(--muted);margin:0;min-height:43px}
+.track{height:2px;background:var(--line);border-radius:2px;position:relative;overflow:hidden;width:240px;max-width:100%;margin:27px auto 0}
+.track::after{content:"";position:absolute;inset:0;background:var(--accent);width:38%;border-radius:inherit;transform:translateX(-110%);animation:travel 1.9s cubic-bezier(.45,0,.25,1) infinite}
+[data-state=success] .track::after{animation:none;transform:translateX(0);width:100%;transition:width .4s}
+.ready-icon{width:18px;height:18px;display:none;color:var(--accent);margin-right:6px;vertical-align:-3px}
+[data-state=success] .ready-icon{display:inline-block}
+.preview{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);color:var(--muted);font-size:11px;text-align:center}
+.preview-label{margin:0 0 10px;line-height:1.6}
+.tools{display:flex;align-items:center;justify-content:center;gap:16px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.themes{display:flex;gap:2px}
+.tools button{display:flex;gap:6px;align-items:center;justify-content:center;border:0;border-radius:6px;background:transparent;color:var(--muted);padding:7px 9px;font-size:11px;line-height:1.3;white-space:nowrap;transition:background .15s,color .15s}
+.tools button[aria-pressed=true]{background:var(--button);color:var(--ink)}
+.tools button:hover{color:var(--ink);background:var(--button)}
+.tools svg{width:13px;height:13px;flex-shrink:0}
+.divider{height:17px;width:1px;background:var(--line)}
+.sources{margin-top:10px;font-size:10px;color:var(--muted)}.sources a{color:inherit;text-decoration-color:var(--line);text-underline-offset:3px}
+@keyframes travel{0%{transform:translateX(-110%)}100%{transform:translateX(365%)}}
+@keyframes appear{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:480px){.tools{gap:6px;flex-wrap:wrap}.tools button{padding:7px}.preview{bottom:18px}.brand{margin-bottom:30px}}
+@media(prefers-reduced-motion:reduce){body,.tools button,.loading{transition:none;animation:none}.track::after{animation:quiet 3s ease-in-out infinite;transform:translateX(80%)}@keyframes quiet{50%{opacity:.35}}}
+</style>
+</head>
+<body>
+<main>
+    <section class="loading" aria-label="Inicio de sesión de TicketFlow">
+        <div class="brand">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1027 1044" fill="none">
+  
+  <g stroke="currentColor" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M82 290 493 57 907 293V764L493 1001 80 766Z"/>
+    <path d="M82 290H348L493 206 775 368 907 293"/>
+    <path d="M348 290 697 632H907"/>
+    <path d="M775 368V632"/>
+    <path d="M82 422H292L642 764H907"/>
+    <path d="M212 422V690L80 766"/>
+    <path d="M212 690 494 852 642 764"/>
+  </g>
+</svg>
+            <span>TicketFlow</span>
+        </div>
+        <div role="status" aria-live="polite" aria-atomic="true">
+            <h1><svg class="ready-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m4 10 4 4 8-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="heading">Preparando tu espacio</span></h1>
+            <p class="description" id="description">Estamos iniciando tu sesión.<br>Enseguida podrás continuar.</p>
+        </div>
+        <div class="track" role="progressbar" aria-label="Iniciando sesión" aria-busy="true" id="progress"></div>
+    </section>
+</main>
+<aside class="preview" aria-label="Controles de la propuesta">
+    <p class="preview-label">Demostración de estados · no inicia sesión ni conecta con tus datos</p>
+    <div class="tools">
+        <div class="themes" aria-label="Tema de la vista previa">
+            <button type="button" data-theme-choice="light" aria-pressed="false"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="10" cy="10" r="3.5"/><path d="M10 1v2m0 14v2M1 10h2m14 0h2M3.6 3.6 5 5m10 10 1.4 1.4M3.6 16.4 5 15M15 5l1.4-1.4"/></svg>Claro</button>
+            <button type="button" data-theme-choice="dark" aria-pressed="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M16.5 12A7 7 0 0 1 8 3.5 7 7 0 1 0 16.5 12Z"/></svg>Oscuro</button>
+        </div>
+        <span class="divider" aria-hidden="true"></span>
+        <button type="button" id="finish">Ver finalización <span aria-hidden="true">→</span></button>
+        <button type="button" id="restart" hidden>Repetir <span aria-hidden="true">↻</span></button>
+    </div>
+    <p class="sources">Referencias: <a href="https://vercel.com/geist/loading-dots" target="_blank" rel="noopener noreferrer">Geist</a> · <a href="https://atlassian.design/components/progress-bar/usage" target="_blank" rel="noopener noreferrer">Atlassian</a></p>
+</aside>
+<script>
+const root=document.documentElement;
+let timers=[];
+const phases=[
+    ['Validando credenciales','Comprobando tu acceso de forma segura.'],
+    ['Acceso concedido','Preparando tu espacio de trabajo.'],
+    ['Cargando tus tickets','Organizando tus vistas y preferencias.']
+];
+function phase(index){
+    const text=document.getElementById('description');
+    text.style.opacity='0';
+    timers.push(setTimeout(()=>{
+        if(root.dataset.state==='success') return;
+        document.getElementById('heading').textContent=phases[index][0];
+        text.textContent=phases[index][1];
+        text.style.opacity='1';
+    },180));
+}
+function play(){
+    timers.forEach(clearTimeout);timers=[];
+    state(false);phase(0);
+    timers.push(setTimeout(()=>phase(1),2600));
+    timers.push(setTimeout(()=>phase(2),5200));
+    timers.push(setTimeout(()=>state(true),8000));
+}
+document.querySelectorAll('[data-theme-choice]').forEach(button=>button.addEventListener('click',()=>{
+    root.dataset.theme=button.dataset.themeChoice;
+    document.querySelectorAll('[data-theme-choice]').forEach(item=>item.setAttribute('aria-pressed',String(item===button)));
+}));
+function state(done){
+    if(done){timers.forEach(clearTimeout);timers=[];}
+    document.getElementById('description').style.opacity='1';
+    root.dataset.state=done?'success':'loading';
+    document.getElementById('heading').textContent=done?'Todo listo':'Preparando tu espacio';
+    document.getElementById('description').replaceChildren();
+    const text=document.getElementById('description');
+    text.append(document.createTextNode(done?'Tu sesión está preparada.':'Estamos iniciando tu sesión.'),document.createElement('br'),document.createTextNode(done?'Bienvenido a TicketFlow.':'Enseguida podrás continuar.'));
+    const bar=document.getElementById('progress');
+    bar.setAttribute('aria-busy',String(!done));
+    bar.setAttribute('aria-label',done?'Carga completada':'Iniciando sesión');
+    if(done)bar.setAttribute('aria-valuenow','100');else bar.removeAttribute('aria-valuenow');
+    document.getElementById('finish').hidden=done;document.getElementById('restart').hidden=!done;
+}
+document.getElementById('finish').addEventListener('click',()=>state(true));
+document.getElementById('restart').addEventListener('click',play);
+play();
+</script>
+</body>
+</html>

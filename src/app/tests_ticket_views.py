@@ -74,6 +74,13 @@ class TicketViewConsistencyTests(TestCase):
                 rows = csv.reader(io.StringIO(b''.join(response.streaming_content).decode('utf-8-sig')))
                 self.assertEqual([int(row[0]) for row in rows if len(row) == 11 and row[0].isdigit()], [hold.id])
 
+    def test_home_solved_count_and_rows_do_not_include_on_hold(self):
+        self.ticket(status='on_hold')
+        resolved = self.ticket(status='resolved')
+        closed = self.ticket(status='closed')
+        self.assertCountEqual([t['id'] for t in self.rows('home_solventado')['tickets']], [resolved.pk, closed.pk])
+        self.assertEqual(self.client.get('/api/home-stats/').json()['stats']['solventado'], 2)
+
     def test_queue_counts_rows_and_csv_ignore_creation_range_and_keep_brand(self):
         old = self.ticket(status='pending', service='ecomfax')
         Ticket.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=100))

@@ -188,9 +188,9 @@ _CUSTOMER_SORT_FIELDS = {
 
 _PROFILE_STATUS_FILTERS = {
     'all':     None,
-    'open':    {'exclude': SOLVED_STATUSES},
+    'open':    {'exclude': QUEUE_FINISHED_STATUSES},
     'pending': {'filter': ['pending']},
-    'solved':  {'filter': SOLVED_STATUSES},
+    'solved':  {'filter': QUEUE_FINISHED_STATUSES},
 }
 
 
@@ -370,7 +370,7 @@ def _balanced_agent_page(agent_counts, page, page_size):
 def _ticket_filter_counts_cache_key(user, brand_id=None, date_from=None, date_to=None, date_mode=None):
     role_name = (getattr(getattr(user, 'role', None), 'role_name', '') or '').lower()
     return (
-        f"tickets:filter-counts:v6:user:{user.id}:"
+        f"tickets:filter-counts:v7:user:{user.id}:"
         f"role:{role_name}:group:{user.group_id or 0}:brand:{brand_id or 0}:"
         f"from:{date_from}:to:{date_to}:mode:{date_mode or 'default'}"
     )
@@ -498,7 +498,7 @@ def _tickets_for_view(base_qs, view, user):
             ).distinct()
         if view == "home_solventado":
             return mine.filter(
-                status__in=SOLVED_STATUSES, updated_at__gte=cutoff_60
+                status__in=QUEUE_FINISHED_STATUSES, updated_at__gte=cutoff_60
             )
         # home_all replica «Tus tickets no resueltos (sin tareas)».
         return mine.exclude(status__in=QUEUE_FINISHED_STATUSES).exclude(type='task')
@@ -601,7 +601,7 @@ def _home_stats(user):
 
     cutoff_60  = timezone.now() - timedelta(days=60)
     solventado = tickets_qs.filter(
-        status__in=SOLVED_STATUSES,
+        status__in=QUEUE_FINISHED_STATUSES,
         updated_at__gte=cutoff_60,
     ).count()
 

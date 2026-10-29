@@ -1037,8 +1037,23 @@ window.initTicketPane = function (root, ctx) {
 
             // Canned comment
             if (a.comment) {
-                const ta = rootEl.querySelector('#new-message');
-                if (ta) { ta.value = a.comment; ta.focus(); }
+                const composer = rootEl.querySelector('#quill-editor')?.__quillComposer;
+                if (composer) {
+                    // Insertar conserva el formato, las imágenes y el borrador existente.
+                    const quill = composer.quill;
+                    const index = quill.getSelection()?.index ?? Math.max(0, quill.getLength() - 1);
+                    const text = (index > 0 ? '\n' : '') + a.comment + '\n';
+                    quill.insertText(index, text, 'user');
+                    quill.setSelection(index + text.length, 0);
+                    quill.focus();
+                } else {
+                    const ta = rootEl.querySelector('#new-message');
+                    if (ta) {
+                        ta.value += (ta.value ? '\n' : '') + a.comment;
+                        ta.dispatchEvent(new Event('input', {bubbles: true}));
+                        ta.focus();
+                    }
+                }
             }
 
             closeMacroPanel();

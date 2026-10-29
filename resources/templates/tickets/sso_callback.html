@@ -1,148 +1,95 @@
-{% load static %}
-<!DOCTYPE html>
-<html lang="es">
+<!doctype html>
+<html lang="es" data-theme="dark" data-state="loading">
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="csrf-token" content="{{ csrf_token }}" />
-    <title>Autenticando...</title>
-    <style>
-    :root {
-      --bg: #160824;
-      --purple: #A347DB;
-      --cyan: #58D8F7;
-      --text: #fff;
-      --muted: rgba(255,255,255,.68);
-    }
-    * { box-sizing: border-box; }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="csrf-token" content="{{ csrf_token }}">
+<title>Iniciando sesión · TicketFlow</title>
+<script>
+(function(){
+    try {
+        const pref=localStorage.getItem('tf.theme') || 'system';
+        document.documentElement.dataset.theme=pref==='light' || (pref==='system' && !window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'light' : 'dark';
+    } catch (_) { /* El tema oscuro funciona sin almacenamiento local. */ }
+})();
+</script>
+<style>
+:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:dark;--bg:#17151d;--ink:#f4f2f7;--muted:#a39eae;--line:#34303d;--accent:#b69aef;--panel:#201d27;--button:#2b2634;--focus:#c4b5fd}
+:root[data-theme=light]{color-scheme:light;--bg:#fcfbfd;--ink:#282330;--muted:#777080;--line:#e6e2eb;--accent:#8b5cf6;--panel:#fff;--button:#f1eef6;--focus:#7c3aed}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--ink);min-height:100svh;font-synthesis:none;-webkit-font-smoothing:antialiased;transition:background .22s,color .22s}
+button{font:inherit;cursor:pointer}button:focus-visible,a:focus-visible{outline:2px solid var(--focus);outline-offset:4px}button:disabled{cursor:default}
+main{min-height:100svh;display:grid;place-items:center;padding:40px 24px}
+.loading{width:min(100%,310px);text-align:center;animation:appear .45s ease-out both}
+.brand{display:inline-flex;gap:10px;align-items:center;margin-bottom:38px;color:var(--ink);font-size:17px;letter-spacing:-.45px;font-weight:600}
+.brand svg{width:29px;height:32px;color:var(--accent)}
+h1{font-size:20px;line-height:1.4;letter-spacing:-.45px;font-weight:500;margin:0 0 10px}
+.description{transition:opacity .18s ease; font-size:13px;line-height:1.65;color:var(--muted);margin:0;min-height:43px}
+.track{height:2px;background:var(--line);border-radius:2px;position:relative;overflow:hidden;width:240px;max-width:100%;margin:27px auto 0}
+.track::after{content:"";position:absolute;inset:0;background:var(--accent);width:38%;border-radius:inherit;transform:translateX(-110%);animation:travel 1.9s cubic-bezier(.45,0,.25,1) infinite}
+[data-state=success] .track::after{animation:none;transform:translateX(0);width:100%;transition:width .4s}
+.ready-icon{width:18px;height:18px;display:none;color:var(--accent);margin-right:6px;vertical-align:-3px}
+[data-state=success] .ready-icon{display:inline-block}
+@keyframes travel{0%{transform:translateX(-110%)}100%{transform:translateX(365%)}}
+@keyframes appear{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:480px){.tools{gap:6px;flex-wrap:wrap}.tools button{padding:7px}.preview{bottom:18px}.brand{margin-bottom:30px}}
+@media(prefers-reduced-motion:reduce){body,.tools button,.loading{transition:none;animation:none}.track::after{animation:quiet 3s ease-in-out infinite;transform:translateX(80%)}@keyframes quiet{50%{opacity:.35}}}
 
-    .ticketflow-sso-page {
-      margin: 0;
-      min-height: 100vh;
-      width: 100%;
-      display: grid;
-      place-items: center;
-      background:
-        radial-gradient(circle at 50% 35%, rgba(163, 71, 219, 0.2), transparent 48%),
-        linear-gradient(135deg, #1C0A2D, #2D1A4A 48%, #110521);
-      color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Arial, sans-serif;
-    }
-    .loader {
-      width: min(92vw, 420px);
-      padding: 36px 26px;
-      text-align: center;
-    }
-    .loader img {
-      width: 256px;
-      height: 256px;
-      display: block;
-      margin: 0 auto 20px;
-      filter: drop-shadow(0 24px 36px rgba(0,0,0,.28));
-    }
-    .loader h1 {
-      margin: 0;
-      font-size: clamp(22px, 4vw, 28px);
-      letter-spacing: -.02em;
-    }
-    .loader p {
-      margin: 10px auto 0;
-      max-width: 340px;
-      color: var(--muted);
-      line-height: 1.55;
-      font-size: 15px;
-    }
-    .pulse-line {
-      width: 174px;
-      height: 4px;
-      margin: 24px auto 0;
-      overflow: hidden;
-      border-radius: 999px;
-      background: rgba(255,255,255,.12);
-    }
-    .pulse-line::before {
-      content: "";
-      display: block;
-      width: 68px;
-      height: 100%;
-      border-radius: inherit;
-      background: linear-gradient(90deg, var(--cyan), var(--purple));
-      animation: loading 1.35s ease-in-out infinite;
-    }
-    @keyframes loading {
-      0% { transform: translateX(-72px); }
-      100% { transform: translateX(184px); }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .pulse-line::before { animation: none; transform: translateX(52px); }
-    }
-
-    #sso-error {
-        display: none;
-        width: min(420px, 100%);
-        margin: 20px auto 0;
-        padding: 14px 16px;
-        border-radius: 14px;
-        color: #fff;
-        background: rgba(239, 68, 68, 0.18);
-        border: 1px solid rgba(239, 68, 68, 0.38);
-        font-size: 14px;
-        line-height: 1.45;
-        text-align: center;
-    }
-
-    #retry-btn {
-        display: none;
-        margin: 16px auto 0;
-        border: 0;
-        border-radius: 999px;
-        padding: 11px 22px;
-        background: linear-gradient(135deg, var(--cyan), var(--purple));
-        color: white;
-        font-weight: 800;
-        cursor: pointer;
-        box-shadow: 0 12px 28px rgba(163, 71, 219, 0.32);
-    }
-
-    #retry-btn:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 16px 34px rgba(163, 71, 219, 0.42);
-    }
+#sso-error{margin:18px 0 0;padding:12px 14px;border:1px solid #b95e72;border-radius:8px;color:var(--ink);font-size:13px;line-height:1.6;background:var(--panel)}
+#retry-btn{margin:16px auto 0;padding:9px 16px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink);font-size:13px}
+[data-state=error] .track{display:none}
 </style>
 </head>
 <body>
-<div class="ticketflow-sso-page">
-    <main class="loader" aria-live="polite">
-        <img src="{% static 'tickets/ticketflow_brand_loader.svg' %}" alt="Ticketflow" />
-        <h1 id="sso-status">Estableciendo conexión...</h1>
-        <p>Validando credenciales y preparando el flujo de tickets.</p>
-        <div class="pulse-line" aria-hidden="true"></div>
+<main>
+    <section class="loading" aria-label="Inicio de sesión de TicketFlow">
+        <div class="brand">
+            <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1027 1044" fill="none">
 
-        <div id="sso-error"></div>
-        <button id="retry-btn" onclick="window.location.href='/login/'">Reintentar Login</button>
-    </main>
-</div>
-
+  <g stroke="currentColor" stroke-width="28" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M82 290 493 57 907 293V764L493 1001 80 766Z"/>
+    <path d="M82 290H348L493 206 775 368 907 293"/>
+    <path d="M348 290 697 632H907"/>
+    <path d="M775 368V632"/>
+    <path d="M82 422H292L642 764H907"/>
+    <path d="M212 422V690L80 766"/>
+    <path d="M212 690 494 852 642 764"/>
+  </g>
+</svg>
+            <span>TicketFlow</span>
+        </div>
+        <div role="status" aria-live="polite" aria-atomic="true">
+            <h1><svg class="ready-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m4 10 4 4 8-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="sso-status">Validando credenciales</span></h1>
+            <p class="description" id="description">Estamos comprobando tu acceso de forma segura.</p>
+        </div>
+        <div class="track" id="progress" role="progressbar" aria-label="Validando credenciales" aria-busy="true"></div>
+        <div id="sso-error" role="alert" hidden></div>
+        <button type="button" id="retry-btn" hidden>Volver a intentar</button>
+    </section>
+</main>
 <script>
     document.addEventListener("DOMContentLoaded", async () => {
         const errorDiv = document.getElementById("sso-error");
         const retryBtn = document.getElementById("retry-btn");
         const statusText = document.getElementById("sso-status");
-        const SSO_API_URL = "{{ SSO_LOGIN_API_URL }}";
+        const SSO_API_URL = "{{ SSO_LOGIN_API_URL|escapejs }}";
+        const description = document.getElementById("description");
+        const progress = document.getElementById("progress");
 
-        function updateStatus(msg) {
-            if (statusText) {
-                statusText.textContent = msg;
-            }
+        function updateStatus(msg, detail) {
+            statusText.textContent = msg;
+            if (detail) description.textContent = detail;
+            progress.setAttribute('aria-label', msg);
         }
 
         function showError(msg) {
-            updateStatus("Error de autenticación");
+            document.documentElement.dataset.state = 'error';
+            updateStatus('No hemos podido iniciar tu sesión', 'Puedes volver a intentarlo para continuar.');
+            progress.setAttribute('aria-busy', 'false');
             errorDiv.textContent = msg;
-            errorDiv.style.display = "block";
-            retryBtn.style.display = "inline-block";
-            console.error(msg);
+            errorDiv.hidden = false;
+            retryBtn.hidden = false;
         }
+        retryBtn.addEventListener('click', () => { window.location.href = '/login/'; });
 
         function getCookie(name) {
             let cookieValue = null;
@@ -163,8 +110,7 @@
             const delay = ms => new Promise(res => setTimeout(res, ms));
 
             // 1. Leer parámetros URL
-            updateStatus("Leyendo token SSO");
-            await delay(50); // Pausa artificial decorativa
+            updateStatus("Validando credenciales", "Estamos comprobando tu acceso de forma segura.");
 
             const params = new URLSearchParams(window.location.search);
             const token = params.get("token");
@@ -175,8 +121,7 @@
             }
 
             // 2. Intercambio del token temporal
-            updateStatus("Validando credenciales");
-            await delay(50);
+            updateStatus("Validando credenciales", "Estamos comprobando tu acceso de forma segura.");
 
             const tokenRes = await fetch(`${SSO_API_URL}/Authentication/issueAppToken/${token}`, {
                 method: "GET",
@@ -190,8 +135,7 @@
             const tokenData = await tokenRes.json();
 
             // 3. Consulta de identidad autenticada
-            updateStatus("Resolviendo identidad");
-            await delay(50);
+            updateStatus("Identificando tu cuenta", "Recuperando la información de tu usuario.");
 
             const meRes = await fetch(`${SSO_API_URL}/Authentication/Me`, {
                 method: "GET",
@@ -209,8 +153,7 @@
             }
 
             // 4. Integración con Django local
-            updateStatus("Creando sesión segura");
-            await delay(50);
+            updateStatus("Preparando tu espacio", "Estamos iniciando tu sesión de TicketFlow.");
 
             const completeRes = await fetch("/api/sso/complete/", {
                 method: "POST",
@@ -233,7 +176,10 @@
             }
 
             // 5. Todo OK
-            updateStatus("Acceso concedido");
+            document.documentElement.dataset.state = "success";
+            updateStatus("Todo listo", "Acceso concedido. Bienvenido a TicketFlow.");
+            progress.setAttribute("aria-busy", "false");
+            progress.setAttribute("aria-valuenow", "100");
             await delay(450);
 
             window.location.href = "/";
