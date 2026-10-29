@@ -18,7 +18,7 @@
     if (window.__tfLivePollBound) return;
     window.__tfLivePollBound = true;
 
-    const INTERVAL_MS = 15000;
+    const INTERVAL_MS = 5000;
     let busy = false;
 
     function activePane() {
@@ -54,6 +54,20 @@
 
         const updated = pane.querySelector('[data-tf-updated]');
         if (updated && ticket.updated_at) updated.textContent = ticket.updated_at;
+
+        const take = pane.querySelector('#take-it-btn');
+        if (take && Object.prototype.hasOwnProperty.call(ticket, 'assignee_id')) {
+            const mine = String(ticket.assignee_id) === pane.dataset.currentUserId;
+            const locked = pane.querySelector('#ticket-form')?.dataset.locked === '1'
+                || ticket.status === 'closed';
+            if (mine !== take.classList.contains('take-it-done')) {
+                take.classList.toggle('take-it-done', mine);
+                take.innerHTML = mine ? '<i class="fas fa-check"></i> Asignado a ti'
+                    : '<i class="fas fa-hand-point-right"></i> Asignarme';
+            }
+            take.disabled = mine || locked;
+        }
+        pane.__tfLive?.syncAssignee?.(ticket);
 
         // "Publicar como <estado>" arrastra el estado que se enviara al publicar,
         // asi que si otro agente cambia el estado hay que re-sincronizarlo o la

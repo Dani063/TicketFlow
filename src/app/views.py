@@ -1849,6 +1849,26 @@ def create_ticket(request):
                 .select_related('user', 'user__role').prefetch_related('attachment_set').order_by('created_at')
             )
         events_list = list(ticket_obj.events.select_related('actor').order_by('created_at'))
+        # Resolver también los eventos antiguos sin alterar los IDs de auditoría.
+        assignee_fields = {'assignee_id', 'assignee', 'asignado'}
+        assignee_ids = {
+            int(value) for event in events_list if event.field_name in assignee_fields
+            for value in (event.old_value, event.new_value)
+            if value and value.isdecimal() and len(value) <= 18
+        }
+        assignee_names = {
+            str(user.pk): user.name or user.email
+            for user in User.objects.filter(pk__in=assignee_ids)
+        }
+
+        def event_value(event, value):
+            if event.field_name not in assignee_fields:
+                return value
+            if not value or value in ('None', 'null'):
+                return 'Sin asignar'
+            if value.isdecimal():
+                return assignee_names.get(str(int(value)), 'Agente no disponible')
+            return value
 
         feed = []
         for c in prepare_comments(comments_list):
@@ -1857,6 +1877,8 @@ def create_ticket(request):
             feed.append({'item_type': 'comment', 'obj': c})
         for e in events_list:
             feed.append({'item_type': 'event', 'obj': e,
+                         'old_display': event_value(e, e.old_value),
+                         'new_display': event_value(e, e.new_value),
                          'field_label': _FIELD_LABEL.get(e.field_name, e.field_name)})
         feed.sort(key=lambda x: x['obj'].created_at)
     else:
@@ -1956,7 +1978,7 @@ def take_ticket(request, ticket_id):
             return JsonResponse({'ok': False, 'success': False, 'error': 'already_assigned'})
         prev = str(ticket.assignee_id) if ticket.assignee_id else None
         ticket.assignee = request.user
-        ticket.save(update_fields=['assignee'])
+        ticket.save(update_fields=['assignee', 'updated_at'])
         TicketEvent.objects.create(
             ticket=ticket, actor=request.user,
             field_name='assignee_id',

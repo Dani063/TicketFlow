@@ -455,6 +455,14 @@ body {
 }
 
 .notifications {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    line-height: 1;
     background: none;
     border: none;
     position: relative;
@@ -462,6 +470,7 @@ body {
     cursor: pointer;
     margin-right: 15px;
 }
+.notifications .icon { display: inline-block; line-height: 1; }
 
     .notifications .badge {
         position: absolute;

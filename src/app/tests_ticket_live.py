@@ -54,6 +54,23 @@ class TicketLiveTests(TestCase):
             is_public=is_public, created_at=timezone.now(),
         )
 
+    def test_take_is_visible_to_another_viewer_without_reloading(self):
+        from django.test import Client
+        peer = User.objects.create_user(email='peer@example.test', name='Peer')
+        peer.role = self.agent_role
+        peer.save(update_fields=['role'])
+        other_client = Client()
+        other_client.force_login(peer)
+        self.client.force_login(self.agent)
+        before = self.live()['ticket']['updated_ts']
+        response = other_client.post(reverse('take_ticket', args=[self.ticket.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['success'])
+        header = self.live()['ticket']
+        self.assertEqual(header['assignee_id'], peer.pk)
+        self.assertEqual(header['assignee_name'], 'Peer')
+        self.assertGreater(header['updated_ts'], before)
+
     def live(self, after=0):
         response = self.client.get(
             reverse("ticket_live", args=[self.ticket.id]), {"after": after},

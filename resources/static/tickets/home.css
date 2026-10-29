@@ -640,9 +640,170 @@
 .upd-item .tl-badge.status-on_hold  { background: #8b5cf6; }
 .status-dot.status-on_hold         { background: #8b5cf6; }
 .tf-trash-meta { display: block; font-size: .8rem; color: var(--color-text-secondary); margin-top: .25rem; }
-.tf-trash-banner { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; padding: .75rem 1rem; margin-bottom: 1rem; border: 1px solid var(--color-danger); border-radius: .5rem; }
-.tf-ticket-presence { flex-basis: 100%; font-size: .85rem; color: var(--color-text-secondary); }
-.ticket-pane > .title-bar { flex-wrap: wrap; }
+.tf-trash-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    margin: 12px 16px;
+    border: 1px solid #fecdd3;
+    border-radius: 10px;
+    background: #fff5f6;
+    color: #9f1239;
+    line-height: 1.5;
+}
+.tf-trash-banner-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 34px;
+    height: 34px;
+    border-radius: 9px;
+    background: #ffe4e6;
+    font-size: 14px;
+}
+.tf-trash-banner-copy { flex: 1; min-width: 0; }
+.tf-trash-banner-copy > strong { display: block; font-size: 13px; font-weight: 600; }
+.tf-trash-banner-details { display: flex; flex-wrap: wrap; gap: 4px; font-size: 12px; color: #9b5263; }
+.tf-trash-banner > button {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 12px;
+    border: 1px solid #fda4af;
+    border-radius: 8px;
+    background: #fff;
+    color: #9f1239;
+    font-size: 12px;
+    font-weight: 600;
+}
+.tf-trash-banner > button:hover { background: #ffe4e6; border-color: #fb7185; }
+.tf-trash-banner > button:focus-visible { outline: 2px solid #e11d48; outline-offset: 3px; }
+:root[data-theme="dark"] .tf-trash-banner { background: #35232e; border-color: #704052; color: #fecdd3; }
+:root[data-theme="dark"] .tf-trash-banner-icon { background: #512c3b; }
+:root[data-theme="dark"] .tf-trash-banner-details { color: #d6a9b5; }
+:root[data-theme="dark"] .tf-trash-banner > button { background: #452b38; border-color: #9b5263; color: #ffe4e6; }
+:root[data-theme="dark"] .tf-trash-banner > button:hover { background: #603447; border-color: #fda4af; }
+@media (max-width: 600px) {
+    .tf-trash-banner { flex-wrap: wrap; margin: 8px; padding: 12px; }
+    .tf-trash-banner > button { margin-left: 46px; }
+}
+.title-bar .tf-ticket-presence {
+    display: flex;
+    flex-wrap: wrap;
+    flex-basis: 100%;
+    min-width: 0;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+.tf-presence-person {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 5px 10px;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    background: #eff6ff;
+    color: #1e40af;
+    animation: tf-presence-appear .2s ease-out;
+}
+.tf-presence-person > .fas { flex-shrink: 0; font-size: 12px; }
+.tf-presence-copy { min-width: 0; overflow-wrap: anywhere; }
+.tf-presence-copy strong { font-weight: 600; }
+.tf-presence-person.is-composing {
+    border-color: #ddd6fe;
+    background: #f5f3ff;
+    color: #6d28d9;
+}
+.tf-presence-dots { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; }
+.tf-presence-dots > span {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: tf-presence-typing 1.4s ease-in-out infinite;
+}
+.tf-presence-dots > span:nth-child(2) { animation-delay: .16s; }
+.tf-presence-dots > span:nth-child(3) { animation-delay: .32s; }
+@keyframes tf-presence-appear {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes tf-presence-typing {
+    0%, 60%, 100% { opacity: .4; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-2px); }
+}
+:root[data-theme="dark"] .tf-presence-person {
+    background: #172c46;
+    border-color: #315578;
+    color: #bfdbfe;
+}
+:root[data-theme="dark"] .tf-presence-person.is-composing {
+    background: #30234b;
+    border-color: #60448b;
+    color: #ddd6fe;
+}
+@media (prefers-reduced-motion: reduce) {
+    .tf-presence-person, .tf-presence-dots > span { animation: none; }
+}
+/* Cabecera del ticket: identidad y fechas a la izquierda, acciones en una zona fija. */
+.ticket-pane > .title-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px 24px;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--color-divider, #e2e8f0);
+    box-shadow: none;
+}
+.ticket-header-main { min-width: 0; display: flex; align-items: center; gap: 16px; }
+.ticket-header-identity { display: contents; }
+.ticket-header-identity h1 {
+    flex: 0 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
+    margin: 0;
+}
+.ticket-header-main .ticket-meta-dates {
+    margin: 0;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    gap: 4px 8px;
+    font-size: 11px;
+    line-height: 1.5;
+}
+.ticket-header-main .ticket-meta-dates > span { white-space: nowrap; }
+.ticket-header-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 8px;
+}
+.ticket-header-actions > button { flex: 0 0 auto; width: auto; min-height: 30px; border-radius: 8px; padding: 5px 12px; margin: 0; }
+.ticket-header-actions #merge-btn { order: 2; }
+.ticket-header-actions #take-it-btn { order: 1; }
+.ticket-pane > .title-bar > .sat-badge { grid-column: 1 / -1; justify-self: start; white-space: normal; }
+.ticket-pane > .title-bar > .tf-ticket-presence {
+    grid-column: 1 / -1;
+    padding-top: 10px;
+    border-top: 1px solid var(--color-divider, #e2e8f0);
+}
+@media (max-width: 900px) {
+    .ticket-pane > .title-bar { grid-template-columns: minmax(0, 1fr) auto; gap: 10px 14px; padding: 12px 16px; }
+    .ticket-header-main { gap: 10px; }
+}
+@media (max-width: 600px) {
+    .ticket-header-main .ticket-meta-dates { flex-wrap: wrap; white-space: normal; flex-shrink: 1; }
+    .ticket-header-actions:empty { display: none; }
+}
 .upd-item .tl-badge.status-resolved { background: #22c55e; }
 .upd-item .tl-badge.status-closed   { background: #6b7280; }
 

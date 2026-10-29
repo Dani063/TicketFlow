@@ -2,6 +2,7 @@
 {# Ticket pane partial: rendered standalone when ?fragment=1, or included in create_ticket.html for deep-link page loads. #}
 <div class="ticket-pane" data-ticket-id="{{ ticket.id|default:'' }}"
      data-presence-enabled="{{ can_use_internal|yesno:'1,0' }}"
+     data-current-user-id="{{ current_user_id }}"
      data-attachment-max-files="{{ attachment_limits.max_files|default:10 }}"
      data-attachment-max-bytes="{{ attachment_limits.max_bytes|default:15728640 }}"
      data-attachment-max-total-bytes="{{ attachment_limits.max_total_bytes|default:52428800 }}"
@@ -17,27 +18,41 @@
 {% endif %}
 {% if ticket.is_deleted %}
 <div class="tf-trash-banner" role="status">
-    <strong><i class="fas fa-trash"></i> Ticket eliminado</strong>
+    <span class="tf-trash-banner-icon" aria-hidden="true"><i class="fas fa-trash-alt"></i></span>
+    <div class="tf-trash-banner-copy">
+    <strong>Ticket eliminado</strong>
+    <div class="tf-trash-banner-details">
     {% if ticket.deleted_at %}<span>El {{ ticket.deleted_at|date:"d/m/Y H:i" }}</span>{% endif %}
     {% if ticket.deleted_by %}<span>por {{ ticket.deleted_by.name|default:ticket.deleted_by.email }}</span>{% endif %}
+    </div>
+    </div>
     {% if can_edit and not ticket.merged_into %}
-    <button type="button" class="tf-btn tf-btn--secondary tf-btn--sm" data-restore-ticket="{{ ticket.id }}">Restaurar</button>
+    <button type="button" class="tf-btn tf-btn--secondary tf-btn--sm" data-restore-ticket="{{ ticket.id }}"><i class="fas fa-undo" aria-hidden="true"></i> Restaurar</button>
     {% endif %}
 </div>
 {% endif %}
 <div class="title-bar">
+    <div class="ticket-header-main">
+    <div class="ticket-header-identity">
     <h1>{% if ticket %}{{ ticket.subject }}{% else %}Nuevo ticket{% endif %}</h1>
     {% if ticket %}
     <span class="ticket-status-badge status-badge-{{ ticket.status }}">{{ ticket.get_status_display }}</span>
     {% if ticket.zendesk_id %}<span class="ticket-zd-id">#{{ ticket.zendesk_id }}</span>{% endif %}
+    {% endif %}
+    </div>
+    {% if ticket %}
     <span class="ticket-meta-dates">
         <span title="Creado">Creado: <strong>{{ ticket.created_at|date:"d/m/Y H:i" }}</strong></span>
         <span class="meta-sep">·</span>
         <span title="Última actualización">Actualizado: <strong data-tf-updated>{{ ticket.updated_at|date:"d/m/Y H:i" }}</strong></span>
     </span>
-    {% if can_edit and not ticket_locked and ticket.assignee_id != current_user_id %}
-    <button type="button" id="take-it-btn" class="take-it-btn" data-ticket-id="{{ ticket.id }}" aria-label="Asignarme este ticket">
-        <i class="fas fa-hand-point-right"></i> Asignarme
+    {% endif %}
+    </div>
+    <div class="ticket-header-actions">
+    {% if ticket %}
+    {% if can_edit and not ticket_locked %}
+    <button type="button" id="take-it-btn" class="take-it-btn{% if ticket.assignee_id == current_user_id %} take-it-done{% endif %}" data-ticket-id="{{ ticket.id }}" {% if ticket.assignee_id == current_user_id %}disabled{% endif %}>
+        {% if ticket.assignee_id == current_user_id %}<i class="fas fa-check"></i> Asignado a ti{% else %}<i class="fas fa-hand-point-right"></i> Asignarme{% endif %}
     </button>
     {% endif %}
     {% if can_edit and not ticket_locked and not ticket.merged_into %}
@@ -46,6 +61,7 @@
     </button>
     {% endif %}
     {% endif %}
+    </div>
     {% if ticket_satisfaction %}
     {# El motivo solo existe en votos negativos: del catálogo si es nativo, texto libre si viene de Zendesk. #}
     {% firstof ticket_satisfaction.reason_choice.label ticket_satisfaction.reason '' as sat_reason %}
@@ -69,7 +85,7 @@
             <div class="panel-inner" id="panelLeftInner">
             <!-- Campos del Formulario -->
             <div class="form-group">
-                <label for="producto">Producto / servicio <span class="req">*</span></label>
+                <label for="producto"><i class="fas fa-cube" aria-hidden="true"></i> Producto / servicio <span class="req">*</span></label>
                 <select id="producto" name="producto" class="select2" required>
                     <option value="" selected>Selecciona un producto</option>
                     {% for product in product_lines %}
@@ -78,7 +94,7 @@
                 </select>
             </div>
             <div class="form-group">
-                <label for="empresa">Empresa</label>
+                <label for="empresa"><i class="fas fa-building" aria-hidden="true"></i> Empresa</label>
                 <select id="empresa" name="empresa" class="select2">
                     <option value="" selected>-</option>
                     {% for brand in empresas %}
@@ -87,7 +103,7 @@
                 </select>
             </div>
             <div class="form-group">
-                <label for="solicitante">Solicitante</label>
+                <label for="solicitante"><i class="fas fa-user" aria-hidden="true"></i> Solicitante</label>
                 <select id="solicitante" name="solicitante" class="select2" data-select2-type="ajax-user"{% if can_use_internal %} data-quick-create="1"{% endif %}>
                     <option value="" disabled selected>-</option>
                     {% if ticket and ticket.requester %}
@@ -96,7 +112,7 @@
                 </select>
             </div>
             <div class="form-group">
-                <label for="asignado">Asignado</label>
+                <label for="asignado"><i class="fas fa-user-check" aria-hidden="true"></i> Asignado</label>
                 <select id="asignado" name="asignado" class="select2">
                     <option value="" selected>-</option>
                     {% for user in agentes %}
@@ -105,7 +121,7 @@
                 </select>
             </div>
             <div class="form-group">
-                <label for="grupo">Grupo</label>
+                <label for="grupo"><i class="fas fa-users" aria-hidden="true"></i> Grupo</label>
                 <select id="grupo" name="grupo" class="select2">
                     <option value="" selected>-</option>
                     {% for g in grupos %}
@@ -114,7 +130,7 @@
                 </select>
             </div>
             <div class="form-group">
-                <label for="ccs">CCs</label>
+                <label for="ccs"><i class="fas fa-user-friends" aria-hidden="true"></i> CCs</label>
                 <select id="ccs" name="ccs" class="select2" multiple data-select2-type="ajax-user"{% if can_use_internal %} data-quick-create="1"{% endif %}>
                     {% if ticket %}
                     {% for u in ticket.ccs.all %}
@@ -124,7 +140,7 @@
                 </select>
             </div>
             <div class="form-group">
-                <label for="tags">Etiquetas</label>
+                <label for="tags"><i class="fas fa-tags" aria-hidden="true"></i> Etiquetas</label>
                 <select id="tags" name="tags" class="select2" multiple>
                     {% for tag in tags %}
                     <option value="{{ tag.id }}">{{ tag.name }}</option>
@@ -133,7 +149,7 @@
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label for="tipo">Tipo</label>
+                    <label for="tipo"><i class="fas fa-list-ul" aria-hidden="true"></i> Tipo</label>
                     <select id="tipo" name="tipo" class="select2">
                         <option value="" selected>-</option>
                         <option value="question">Consulta</option>
@@ -143,7 +159,7 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="prioridad">Prioridad</label>
+                    <label for="prioridad"><i class="fas fa-flag" aria-hidden="true"></i> Prioridad</label>
                     <select id="prioridad" name="prioridad" class="select2">
                         <option value="" selected>-</option>
                         <option value="low">Baja</option>
@@ -154,7 +170,7 @@
                 </div>
             </div>
             <div class="form-group" id="problemLinkGroup" style="display:none">
-                <label for="problem_id">Problema vinculado</label>
+                <label for="problem_id"><i class="fas fa-link" aria-hidden="true"></i> Problema vinculado</label>
                 <input type="number" id="problem_id" name="problem_id" class="form-control-input"
                        min="1" placeholder="# de ticket tipo problema">
                 <a id="problemLinkRef" class="linked-ref" style="display:none" href="#"></a>
@@ -164,7 +180,7 @@
                 <ul id="linkedIncidentsList" class="linked-incidents"></ul>
             </div>
             <div class="form-group">
-                <label for="servicio">Servicio</label>
+                <label for="servicio"><i class="fas fa-concierge-bell" aria-hidden="true"></i> Servicio</label>
                 <select id="servicio" name="servicio" class="select2">
                     <option value="" selected>-</option>
                     <option value="ecomfax">EcomFax</option>
@@ -181,7 +197,7 @@
                 </select>
             </div>
             <div class="form-group">
-                <label for="canal">Canal</label>
+                <label for="canal"><i class="fas fa-comment-dots" aria-hidden="true"></i> Canal</label>
                 <select id="canal" name="canal" class="select2">
                     <option value="" selected>-</option>
                     <option value="email">Email</option>
@@ -191,12 +207,12 @@
                 </select>
             </div>
             <div class="form-group">
-                <label for="due_at">Fecha límite</label>
+                <label for="due_at"><i class="fas fa-calendar-alt" aria-hidden="true"></i> Fecha límite</label>
                 <input type="datetime-local" id="due_at" name="due_at" class="form-control-input"
                        {% if ticket and ticket.due_at %}value="{{ ticket.due_at|date:'Y-m-d' }}T{{ ticket.due_at|date:'H:i' }}"{% endif %}>
             </div>
             <div class="form-group">
-                <label for="idioma">Idioma</label>
+                <label for="idioma"><i class="fas fa-globe" aria-hidden="true"></i> Idioma</label>
                 <select id="idioma" name="idioma" class="select2">
                     <option value="" selected>-</option>
                     <option value="es">Español</option>
@@ -206,7 +222,7 @@
                 </select>
             </div>
             <div class="form-group">
-                <label for="categoria">Categoría</label>
+                <label for="categoria"><i class="fas fa-folder-open" aria-hidden="true"></i> Categoría</label>
                 <select id="categoria" name="categoria" class="select2">
                     <option value="" selected>-</option>
                     <option value="communication">Comunicación</option>
@@ -228,7 +244,7 @@
                 <label><input type="checkbox" id="monitoring" name="monitoring" value="1"> Monitorización</label>
             </div>
             <div class="form-group">
-                <label for="approval_status">Estado de aprobación</label>
+                <label for="approval_status"><i class="fas fa-check-circle" aria-hidden="true"></i> Estado de aprobación</label>
                 <input type="text" id="approval_status" name="approval_status" placeholder="-">
             </div>
             <hr class="margin-bottom-large">
@@ -297,8 +313,8 @@
                     <span class="sys-text">
                         <span class="sys-actor">{{ e.actor.name|default:"Sistema" }}</span>
                         cambió <span class="sys-field">{{ item.field_label }}</span>
-                        {% if e.old_value %}<span class="sys-old">{{ e.old_value }}</span> →{% endif %}
-                        <span class="sys-new">{{ e.new_value|default:"(vacío)" }}</span>
+                        {% if item.old_display %}<span class="sys-old">{{ item.old_display }}</span> →{% endif %}
+                        <span class="sys-new">{{ item.new_display|default:"(vacío)" }}</span>
                     </span>
                     <span class="sys-time" data-ts="{{ e.created_at|date:'c' }}" title="{{ e.created_at|date:'d/m/Y H:i' }}">{{ e.created_at|date:'d/m/Y H:i' }}</span>
                 </div>
@@ -437,7 +453,7 @@
 
             <!-- Datos rápidos -->
             <div class="rq-details">
-                <div class="rq-row"><span class="rq-label">Email</span><span class="rq-value rq-link">{{ u.email }}</span></div>
+                <div class="rq-row"><span class="rq-label">Email</span><span class="rq-value rq-link rq-email">{{ u.email }}</span></div>
                 {% if u.phone %}<div class="rq-row"><span class="rq-label">Teléfono</span><span class="rq-value">{{ u.phone }}</span></div>{% endif %}
                 {% if u.organization %}<div class="rq-row"><span class="rq-label">Org.</span><span class="rq-value rq-link">{{ u.organization.name }}</span></div>{% endif %}
                 {% if u.time_zone %}<div class="rq-row"><span class="rq-label">Zona horaria</span><span class="rq-value">{{ u.time_zone }}</span></div>{% endif %}

@@ -1,5 +1,21 @@
 ﻿// app/static/tickets/create_ticket.js
 //
+// Mensajes comunes de Select2, incluidos los campos con búsqueda remota.
+if (window.jQuery?.fn.select2) {
+    window.jQuery.fn.select2.defaults.set('language', {
+        errorLoading: () => 'No se han podido cargar los resultados.',
+        inputTooShort: args => {
+            const remaining = args.minimum - args.input.length;
+            return `Escribe ${remaining} ${remaining === 1 ? 'carácter más' : 'caracteres más'} para buscar.`;
+        },
+        inputTooLong: args => `Elimina ${args.input.length - args.maximum} caracteres.`,
+        loadingMore: () => 'Cargando más resultados…',
+        maximumSelected: args => `Puedes seleccionar hasta ${args.maximum} elementos.`,
+        noResults: () => 'No se han encontrado resultados.',
+        searching: () => 'Buscando…',
+        removeAllItems: () => 'Quitar todos los elementos',
+    });
+}
 // Pane-scoped initializer: invoked once per ticket pane (either deep-link page
 // load or fragment fetch via tabs.js). Replaces the global DOMContentLoaded
 // pattern so multiple panes can coexist mounted in the DOM at once.
@@ -701,6 +717,9 @@ window.initTicketPane = function (root, ctx) {
             if (event.target.tagName === 'A') {
                 const status = event.target.getAttribute('data-status');
                 selectedStatus.textContent = status;
+                dropdownContent.querySelectorAll('a').forEach(a => {
+                    a.classList.toggle('active', a.dataset.status === status);
+                });
                 dropdownContent.classList.remove('show');
             }
         });
@@ -1304,6 +1323,17 @@ window.initTicketPane = function (root, ctx) {
     }
     fitLayout();
     window.addEventListener('resize', fitLayout);
+    // La presencia puede añadir varias filas a la cabecera después del montaje.
+    // Medir su altura real mantiene el editor por encima del pie fijo.
+    const layoutHeader = rootEl.querySelector('.title-bar');
+    const layoutFooter = rootEl.querySelector('.footer-bar');
+    const layoutObserver = new ResizeObserver(fitLayout);
+    if (layoutHeader) layoutObserver.observe(layoutHeader);
+    if (layoutFooter) layoutObserver.observe(layoutFooter);
+    rootEl.addEventListener('tf:pane-dispose', () => {
+        layoutObserver.disconnect();
+        window.removeEventListener('resize', fitLayout);
+    }, {once: true});
     // Expose so tabs.js can re-fit on tab re-activation (the inline height
     // cached at first mount can drift if the viewport changed while this
     // pane was detached).
@@ -1499,6 +1529,7 @@ window.initTicketPane = function (root, ctx) {
                 });
                 const data = await resp.json();
                 if (data.success) {
+                    const hadPendingChanges = hasTicketFieldChanges();
                     const sel = rootEl.querySelector('#asignado');
                     if (sel) {
                         if (!sel.querySelector(`option[value="${data.assignee_id}"]`)) {
@@ -1510,6 +1541,7 @@ window.initTicketPane = function (root, ctx) {
                     takeItBtn.innerHTML = '<i class="fas fa-check"></i> Asignado a ti';
                     takeItBtn.classList.add('take-it-done');
                     takeItBtn.disabled = true;
+                    if (!hadPendingChanges) _formBaseline = serializeTicketForm();
                 }
             } catch (e) {
                 takeItBtn.disabled = false;
@@ -1696,6 +1728,18 @@ window.initTicketPane = function (root, ctx) {
             || rootEl.querySelector('#selected-status')?.textContent || '').trim().toLowerCase(),
         appendComment: appendPublishedComment,
         hasPendingFieldChanges: hasTicketFieldChanges,
+        syncAssignee(ticket) {
+            if (_formBaseline === null || hasTicketFieldChanges()
+                || !Object.prototype.hasOwnProperty.call(ticket, 'assignee_id')) return;
+            const select = rootEl.querySelector('#asignado');
+            const value = ticket.assignee_id == null ? '' : String(ticket.assignee_id);
+            if (!select || select.value === value) return;
+            if (!Array.from(select.options).some(option => option.value === value)) {
+                select.append(new Option(ticket.assignee_name || 'Sin asignar', value));
+            }
+            $(select).val(value).trigger('change');
+            _formBaseline = serializeTicketForm();
+        },
     };
 
 };

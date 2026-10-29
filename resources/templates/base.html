@@ -35,11 +35,11 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css">
     <!-- create_ticket.css loaded globally so ticket panes are styled even when
          the user navigates to a non-ticket page first (e.g. Home → ticket). -->
-    <link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s8.9">
+    <link rel="stylesheet" href="{% static 'tickets/create_ticket.css' %}?v=s8.15">
     <link rel="stylesheet" href="{% static 'tickets/attachments.css' %}?v=s7.0">
     <!-- home.css is the shared sidebar-page stylesheet; load globally so
          SPA fragment swaps don't lose styling. -->
-    <link rel="stylesheet" href="{% static 'tickets/home.css' %}?v=s6.9">
+    <link rel="stylesheet" href="{% static 'tickets/home.css' %}?v=s6.13">
 
     {% block extra_css %}{% endblock %}
 </head>
@@ -104,11 +104,11 @@
     <script src="{% static 'tickets/attachments.js' %}?v=s7.3"></script>
     <script src="{% static 'tickets/merge_review.js' %}?v=s1.0"></script>
     <script src="{% static 'tickets/quick_user.js' %}?v=s1.1"></script>
-    <script src="{% static 'tickets/create_ticket.js' %}?v=s9.5"></script>
+    <script src="{% static 'tickets/create_ticket.js' %}?v=s9.7"></script>
     <script src="{% static 'tickets/ticket_trash.js' %}?v=s1.0"></script>
-    <script src="{% static 'tickets/presence.js' %}?v=s1.0"></script>
+    <script src="{% static 'tickets/presence.js' %}?v=s1.1"></script>
     <script src="{% static 'tickets/ai_reply.js' %}?v=s4.8"></script>
-    <script src="{% static 'tickets/ticket_live.js' %}?v=s1.3"></script>
+    <script src="{% static 'tickets/ticket_live.js' %}?v=s1.4"></script>
     <script src="{% static 'tickets/easter_egg.js' %}?v=s1.0"></script>
 
     {% block extra_js %}{% endblock %}

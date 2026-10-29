@@ -50,8 +50,33 @@
             badge.setAttribute('aria-live', 'polite');
             title.appendChild(badge);
         }
-        const text = agents.map(a => `${a.name} ${a.composing ? 'está escribiendo' : 'también está viendo este ticket'}`).join(' · ');
-        if (badge.textContent !== text) badge.textContent = text;
+        // No reconstruir en cada latido: conserva las animaciones y evita anuncios repetidos.
+        const signature = JSON.stringify(agents.map(a => [a.name, Boolean(a.composing)]));
+        if (badge.dataset.signature === signature) return;
+        badge.dataset.signature = signature;
+        const items = agents.map(agent => {
+            const item = document.createElement('span');
+            item.className = 'tf-presence-person' + (agent.composing ? ' is-composing' : '');
+            const icon = document.createElement('i');
+            icon.className = 'fas ' + (agent.composing ? 'fa-pen' : 'fa-eye');
+            icon.setAttribute('aria-hidden', 'true');
+            const copy = document.createElement('span');
+            copy.className = 'tf-presence-copy';
+            const name = document.createElement('strong');
+            name.textContent = agent.name;
+            copy.append(name, document.createTextNode(agent.composing
+                ? ' está escribiendo' : ' está viendo este ticket'));
+            item.append(icon, copy);
+            if (agent.composing) {
+                const dots = document.createElement('span');
+                dots.className = 'tf-presence-dots';
+                dots.setAttribute('aria-hidden', 'true');
+                for (let i = 0; i < 3; i++) dots.appendChild(document.createElement('span'));
+                item.appendChild(dots);
+            }
+            return item;
+        });
+        badge.replaceChildren(...items);
     }
 
     async function pulse(state) {
