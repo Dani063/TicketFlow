@@ -148,6 +148,7 @@
             if (roleId)  fetchUrl += `&role_id=${encodeURIComponent(roleId)}`;
             if (groupId) fetchUrl += `&group_id=${encodeURIComponent(groupId)}`;
             const response = await fetch(fetchUrl);
+            if (!response.ok) throw new Error(`Error HTTP ${response.status}`);
             const json = await response.json();
 
             if (!json.customers || json.customers.length === 0) {
@@ -169,16 +170,18 @@
                             openCustomer(u.id, u.name);
                         }
                     });
-                    row.innerHTML = `
-                        <td>${u.id}</td>
-                        <td>${u.name}</td>
-                        <td>${u.email}</td>
-                        <td>${u.status}</td>
-                        <td>${u.role}</td>
-                        <td>${u.group}</td>
-                        <td>${u.created_at}</td>
-                        <td class="customer-open-cell" aria-hidden="true"><i class="fas fa-chevron-right"></i></td>
-                    `;
+                    [u.id, u.name, u.email, u.status, u.role, u.group, u.created_at].forEach(value => {
+                        const td = document.createElement('td');
+                        td.textContent = value == null || value === '' ? '-' : String(value);
+                        row.appendChild(td);
+                    });
+                    const openCell = document.createElement('td');
+                    openCell.className = 'customer-open-cell';
+                    openCell.setAttribute('aria-hidden', 'true');
+                    const arrow = document.createElement('i');
+                    arrow.className = 'fas fa-chevron-right';
+                    openCell.appendChild(arrow);
+                    row.appendChild(openCell);
                     fragment.appendChild(row);
                 });
                 tbody.appendChild(fragment);
@@ -208,7 +211,7 @@
             }
         } catch (err) {
             console.error("Error cargando usuarios:", err);
-            tbody.innerHTML = `<tr><td colspan="8"><div class="tf-empty tf-empty--compact"><span class="tf-empty-title" style="color: var(--color-danger);">No se pudieron cargar los clientes</span><span class="tf-empty-message">Vuelve a intentarlo.</span></div></td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8"><div class="tf-empty tf-empty--compact"><span class="tf-empty-title" style="color: var(--color-danger);">No se pudieron cargar los clientes</span><span class="tf-empty-message">Comprueba la conexión y vuelve a intentarlo.</span><button type="button" class="tf-btn tf-btn--secondary tf-btn--sm tf-empty-retry" data-retry-customers>Reintentar</button></div></td></tr>`;
         } finally {
             spinner.style.display = "none";
         }
@@ -226,6 +229,9 @@
     }
 
     function init() {
+        document.getElementById('customersTableBody').addEventListener('click', event => {
+            if (event.target.closest('[data-retry-customers]')) loadCustomers(_currentView, _currentPage);
+        });
         const filters = document.querySelectorAll("#customerFilters li");
         const filtersPanel = document.getElementById('customerFiltersPanel');
         const filtersToggle = document.getElementById('customerFiltersToggle');

@@ -19,7 +19,7 @@
             <span class="icon">🔔</span><span class="badge" style="display:none">0</span>
         </button>
         <div class="user-profile" role="button" tabindex="0" aria-label="Abrir menú de perfil" aria-haspopup="menu" aria-expanded="false">
-            <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="profile-picture">
+            <img src="{% if request.user.photo_url %}{{ request.user.photo_url }}{% else %}{% static 'tickets/profile-pic.png' %}{% endif %}" data-default-avatar="{% static 'tickets/profile-pic.png' %}" alt="" class="profile-picture">
             <span class="username">{{ request.user.name|default:'Usuario' }}</span>
         </div>
     </div>

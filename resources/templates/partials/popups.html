@@ -18,7 +18,7 @@
     <div class="up-view up-view-main">
         <div class="up-header">
             <a href="{% url 'profile' %}" class="up-identity">
-                <img src="{% static 'tickets/profile-pic.png' %}" alt="Perfil" class="up-avatar">
+                <img src="{% if request.user.photo_url %}{{ request.user.photo_url }}{% else %}{% static 'tickets/profile-pic.png' %}{% endif %}" data-default-avatar="{% static 'tickets/profile-pic.png' %}" alt="" class="up-avatar">
                 <div class="up-identity-text">
                     <span class="up-name">{{ request.user.name|default:'Usuario' }}</span>
                     <span class="up-email">{{ request.user.email|default:'' }}</span>

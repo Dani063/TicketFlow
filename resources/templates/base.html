@@ -101,7 +101,7 @@
     <script src="{% static 'tickets/tabs.js' %}?v=s7.6"></script>
     <script src="{% static 'tickets/theme.js' %}?v=s5.9"></script>
     {{ request.user.workspace_preferences|json_script:"workspace-shell-preferences" }}
-    <script src="{% static 'tickets/workspace-profile.js' %}?v=5"></script>
+    <script src="{% static 'tickets/workspace-profile.js' %}?v=6"></script>
     <!-- create_ticket.js loaded globally so initTicketPane is available even
          when the user navigates Home → ticket via SPA (no full page reload). -->
     <script src="{% static 'tickets/attachments.js' %}?v=s7.3"></script>

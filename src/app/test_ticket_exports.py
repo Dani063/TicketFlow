@@ -97,13 +97,13 @@ class TicketListFilterExportTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('text/csv', response['Content-Type'])
         today = timezone.localdate()
-        expected_name = f'Tickets_recordia_telefonica_ultimo_mes_{today - timedelta(days=30):%Y%m%d}-{today:%Y%m%d}.csv'
+        expected_name = f'Tickets_recordia_de_telefonica_del_ultimo_mes_{today - timedelta(days=30):%Y%m%d}-{today:%Y%m%d}.csv'
         self.assertIn(expected_name, response['Content-Disposition'])
 
         content = b''.join(response.streaming_content).decode('utf-8-sig')
         rows = list(csv.reader(StringIO(content)))
         self.assertIn(['Empresa', 'Recordia'], rows)
-        self.assertIn(['Vista', 'Tickets Telefónica último mes'], rows)
+        self.assertIn(['Vista', 'Tickets de Telefónica del último mes'], rows)
         header = [
             'ID', 'Status', 'Service', 'Subject', 'Type', 'Channel',
             'Requester', 'Priority', 'Requested', 'Solved', 'Category',
@@ -125,7 +125,7 @@ class TicketListFilterExportTests(TestCase):
         self.assertTrue(response.content.startswith(b'%PDF'))
         self.assertGreater(len(response.content), 1500)
         today = timezone.localdate()
-        expected_name = f'Tickets_recordia_telefonica_ultimo_mes_{today - timedelta(days=30):%Y%m%d}-{today:%Y%m%d}.pdf'
+        expected_name = f'Tickets_recordia_de_telefonica_del_ultimo_mes_{today - timedelta(days=30):%Y%m%d}-{today:%Y%m%d}.pdf'
         self.assertIn(expected_name, response['Content-Disposition'])
 
     def test_end_user_export_never_escapes_visible_ticket_scope(self):

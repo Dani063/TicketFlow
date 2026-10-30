@@ -59,12 +59,14 @@
         return '';
     }
 
-    function emptyRow(text, color) {
+    function emptyRow(text, color, retry) {
         const style = color ? ` style="color: ${color};"` : '';
         return `<tr><td colspan="${COLSPAN}"><div class="tf-empty tf-empty--compact">` +
             `<span class="tf-empty-icon"><i class="fas fa-inbox"></i></span>` +
-            `<span class="tf-empty-title"${style}>Sin tickets que requieran atención</span>` +
-            `<span class="tf-empty-message"${style}>${text}</span></div></td></tr>`;
+            `<span class="tf-empty-title"${style}>${retry ? 'No se pudieron cargar los tickets' : 'Sin tickets que requieran atención'}</span>` +
+            `<span class="tf-empty-message"${style}>${text}</span>` +
+            (retry ? '<button type="button" class="tf-btn tf-btn--secondary tf-btn--sm tf-empty-retry" data-retry-home>Reintentar</button>' : '') +
+            `</div></td></tr>`;
     }
 
     function openTicket(id, subject) {
@@ -327,7 +329,7 @@
             if (seq !== _reqSeq) return;   // llegó tarde: hay otra carga en curso
 
             if (!res.ok) {
-                tbody.innerHTML = emptyRow(json.detail || 'Error al cargar tickets.', 'var(--color-danger)');
+                tbody.innerHTML = emptyRow('Comprueba la conexión y vuelve a intentarlo.', 'var(--color-danger)', true);
                 return;
             }
 
@@ -360,7 +362,7 @@
         } catch (e) {
             console.error('Error cargando la tabla de la home:', e);
             if (seq === _reqSeq) {
-                tbody.innerHTML = emptyRow('Error de red al cargar tickets.', 'var(--color-danger)');
+                tbody.innerHTML = emptyRow('Comprueba la conexión y vuelve a intentarlo.', 'var(--color-danger)', true);
             }
         } finally {
             if (spinner && !silent && seq === _reqSeq) spinner.style.display = 'none';
@@ -549,6 +551,9 @@
     // ---- Arranque ---------------------------------------------------------
 
     function init() {
+        $('homeTicketsTableBody').addEventListener('click', event => {
+            if (event.target.closest('[data-retry-home]')) load(_view, _page);
+        });
         // Botones de estadísticas: cada uno es una vista de servidor. Volver a
         // pulsar el que ya está activo quita el filtro.
         document.querySelectorAll('.stat[data-view]').forEach(stat => {

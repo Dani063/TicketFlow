@@ -101,71 +101,75 @@
                 <span class="filter-count">–</span>
             </li>
             <li data-view="unsolved_no_tareas">
-                <span class="filter-name">Open</span>
+                <span class="filter-name">No resueltos (sin tareas)</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="resueltos">
-                <span class="filter-name">Resolved</span>
+                <span class="filter-name">Resueltos</span>
                 <span class="filter-count">–</span>
             </li>
         {% else %}
-            {# Filtros completos para agentes #}
+            {# Colas frecuentes a la vista; el resto se puede desplegar o buscar. #}
             <li class="filter-section-label" data-filter-section="priority-assignment">
                 <button type="button" class="filter-section-toggle" aria-expanded="true">
-                    <span>Prioridad y asignación</span><i class="fas fa-chevron-down" aria-hidden="true"></i>
+                    <span>Tu trabajo</span><i class="fas fa-chevron-down" aria-hidden="true"></i>
                 </button>
             </li>
-            <li data-view="telefonica_mes" class="active">
-                <span class="filter-name">Tickets Telefónica último mes</span>
-                <span class="filter-count">–</span>
-            </li>
-            <li data-view="sla_breached" class="filter-sla-breached">
-                <span class="filter-name"><i class="fas fa-exclamation-circle"></i> SLA incumplido</span>
-                <span class="filter-count">–</span>
-            </li>
-            <li data-view="sla_at_risk" class="filter-sla-risk">
-                <span class="filter-name"><i class="fas fa-hourglass-half"></i> SLA en riesgo</span>
-                <span class="filter-count">–</span>
-            </li>
-            <li data-view="unsolved_no_tareas">
-                <span class="filter-name">Tus tickets no resueltos (sin tareas)</span>
-                <span class="filter-count">–</span>
-            </li>
-            <li data-view="unassigned">
-                <span class="filter-name">Tickets sin asignar</span>
+            <li data-view="unsolved_no_tareas" class="active">
+                <span class="filter-name">Mis tickets no resueltos (sin tareas)</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="all_unsolved_no_tareas">
                 <span class="filter-name">Todos los tickets no resueltos (sin tareas)</span>
                 <span class="filter-count">–</span>
             </li>
+            <li data-view="unassigned">
+                <span class="filter-name">Tickets sin asignar</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="unsolved_groups">
+                <span class="filter-name">No resueltos de mis grupos</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="sla_at_risk" class="filter-sla-risk">
+                <span class="filter-name"><i class="fas fa-hourglass-half" aria-hidden="true"></i> SLA en riesgo</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="sla_breached" class="filter-sla-breached">
+                <span class="filter-name"><i class="fas fa-exclamation-circle" aria-hidden="true"></i> SLA incumplido</span>
+                <span class="filter-count">–</span>
+            </li>
             <li class="filter-section-label" data-filter-section="recent-activity">
                 <button type="button" class="filter-section-toggle" aria-expanded="true">
-                    <span>Actividad reciente</span><i class="fas fa-chevron-down" aria-hidden="true"></i>
+                    <span>Actividad y tareas</span><i class="fas fa-chevron-down" aria-hidden="true"></i>
                 </button>
             </li>
             <li data-view="recently_updated">
-                <span class="filter-name">Tickets actualizados recientemente</span>
+                <span class="filter-name">Actualizados recientemente</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="recently_solved">
-                <span class="filter-name">Tickets resueltos recientemente</span>
+                <span class="filter-name">Resueltos recientemente</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="pendientes">
-                <span class="filter-name">Tickets en estado pending</span>
+                <span class="filter-name">Tickets pendientes</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="tareas">
                 <span class="filter-name">Todas las tareas</span>
                 <span class="filter-count">–</span>
             </li>
-            <li data-view="unsolved_groups">
-                <span class="filter-name">Tickets no resueltos de tus grupos</span>
+            <li data-view="new_in_groups">
+                <span class="filter-name">Tickets nuevos de mis grupos</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="rated_last7">
-                <span class="filter-name">Tickets valorados en los últimos 7 días</span>
+                <span class="filter-name">Valorados en los últimos 7 días</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="no_update_48h">
+                <span class="filter-name">Sin actualizar en 48 horas</span>
                 <span class="filter-count">–</span>
             </li>
             <li class="filter-section-label" data-filter-section="services-channels">
@@ -173,85 +177,73 @@
                     <span>Servicios y canales</span><i class="fas fa-chevron-down" aria-hidden="true"></i>
                 </button>
             </li>
+            <li data-view="telefonica_mes">
+                <span class="filter-name">Tickets de Telefónica del último mes</span>
+                <span class="filter-count">–</span>
+            </li>
             <li data-view="internos_comuny">
-                <span class="filter-name">Tickets internos open de Comunycarse</span>
+                <span class="filter-name">Tickets internos abiertos de Comunycarse</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="abiertos_ecomfax">
-                <span class="filter-name">Tickets open de eComFax</span>
+                <span class="filter-name">Tickets abiertos de eComFax</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="recordia_sgsd">
                 <span class="filter-name">Recordia SGSD</span>
                 <span class="filter-count">–</span>
             </li>
-            <li class="filter-section-label" data-filter-section="history-other">
-                <button type="button" class="filter-section-toggle" aria-expanded="true">
-                    <span>Histórico y otras vistas</span><i class="fas fa-chevron-down" aria-hidden="true"></i>
-                </button>
-            </li>
-            <li data-view="trash">
-                <span class="filter-name"><i class="fas fa-trash"></i> Tickets eliminados</span>
-                <span class="filter-count">–</span>
-            </li>
-            <li data-view="closed">
-                <span class="filter-name">Tickets en estado closed</span>
-                <span class="filter-count">–</span>
-            </li>
-            <li data-view="sus_pendientes">
-                <span class="filter-name">Sus tickets en estado pending</span>
-                <span class="filter-count">–</span>
-            </li>
-            <li data-view="espera">
-                <span class="filter-name">Tickets en estado espera</span>
-                <span class="filter-count">–</span>
-            </li>
-            <li data-view="abiertos">
-                <span class="filter-name">Tickets en estado open</span>
-                <span class="filter-count">–</span>
-            </li>
-            <li data-view="sus_no_cerrados">
-                <span class="filter-name">Sus tickets no closed</span>
-                <span class="filter-count">–</span>
-            </li>
-            <li data-view="ultimos_cerrados">
-                <span class="filter-name">Últimos tickets closed</span>
-                <span class="filter-count">–</span>
-            </li>
-            <li data-view="no_resueltos">
-                <span class="filter-name">Todos los tickets No Resueltos</span>
-                <span class="filter-count">–</span>
-            </li>
             <li data-view="twitter">
-                <span class="filter-name">Recibido por Twitter</span>
+                <span class="filter-name">Recibidos por Twitter</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="twitter_dm">
-                <span class="filter-name">Recibido por Twitter Mensaje directo</span>
+                <span class="filter-name">Mensajes directos de Twitter</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="twitter_like">
-                <span class="filter-name">Recibido por Twitter "Me gusta"</span>
+                <span class="filter-name">«Me gusta» de Twitter</span>
                 <span class="filter-count">–</span>
             </li>
-            <li data-view="sus_tareas">
-                <span class="filter-name">Todas sus tareas</span>
+            <li class="filter-section-label" data-filter-section="history-other">
+                <button type="button" class="filter-section-toggle" aria-expanded="true">
+                    <span>Estados e histórico</span><i class="fas fa-chevron-down" aria-hidden="true"></i>
+                </button>
+            </li>
+            <li data-view="espera">
+                <span class="filter-name">Tickets en espera</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="abiertos">
+                <span class="filter-name">Tickets abiertos</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="resueltos">
-                <span class="filter-name">Tickets en estado resolved</span>
+                <span class="filter-name">Tickets resueltos</span>
                 <span class="filter-count">–</span>
             </li>
-            <li data-view="new_in_groups">
-                <span class="filter-name">Tickets nuevos de tus grupos</span>
+            <li data-view="closed">
+                <span class="filter-name">Tickets cerrados</span>
                 <span class="filter-count">–</span>
             </li>
-            <li data-view="open">
-                <span class="filter-name">Tickets en estado open</span>
+            <li data-view="sus_pendientes">
+                <span class="filter-name">Tickets pendientes solicitados por mí</span>
                 <span class="filter-count">–</span>
             </li>
-            <li data-view="no_update_48h">
-                <span class="filter-name">Tickets sin actualizar en 48 horas</span>
+            <li data-view="sus_no_cerrados">
+                <span class="filter-name">Tickets solicitados por mí sin cerrar</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="no_resueltos">
+                <span class="filter-name">Todos los tickets no resueltos</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="sus_tareas">
+                <span class="filter-name">Tareas solicitadas por mí</span>
+                <span class="filter-count">–</span>
+            </li>
+            <li data-view="trash">
+                <span class="filter-name"><i class="fas fa-trash" aria-hidden="true"></i> Tickets eliminados</span>
                 <span class="filter-count">–</span>
             </li>
         {% endif %}
@@ -360,5 +352,5 @@
 <script>
 window.__ticketsData = { createTicketUrl: "{% url 'create_ticket' %}" };
 </script>
-<script src="{% static 'tickets/tickets_list.js' %}?v=s6.10"></script>
+<script src="{% static 'tickets/tickets_list.js' %}?v=s6.11"></script>
 {% endblock %}

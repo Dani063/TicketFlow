@@ -38,20 +38,33 @@
 
     const CHANNEL_LABELS = {
         email: 'Email', web: 'Web', phone: 'Teléfono', api: 'API', chat: 'Chat',
-        twitter: 'Twitter', twitter_dm: 'Twitter DM', twitter_like: 'Twitter Like', internal: 'Interno',
+        twitter: 'Twitter', twitter_dm: 'Mensaje directo de Twitter', twitter_like: '«Me gusta» de Twitter', internal: 'Interno',
     };
     function channelLabel(c) { return CHANNEL_LABELS[c] || c || '-'; }
-    const STATUS_LABELS = { open: 'Open', pending: 'Pending', on_hold: 'On-hold', resolved: 'Resolved', closed: 'Closed' };
+    const STATUS_LABELS = { open: 'Abierto', pending: 'Pendiente', on_hold: 'En espera', resolved: 'Resuelto', closed: 'Cerrado' };
 
     function slaBadge(sla) {
-        if (!sla) return '-';
+        if (!sla) return document.createTextNode('-');
+        const badge = document.createElement('span');
         if (sla.breached) {
             const title = sla.next_due ? `SLA incumplido · venció ${sla.next_due}` : 'SLA incumplido';
-            return `<span class="sla-badge sla-breached" title="${title}">Incumplido</span>`;
+            badge.className = 'sla-badge sla-breached';
+            badge.title = title;
+            badge.textContent = 'Incumplido';
+            return badge;
         }
-        if (sla.at_risk) return `<span class="sla-badge sla-risk" title="Vence ${sla.next_due}">En riesgo</span>`;
-        if (sla.next_due) return `<span class="sla-badge sla-ok">${sla.next_due}</span>`;
-        return '-';
+        if (sla.at_risk) {
+            badge.className = 'sla-badge sla-risk';
+            badge.title = `Vence ${sla.next_due}`;
+            badge.textContent = 'En riesgo';
+            return badge;
+        }
+        if (sla.next_due) {
+            badge.className = 'sla-badge sla-ok';
+            badge.textContent = sla.next_due;
+            return badge;
+        }
+        return document.createTextNode('-');
     }
 
     function fmtDate(date) {
@@ -353,12 +366,14 @@
         }
     }
 
-    function emptyRow(colspan, text, color, title) {
+    function emptyRow(colspan, text, color, title, retry) {
         const style = color ? ` style="color: ${color};"` : '';
         return `<tr><td colspan="${colspan}"><div class="tf-empty tf-empty--compact">` +
             `<span class="tf-empty-icon"><i class="fas fa-filter"></i></span>` +
             `<span class="tf-empty-title"${style}>${title || 'Sin tickets en esta vista'}</span>` +
-            `<span class="tf-empty-message"${style}>${text}</span></div></td></tr>`;
+            `<span class="tf-empty-message"${style}>${text}</span>` +
+            (retry ? '<button type="button" class="tf-btn tf-btn--secondary tf-btn--sm tf-empty-retry" data-retry-tickets>Reintentar</button>' : '') +
+            `</div></td></tr>`;
     }
 
     async function loadTickets(view, page, updateUrl) {
@@ -385,6 +400,7 @@
             let url = `/tickets/filter/?view=${encodeURIComponent(view)}&page=${page}&page_size=${_pageSize}&fast=1${filterParams()}`;
             if (_sortBy) url += `&sort_by=${_sortBy}&sort_dir=${_sortDir}`;
             const response = await fetch(url);
+            if (!response.ok) throw new Error(`Error HTTP ${response.status}`);
             const json = await response.json();
             if (seq !== _loadRequestSeq) return;
             syncDateControls(json.applied_filters);
@@ -457,24 +473,33 @@
                     subjectSpan.dataset.lcBody = t.last_comment ? t.last_comment.body : "";
                     subjectSpan.dataset.lcInternal = (t.last_comment && t.last_comment.is_internal) ? "1" : "";
 
-                    row.innerHTML = `
-                      <td>${t.id}</td>
-                      <td><span class="status-dot status-${t.status}" title="${STATUS_LABELS[t.status] || t.status}"></span></td>
-                      <td>${t.requester}</td>
-                      <td>${t.updated_at}</td>
-                      <td>${t.service}</td>
-                      <td>${t.brand || '-'}</td>
-                      <td>${channelLabel(t.channel)}</td>
-                      <td>${slaBadge(t.sla)}</td>
-                      <td>${t.assignee}</td>
-                    `;
-                    row.insertBefore(cbCell, row.firstChild);
-                    row.cells[2].appendChild(subjectSpan);
+                    const cell = value => {
+                        const td = document.createElement('td');
+                        td.textContent = value == null || value === '' ? '-' : String(value);
+                        row.appendChild(td);
+                        return td;
+                    };
+                    row.appendChild(cbCell);
+                    cell(t.id);
+                    const subjectCell = cell('');
+                    const statusDot = document.createElement('span');
+                    statusDot.className = 'status-dot status-' + (STATUS_LABELS[t.status] ? t.status : 'unknown');
+                    statusDot.title = STATUS_LABELS[t.status] || t.status || '';
+                    subjectCell.replaceChildren(statusDot, subjectSpan);
+                    cell(t.requester);
+                    cell(t.updated_at);
+                    cell(t.service);
+                    cell(t.brand);
+                    cell(channelLabel(t.channel));
+                    const slaCell = document.createElement('td');
+                    slaCell.appendChild(slaBadge(t.sla));
+                    row.appendChild(slaCell);
+                    cell(t.assignee);
                     if (view === 'trash') {
                         const audit = document.createElement('small');
                         audit.className = 'tf-trash-meta';
                         audit.textContent = `Eliminado: ${t.deleted_at || 'fecha no registrada'} · Por: ${t.deleted_by || 'usuario no registrado'}`;
-                        row.cells[2].appendChild(audit);
+                        subjectCell.appendChild(audit);
                     }
                     fragment.appendChild(row);
                 });
@@ -507,7 +532,7 @@
         } catch (err) {
             if (seq !== _loadRequestSeq) return;
             console.error("Error cargando tickets:", err);
-            tbody.innerHTML = emptyRow(COLSPAN, 'Error al cargar tickets.', 'var(--color-danger)');
+            tbody.innerHTML = emptyRow(COLSPAN, 'Comprueba la conexión y vuelve a intentarlo.', 'var(--color-danger)', 'No se pudieron cargar los tickets', true);
         } finally {
             if (seq === _loadRequestSeq) spinner.style.display = "none";
         }
@@ -515,6 +540,9 @@
     window.loadTickets = loadTickets;
 
     function init() {
+        document.getElementById('ticketsTableBody').addEventListener('click', event => {
+            if (event.target.closest('[data-retry-tickets]')) loadTickets(_currentView, _currentPage);
+        });
         document.getElementById("refreshFilters").addEventListener("click", async () => {
             if (_relativeDays !== null) setPreset(_relativeDays);
             _lastExactTotal = null;
@@ -530,14 +558,17 @@
         const filtersToggle = document.getElementById('ticketFiltersToggle');
         const viewTitle = document.getElementById('ticketsViewTitle');
         const filterSearch = document.getElementById('filterViewsSearch');
-        const collapsedSectionsStorageKey = 'ticketflow.filterSections.v1';
+        const collapsedSectionsStorageKey = 'ticketflow.filterSections.v2';
         const reduceFilterMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         let filterAnimationSequence = 0;
-        let collapsedSections = new Set();
+        let collapsedSections = new Set(['recent-activity', 'services-channels', 'history-other']);
 
         try {
-            const savedSections = JSON.parse(sessionStorage.getItem(collapsedSectionsStorageKey) || '[]');
-            if (Array.isArray(savedSections)) collapsedSections = new Set(savedSections);
+            const savedSections = sessionStorage.getItem(collapsedSectionsStorageKey);
+            if (savedSections !== null) {
+                const parsed = JSON.parse(savedSections);
+                if (Array.isArray(parsed)) collapsedSections = new Set(parsed);
+            }
         } catch (error) {
             console.warn('No se pudo recuperar el estado de los filtros.', error);
         }
@@ -684,6 +715,8 @@
         });
 
         let activeView = getUrlParam("view");
+        if (activeView === 'open' && [...viewFilters].some(filter => filter.dataset.view === 'abiertos')) activeView = 'abiertos';
+        if (activeView === 'ultimos_cerrados' && [...viewFilters].some(filter => filter.dataset.view === 'closed')) activeView = 'closed';
         let activePage = parseInt(getUrlParam("page") || "1", 10) || 1;
         let savedSize  = parseInt(getUrlParam("page_size") || "50", 10);
         if ([10,20,50,100,150].includes(savedSize)) {
@@ -765,6 +798,11 @@
         });
 
         if (!activeView && viewFilters.length > 0) activeView = viewFilters[0].dataset.view;
+
+        // Una vista abierta desde un enlace directo debe permanecer visible en el lateral.
+        const activeFilter = [...viewFilters].find(filter => filter.dataset.view === activeView);
+        const activeSection = filterSections.find(section => getSectionItems(section).includes(activeFilter));
+        if (activeSection) collapsedSections.delete(activeSection.dataset.filterSection);
 
         function setActiveView(filter) {
             viewFilters.forEach(x => {

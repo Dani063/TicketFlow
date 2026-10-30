@@ -121,12 +121,15 @@
                 if (result.photo_url) { avatar.src = result.photo_url; avatar.alt = ''; }
                 else avatar.textContent = result.name.charAt(0).toUpperCase();
                 oldAvatar.replaceWith(avatar);
-                if (result.photo_url) document.querySelectorAll('.navbar .profile-picture').forEach(img => { img.src = result.photo_url; });
+                document.querySelectorAll('.navbar .profile-picture, .user-popup .up-avatar').forEach(img => {
+                    img.src = result.photo_url || img.dataset.defaultAvatar;
+                });
                 form.elements.photo.value = '';
                 preview.dataset.currentPhoto = result.photo_url || '';
                 initial.textContent = result.name.charAt(0).toUpperCase();
                 updatePhoto();
                 document.querySelectorAll('.navbar .username').forEach(name => { name.textContent = result.name; });
+                document.querySelectorAll('.user-popup .up-name').forEach(name => { name.textContent = result.name; });
                 const stored = root.querySelector('#workspace-page-preferences');
                 if (stored) stored.textContent = JSON.stringify(result.preferences);
                 const shell = document.getElementById('workspace-shell-preferences');
