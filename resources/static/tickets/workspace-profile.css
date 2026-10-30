@@ -86,3 +86,178 @@
 .wp-photo-status { display: block; font-size: 12px; line-height: 1.5; color: var(--wp-muted); margin-top: 3px; }
 .wp-photo-status[data-error=true] { color: var(--color-danger,#be123c); }
 @media(max-width:600px) { .wp-photo-picker { gap: 14px; }.wp-photo-avatar { width: 64px; height: 64px; flex-basis: 64px; } }
+
+/* Tickets asociados: controles, tabla y paginación forman una sola superficie. */
+.workspace-profile #profileTicketsPanel {
+    overflow: hidden;
+    border: 1px solid var(--wp-line);
+    border-radius: 12px;
+    background: var(--wp-bg);
+}
+.workspace-profile #profileTicketsToolbar {
+    gap: 14px;
+    margin: 0;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--wp-line);
+}
+.workspace-profile .tf-status-pills { gap: 6px; }
+.workspace-profile .tf-status-pill {
+    padding: 7px 12px;
+    border-color: var(--wp-line);
+    background: transparent;
+    color: var(--wp-muted);
+    font-weight: 600;
+    line-height: 1.2;
+}
+.workspace-profile .tf-status-pill:hover { border-color: var(--color-primary); background: var(--color-primary-soft); color: var(--color-primary); }
+.workspace-profile .tf-status-pill.is-active { border-color: var(--color-primary); background: var(--color-primary); color: #fff; }
+.workspace-profile .tf-profile-search {
+    width: min(100%, 280px);
+    min-width: 220px;
+    height: 38px;
+    gap: 0;
+    border: 1px solid var(--color-input-border);
+    border-radius: 8px;
+    background: var(--color-input-bg);
+}
+.workspace-profile .tf-profile-search:focus-within { border-color: var(--color-primary); }
+.workspace-profile .tf-profile-search input.tf-input {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    min-height: 0;
+    height: 100%;
+    margin: 0;
+    padding: 0 10px 0 12px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+.workspace-profile .tf-profile-search .tf-btn {
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    border: 0;
+    background: transparent;
+    color: var(--wp-muted);
+}
+.workspace-profile .tf-profile-search .tf-btn:hover { color: var(--color-primary); }
+.workspace-profile .profile-tickets-table-wrap {
+    display: block;
+    flex: none;
+    min-height: 0;
+    max-height: none;
+    margin: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-gutter: auto;
+}
+.workspace-profile .profile-tickets-table-wrap > table {
+    width: 100%;
+    min-width: 680px;
+    table-layout: fixed;
+    margin: 0;
+    border: 0;
+    background: var(--wp-bg);
+    box-shadow: none;
+    font-size: 13px;
+}
+.workspace-profile .profile-tickets-table-wrap th,
+.workspace-profile .profile-tickets-table-wrap td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--wp-line);
+    text-align: left;
+    vertical-align: middle;
+}
+.workspace-profile .profile-tickets-table-wrap thead th {
+    background: var(--color-surface-2);
+    color: var(--wp-muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+.workspace-profile .profile-tickets-table-wrap tbody tr:last-child td { border-bottom: 0; }
+.workspace-profile .profile-tickets-table-wrap tbody tr:hover { background: var(--color-row-hover); }
+.workspace-profile .profile-tickets-table-wrap tbody tr:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+.workspace-profile .profile-tickets-table-wrap :is(th,td):nth-child(1) { width: 90px; }
+.workspace-profile .profile-tickets-table-wrap :is(th,td):nth-child(3) { width: 132px; }
+.workspace-profile .profile-tickets-table-wrap :is(th,td):nth-child(4) { width: 108px; }
+.workspace-profile .profile-tickets-table-wrap :is(th,td):nth-child(5) { width: 165px; }
+.workspace-profile .wp-ticket-id,
+.workspace-profile .wp-ticket-date { color: var(--wp-muted); font-variant-numeric: tabular-nums; }
+.workspace-profile .wp-ticket-subject {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.workspace-profile .wp-ticket-subject .status-dot {
+    flex: 0 0 8px;
+    width: 8px;
+    height: 8px;
+    margin: 0;
+}
+.workspace-profile .profile-tickets-table-wrap .subject-text {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--wp-ink);
+    font-weight: 600;
+}
+.workspace-profile .wp-ticket-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    max-width: 100%;
+    padding: 5px 9px;
+    border-radius: 999px;
+    background: var(--color-surface-2);
+    color: var(--wp-muted);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.workspace-profile .wp-ticket-state::before { content: ''; width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: currentColor; }
+.workspace-profile .wp-ticket-state--open { background: var(--status-open-bg); color: var(--status-open-fg); }
+.workspace-profile .wp-ticket-state--pending { background: var(--status-pending-bg); color: var(--status-pending-fg); }
+.workspace-profile .wp-ticket-state--on_hold { background: var(--color-primary-soft); color: var(--color-primary); }
+.workspace-profile .wp-ticket-state--resolved { background: var(--status-resolved-bg); color: var(--status-resolved-fg); }
+.workspace-profile .wp-ticket-state--closed { background: var(--status-closed-bg); color: var(--status-closed-fg); }
+.workspace-profile .wp-ticket-priority { color: var(--wp-muted); font-weight: 500; }
+.workspace-profile .wp-ticket-priority--high { color: var(--status-pending-fg); }
+.workspace-profile .wp-ticket-priority--urgent { color: var(--color-danger); font-weight: 600; }
+.workspace-profile .profile-pagination {
+    width: 100%;
+    margin: 0;
+    padding: 10px 16px;
+    gap: 12px;
+    border-top: 1px solid var(--wp-line);
+    background: var(--wp-bg);
+    color: var(--wp-muted);
+    font-size: 12px;
+}
+.workspace-profile .profile-pagination .registros-info { font-variant-numeric: tabular-nums; }
+.workspace-profile .profile-pagination .page-size-sep { order: 1; margin-left: auto; white-space: nowrap; }
+.workspace-profile .profile-pagination .page-size-wrapper { order: 2; width: 68px; }
+.workspace-profile .profile-pagination .page-numbers { order: 3; gap: 3px; }
+.workspace-profile .profile-pagination .page-num-btn { width: 28px; min-width: 28px; height: 28px; border-radius: 7px; }
+.workspace-profile .profile-pagination .page-arrow { font-size: 11px; }
+.workspace-profile .profile-pagination .page-ellipsis { color: var(--wp-muted); white-space: nowrap; }
+.workspace-profile .profile-pagination .page-size-wrapper select {
+    width: 100%;
+    min-height: 32px;
+    margin: 0;
+    padding: 4px 7px;
+    border-radius: 7px;
+    font-size: 12px;
+}
+@media (max-width: 760px) {
+    .workspace-profile #profileTicketsToolbar { flex-wrap: wrap; }
+    .workspace-profile #profileTicketsToolbar .tf-toolbar-grow { display: none; }
+    .workspace-profile .tf-profile-search { width: 100%; min-width: 0; }
+    .workspace-profile .profile-pagination .registros-info { flex-basis: 100%; }
+    .workspace-profile .profile-pagination .page-size-sep { margin-left: 0; }
+    .workspace-profile .profile-pagination .page-numbers { margin-left: auto; }
+}

@@ -53,11 +53,23 @@ existe con `DEBUG=True`), no por `/login/` (redirige al SSO corporativo).
 
 ## Tests
 
+Las instrucciones para asistentes de código están también en [`AGENTS.md`](AGENTS.md).
+
 ```bash
-cd src
-USE_SQLITE=1 DISABLE_AWS_SSM=1 python main.py test app
-USE_SQLITE=1 DISABLE_AWS_SSM=1 python main.py check
+# Desde la raíz del repositorio. Usa SQLite, evita AWS y acelera el hash
+# de las contraseñas creadas por los tests (sin cambiar producción).
+python scripts/run_tests.py app
+
+# Durante el desarrollo, ejecutar solo el módulo afectado.
+python scripts/run_tests.py app.tests_ticket_views
+
+# Antes de integrar cambios, repetir la suite completa y ver los más lentos.
+python scripts/run_tests.py app --timing --durations 20
 ```
+
+El ejecutor rápido usa exactamente la misma suite y aplica todas las migraciones.
+Para comprobar la configuración sin ejecutar tests:
+`python src/main.py check --settings=TicketFlow.settings_test`.
 
 La suite escupe tracebacks y warnings a propósito (hay tests que provocan fallos de IA, SES
 y CSRF deliberadamente); el resultado que importa es el `OK`/`FAILED` final.

@@ -10,49 +10,52 @@ Optional: extra_param + extra_value (carried in every link, e.g. customer id).
     <div class="tf-status-pills" role="group" aria-label="Filtro por estado">
         {% with current=filters.status %}
         <button type="button" class="tf-status-pill {% if current == 'all' %}is-active{% endif %}"     data-status="all">Todos</button>
-        <button type="button" class="tf-status-pill {% if current == 'open' %}is-active{% endif %}"    data-status="open">open</button>
-        <button type="button" class="tf-status-pill {% if current == 'pending' %}is-active{% endif %}" data-status="pending">pending</button>
-        <button type="button" class="tf-status-pill {% if current == 'solved' %}is-active{% endif %}"  data-status="solved">resolved</button>
+        <button type="button" class="tf-status-pill {% if current == 'open' %}is-active{% endif %}"    data-status="open">Activos</button>
+        <button type="button" class="tf-status-pill {% if current == 'pending' %}is-active{% endif %}" data-status="pending">Pendientes</button>
+        <button type="button" class="tf-status-pill {% if current == 'solved' %}is-active{% endif %}"  data-status="solved">Resueltos</button>
         <input type="hidden" name="status" value="{{ current }}" id="profileTicketsStatus">
         {% endwith %}
     </div>
     <div class="tf-toolbar-grow"></div>
     <div class="tf-profile-search">
-        <input class="tf-input tf-input--search" type="search" name="q" value="{{ filters.q }}" placeholder="Buscar por asunto o #ID…" autocomplete="off">
+        <input class="tf-input tf-input--search" type="search" name="q" value="{{ filters.q }}" placeholder="Buscar asunto o ID" aria-label="Buscar tickets por asunto o ID" autocomplete="off">
         <button type="submit" class="tf-btn tf-btn--icon tf-btn--ghost" aria-label="Buscar"><i class="fas fa-search"></i></button>
     </div>
     <input type="hidden" name="page_size" value="{{ pagination.page_size }}" id="profileTicketsPageSize">
 </form>
 
 <div class="tabla tf-table-scroll profile-tickets-table-wrap">
-    <table data-workspace-ticket-table>
+    <table data-workspace-ticket-table aria-label="Tickets asociados">
         <thead>
             <tr>
                 <th>ID</th>
                 <th>Asunto</th>
                 <th>Estado</th>
                 <th>Prioridad</th>
-                <th>Última actualización</th>
+                <th>Actualizado</th>
             </tr>
         </thead>
         <tbody>
             {% for ticket in tickets %}
-            <tr onclick="openTicket('{{ ticket.id }}', '{{ ticket.subject|escapejs }}')">
-                <td>{{ ticket.id }}</td>
+            <tr class="wp-ticket-row" tabindex="0" role="link" aria-label="Abrir ticket {{ ticket.id }}: {{ ticket.subject }}" onclick="openTicket('{{ ticket.id }}', '{{ ticket.subject|escapejs }}')" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.click(); }">
+                <td class="wp-ticket-id">#{{ ticket.id }}</td>
                 <td>
-                    <span class="status-dot status-{{ ticket.status|lower }}"></span><span class="subject-text" title="{{ ticket.subject }}"
-                        data-status="{{ ticket.status }}"
-                        data-subject="{{ ticket.subject }}"
-                        data-description="{{ ticket.description|default:''|truncatechars:200 }}"
-                        data-priority="{{ ticket.priority|default:'' }}"
-                        data-lc-author="{{ ticket.lc_author|default:'' }}"
-                        data-lc-date="{{ ticket.lc_date|default:'' }}"
-                        data-lc-body="{{ ticket.lc_body|default:'' }}"
-                        data-lc-internal="{{ ticket.lc_internal|yesno:'1,' }}">{{ ticket.subject|truncatechars:100 }}</span>
+                    <span class="wp-ticket-subject">
+                        <span class="status-dot status-{{ ticket.status|lower }}" aria-hidden="true"></span>
+                        <span class="subject-text" title="{{ ticket.subject }}"
+                            data-status="{{ ticket.status }}"
+                            data-subject="{{ ticket.subject }}"
+                            data-description="{{ ticket.description|default:''|truncatechars:200 }}"
+                            data-priority="{{ ticket.priority|default:'' }}"
+                            data-lc-author="{{ ticket.lc_author|default:'' }}"
+                            data-lc-date="{{ ticket.lc_date|default:'' }}"
+                            data-lc-body="{{ ticket.lc_body|default:'' }}"
+                            data-lc-internal="{{ ticket.lc_internal|yesno:'1,' }}">{{ ticket.subject|truncatechars:100 }}</span>
+                    </span>
                 </td>
-                <td>{{ ticket.status }}</td>
-                <td>{{ ticket.priority|default:"—" }}</td>
-                <td>{{ ticket.updated_at|date:"d/m/Y H:i" }}</td>
+                <td><span class="wp-ticket-state wp-ticket-state--{{ ticket.status|default:'unknown' }}">{% if ticket.status == 'open' %}Abierto{% elif ticket.status == 'pending' %}Pendiente{% elif ticket.status == 'on_hold' %}En espera{% elif ticket.status == 'resolved' %}Resuelto{% elif ticket.status == 'closed' %}Cerrado{% else %}{{ ticket.status|default:'Sin estado' }}{% endif %}</span></td>
+                <td><span class="wp-ticket-priority wp-ticket-priority--{{ ticket.priority|default:'none' }}">{% if ticket.priority == 'low' %}Baja{% elif ticket.priority == 'normal' %}Normal{% elif ticket.priority == 'high' %}Alta{% elif ticket.priority == 'urgent' %}Urgente{% else %}{{ ticket.priority|default:'—' }}{% endif %}</span></td>
+                <td class="wp-ticket-date">{{ ticket.updated_at|date:"d/m/Y H:i" }}</td>
             </tr>
             {% empty %}
             <tr><td colspan="5">
@@ -70,13 +73,13 @@ Optional: extra_param + extra_value (carried in every link, e.g. customer id).
 {% if pagination.total > 0 %}
 <div class="pagination-bar profile-pagination">
     <span class="registros-info">
-        {{ pagination.start_index }}–{{ pagination.end_index }} de {{ pagination.total }}
+        {{ pagination.start_index }}–{{ pagination.end_index }} de {{ pagination.total }} ticket{{ pagination.total|pluralize:"s" }}
     </span>
     <div class="page-numbers">
-        <button type="button" class="page-num-btn page-arrow" data-page="{{ pagination.prev_page }}" {% if not pagination.has_prev %}disabled{% endif %} aria-label="Anterior">‹</button>
+        <button type="button" class="page-num-btn page-arrow" data-page="{{ pagination.prev_page }}" {% if not pagination.has_prev %}disabled{% endif %} aria-label="Página anterior"><i class="fas fa-chevron-left" aria-hidden="true"></i></button>
         <span class="page-num-btn active" aria-current="page">{{ pagination.page }}</span>
         <span class="page-ellipsis">/ {{ pagination.total_pages }}</span>
-        <button type="button" class="page-num-btn page-arrow" data-page="{{ pagination.next_page }}" {% if not pagination.has_next %}disabled{% endif %} aria-label="Siguiente">›</button>
+        <button type="button" class="page-num-btn page-arrow" data-page="{{ pagination.next_page }}" {% if not pagination.has_next %}disabled{% endif %} aria-label="Página siguiente"><i class="fas fa-chevron-right" aria-hidden="true"></i></button>
     </div>
     <span class="page-size-sep">Por página</span>
     <div class="page-size-wrapper">

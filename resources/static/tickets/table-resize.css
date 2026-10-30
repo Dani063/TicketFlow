@@ -1,0 +1,60 @@
+/* Asas para ajustar el ancho de columna (table-resize.js). */
+.tf-col-host { position: relative; }
+
+.tf-col-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 9px;
+    height: 100%;
+    cursor: col-resize;
+    touch-action: none;
+    user-select: none;
+    z-index: 2;
+}
+
+.tf-col-resizer::after {
+    content: '';
+    position: absolute;
+    top: 22%;
+    bottom: 22%;
+    right: 3px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--color-border-strong);
+    opacity: 0;
+    transition: opacity .15s ease, background-color .15s ease;
+}
+
+th:hover > .tf-col-resizer::after { opacity: 1; }
+
+.tf-col-resizer:hover::after,
+.tf-col-resizer:focus-visible::after,
+.tf-col-resizer.is-active::after {
+    opacity: 1;
+    background: var(--color-primary);
+}
+
+.tf-col-resizer:focus-visible { outline: none; }
+
+/* El título de la cabecera nunca se parte; table-resize.js impide estrechar
+   la columna por debajo de él. */
+table.tf-cols-sized > thead > tr > th { white-space: nowrap; }
+
+/* Con anchos fijos, el texto largo de las filas (correos, asuntos) baja de
+   línea en vez de invadir la columna vecina. */
+table.tf-cols-sized > tbody > tr > td { overflow-wrap: anywhere; }
+
+body.tf-col-resizing,
+body.tf-col-resizing * {
+    cursor: col-resize !important;
+    user-select: none !important;
+}
+
+@media (max-width: 720px) {
+    .tf-col-resizer { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tf-col-resizer::after { transition: none; }
+}
