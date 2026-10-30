@@ -42,11 +42,11 @@ class TicketViewConsistencyTests(TestCase):
         self.assertEqual(response.status_code, 200)
         return response.json()
 
-    def test_home_and_personal_queue_share_old_assigned_non_task_work(self):
+    def test_home_and_personal_queue_share_old_assigned_work_including_tasks(self):
         old = self.ticket()
         Ticket.objects.filter(pk=old.pk).update(created_at=timezone.now() - timedelta(days=100))
         hold = self.ticket(status='on_hold')
-        self.ticket(type='task')
+        task = self.ticket(type='task')
         self.ticket(status='resolved')
         self.ticket(status='closed')
         self.ticket(requester=self.agent, assignee=self.other)
@@ -55,9 +55,34 @@ class TicketViewConsistencyTests(TestCase):
         self.ticket(is_deleted=True)
         for view in ['home_all', 'unsolved_no_tareas']:
             payload = self.rows(view)
-            self.assertCountEqual([t['id'] for t in payload['tickets']], [old.id, hold.id])
+            self.assertCountEqual([t['id'] for t in payload['tickets']], [old.id, hold.id, task.id])
             self.assertFalse(payload['applied_filters']['date_range_applied'])
-        self.assertEqual(self.client.get('/api/home-stats/').json()['pendientes_count'], 2)
+        self.assertEqual(self.client.get('/api/home-stats/').json()['pendientes_count'], 3)
+
+    def test_group_task_from_email_is_in_home_and_in_every_unsolved_queue(self):
+        # Caso real de PRO: la IA clasifica como tarea un correo del cliente.
+        task = self.ticket(type='task', channel='email', assignee=self.other)
+        counts = lambda: self.client.get('/tickets/filter/', {
+            'counts': 1, 'counts_only': 1, 'force_counts': 1,
+        }).json()['filtros']
+        self.assertEqual([t['id'] for t in self.rows('home_groups')['tickets']], [task.id])
+        self.assertEqual([t['id'] for t in self.rows('all_unsolved_no_tareas')['tickets']], [task.id])
+        self.assertEqual(counts()['all_unsolved_no_tareas'], 1)
+
+        # Pendiente sale de «abiertos de tu grupo», pero sigue en la cola.
+        Ticket.objects.filter(pk=task.pk).update(status='pending')
+        cache.clear()
+        self.assertEqual(self.rows('home_groups')['tickets'], [])
+        self.assertEqual([t['id'] for t in self.rows('all_unsolved_no_tareas')['tickets']], [task.id])
+        self.assertEqual(counts()['all_unsolved_no_tareas'], 1)
+
+    def test_ticket_filters_drop_task_suffix_and_duplicated_unsolved_view(self):
+        html = self.client.get('/tickets/').content.decode()
+        self.assertNotIn('sin tareas', html)
+        self.assertNotIn('data-view="no_resueltos"', html)
+        self.assertIn('data-view="all_unsolved_no_tareas"', html)
+        self.assertEqual(self.rows('all_unsolved_no_tareas')['applied_filters']['view_label'],
+                         'Todos los tickets no resueltos')
 
     def test_on_hold_is_in_unsolved_rows_counts_and_exports(self):
         hold = self.ticket(status='on_hold')

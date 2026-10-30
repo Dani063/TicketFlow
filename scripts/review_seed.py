@@ -71,7 +71,7 @@ def seed_review(root, *, reset=False, port=8010):
     ticket('02','Pendiente antiguo (120 días)', status='pending', age_days=120)
     ticket('03','Abierto sin asignar', assignee=None)
     ticket('04','Abierto asignado al agente B', assignee=other)
-    ticket('05','Tarea: fuera de la cola sin tareas', type='task')
+    ticket('05','Tarea: también en las colas de no resueltos', type='task')
     solved = ticket('06','Resuelto: fuera de la cola no resuelta', status='resolved', resolved_at=now)
     ticket('07','On-hold: notas y SLA en pausa', status='on_hold', age_days=2/24,
         on_hold_at=now-timedelta(hours=1), resolved_at=now-timedelta(hours=1),
@@ -122,9 +122,9 @@ def seed_review(root, *, reset=False, port=8010):
     SatisfactionRating.objects.get_or_create(ticket=other_solved,score='bad',defaults={'requester':customer,'assignee':other,'created_at':now})
     counts={
         'personal_agente_a':Ticket.objects.filter(assignee=agent,is_deleted=False,merged_into__isnull=True)
-            .exclude(status__in=('resolved','on_hold','closed')).exclude(type='task').count(),
-        'todos_no_resueltos_sin_tareas':Ticket.objects.filter(is_deleted=False,merged_into__isnull=True)
-            .exclude(status__in=('resolved','on_hold','closed')).exclude(type='task').count(),
+            .exclude(status__in=('resolved','on_hold','closed')).count(),
+        'todos_no_resueltos':Ticket.objects.filter(is_deleted=False,merged_into__isnull=True)
+            .exclude(status__in=('resolved','on_hold','closed')).count(),
     }
     index={'users':[{'email':item[1],'name':item[2],'role':item[0]} for item in ACCOUNTS],
         'brand':brand.name,'scenarios':scenarios,'initial_counts':counts}

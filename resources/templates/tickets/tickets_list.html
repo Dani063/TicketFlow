@@ -101,7 +101,7 @@
                 <span class="filter-count">–</span>
             </li>
             <li data-view="unsolved_no_tareas">
-                <span class="filter-name">No resueltos (sin tareas)</span>
+                <span class="filter-name">No resueltos</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="resueltos">
@@ -116,11 +116,11 @@
                 </button>
             </li>
             <li data-view="unsolved_no_tareas" class="active">
-                <span class="filter-name">Mis tickets no resueltos (sin tareas)</span>
+                <span class="filter-name">Mis tickets no resueltos</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="all_unsolved_no_tareas">
-                <span class="filter-name">Todos los tickets no resueltos (sin tareas)</span>
+                <span class="filter-name">Todos los tickets no resueltos</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="unassigned">
@@ -232,10 +232,6 @@
             </li>
             <li data-view="sus_no_cerrados">
                 <span class="filter-name">Tickets solicitados por mí sin cerrar</span>
-                <span class="filter-count">–</span>
-            </li>
-            <li data-view="no_resueltos">
-                <span class="filter-name">Todos los tickets no resueltos</span>
                 <span class="filter-count">–</span>
             </li>
             <li data-view="sus_tareas">
@@ -352,5 +348,5 @@
 <script>
 window.__ticketsData = { createTicketUrl: "{% url 'create_ticket' %}" };
 </script>
-<script src="{% static 'tickets/tickets_list.js' %}?v=s6.11"></script>
+<script src="{% static 'tickets/tickets_list.js' %}?v=s6.12"></script>
 {% endblock %}

@@ -701,7 +701,9 @@ class BalancedUnresolvedTicketPaginationTests(_BaseFixture):
                             ('Miembro desactivado', inactive_member), ('Sin asignar', None)]:
             ticket = self.make_ticket(subject=name, assignee=agent)
             expected_ids[agent.name if agent else 'Sin asignar'].append(ticket.id)
-        self.make_ticket(subject="Tarea", assignee=self.agent, type="task")
+        # Las tareas forman parte de la cola como cualquier otro ticket.
+        task = self.make_ticket(subject="Tarea", assignee=self.agent, type="task")
+        expected_ids[self.agent.name].append(task.id)
         self.make_ticket(subject="Resolved", assignee=self.agent, status="resolved")
         self.make_ticket(subject="Closed", assignee=self.agent, status="closed")
 
@@ -713,7 +715,7 @@ class BalancedUnresolvedTicketPaginationTests(_BaseFixture):
         second = self.client.get(f"{endpoint}?{query}&page=2").json()
         third = self.client.get(f"{endpoint}?{query}&page=3").json()
 
-        self.assertEqual(first["pagination"]["total"], 21)
+        self.assertEqual(first["pagination"]["total"], 22)
         self.assertEqual(first["pagination"]["total_pages"], 3)
         self.assertTrue(first["pagination"]["exact"])
         self.assertEqual(first["group_by"], "assignee")
@@ -726,23 +728,23 @@ class BalancedUnresolvedTicketPaginationTests(_BaseFixture):
         self.assertEqual(actual, expected_ids)
         self.assertEqual(len(first['tickets']), 10)
         self.assertEqual(len(second['tickets']), 10)
-        self.assertEqual(len(third['tickets']), 1)
+        self.assertEqual(len(third['tickets']), 2)
 
         exact_total = self.client.get(
             f"{endpoint}?view=all_unsolved_no_tareas&page_size=10&total_only=1"
         ).json()
-        self.assertEqual(exact_total["pagination"]["total"], 21)
+        self.assertEqual(exact_total["pagination"]["total"], 22)
 
         counts = self.client.get(
             f"{endpoint}?counts=1&counts_only=1&force_counts=1&page_size=10"
         ).json()["filtros"]
-        self.assertEqual(counts["all_unsolved_no_tareas"], 21)
+        self.assertEqual(counts["all_unsolved_no_tareas"], 22)
 
         # La vista personal solo incluye el trabajo asignado al agente actual.
         global_unsolved = self.client.get(
             f"{endpoint}?view=unsolved_no_tareas&page_size=10&total_only=1"
         ).json()
-        self.assertEqual(global_unsolved["pagination"]["total"], 8)
+        self.assertEqual(global_unsolved["pagination"]["total"], 9)
 
     def test_more_agents_than_rows_continue_on_the_next_page(self):
         rule = AssignmentRule.objects.create(name="Many agents", active=True)

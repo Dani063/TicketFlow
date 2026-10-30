@@ -138,9 +138,9 @@ _TICKET_VIEW_LABELS = {
     'trash': 'Tickets eliminados',
     'mis_tickets': 'Todos tus tickets',
     'telefonica_mes': 'Tickets de Telefónica del último mes',
-    'unsolved_no_tareas': 'Mis tickets no resueltos (sin tareas)',
+    'unsolved_no_tareas': 'Mis tickets no resueltos',
     'unassigned': 'Tickets sin asignar',
-    'all_unsolved_no_tareas': 'Todos los tickets no resueltos (sin tareas)',
+    'all_unsolved_no_tareas': 'Todos los tickets no resueltos',
     'recently_updated': 'Actualizados recientemente',
     'recently_solved': 'Resueltos recientemente',
     'pendientes': 'Tickets pendientes',
@@ -500,8 +500,8 @@ def _tickets_for_view(base_qs, view, user):
             return mine.filter(
                 status__in=QUEUE_FINISHED_STATUSES, updated_at__gte=cutoff_60
             )
-        # home_all replica «Tus tickets no resueltos (sin tareas)».
-        return mine.exclude(status__in=QUEUE_FINISHED_STATUSES).exclude(type='task')
+        # home_all replica «Mis tickets no resueltos», tareas incluidas.
+        return mine.exclude(status__in=QUEUE_FINISHED_STATUSES)
 
     if view == "mis_tickets":
         return base_qs
@@ -510,15 +510,15 @@ def _tickets_for_view(base_qs, view, user):
             requester__organization__name="Telefonica",
             created_at__gte=now - timedelta(days=30),
         )
+    # Las claves conservan «no_tareas» por los enlaces guardados, pero las
+    # tareas ya cuentan como trabajo pendiente: la IA clasifica correos de
+    # clientes como tarea y desaparecían de la cola.
     if view == "unsolved_no_tareas":
-        return _my_tickets_queryset(base_qs, user).filter(~Q(status__in=QUEUE_FINISHED_STATUSES), ~Q(type="task"))
+        return _my_tickets_queryset(base_qs, user).filter(~Q(status__in=QUEUE_FINISHED_STATUSES))
     if view == "unassigned":
         return base_qs.filter(assignee__isnull=True)
     if view == "all_unsolved_no_tareas":
-        return base_qs.filter(
-            ~Q(status__in=QUEUE_FINISHED_STATUSES),
-            ~Q(type="task"),
-        )
+        return base_qs.filter(~Q(status__in=QUEUE_FINISHED_STATUSES))
     if view == "recently_updated":
         return base_qs.filter(updated_at__gte=now - timedelta(hours=24))
     if view == "recently_solved":
@@ -609,7 +609,7 @@ def _home_stats(user):
     # /tickets/filter/?view=home_* con paginación y orden, igual que /tickets/.
     # Aquí solo hace falta el total para el encabezado, y el propio JS lo
     # refresca con el que devuelve la API en cada carga.
-    pendientes_count = tickets_qs.exclude(status__in=QUEUE_FINISHED_STATUSES).exclude(type='task').count()
+    pendientes_count = tickets_qs.exclude(status__in=QUEUE_FINISHED_STATUSES).count()
 
     # Personal bien/mal: tickets del usuario, últimos 60 días
     user_ratings_60 = SatisfactionRating.objects.filter(
@@ -739,15 +739,11 @@ def filter_tickets(request):
             n_twitter_dm     = Count('id', filter=in_range & Q(channel='twitter_dm')),
             n_twitter_like   = Count('id', filter=in_range & Q(channel='twitter_like')),
             n_on_hold        = Count('id', filter=Q(status='on_hold')),
-            n_mine_unsolved  = Count('id', filter=mine & ~Q(status__in=QUEUE_FINISHED_STATUSES) & ~Q(type='task')),
+            n_mine_unsolved  = Count('id', filter=mine & ~Q(status__in=QUEUE_FINISHED_STATUSES)),
             n_comuny         = Count(Case(When(service='internocomuny',  status='open', then=1), output_field=IntegerField())),
             n_ecomfax        = Count(Case(When(service='ecomfax',        status='open', then=1), output_field=IntegerField())),
             n_recordia       = Count(Case(When(service='recordia',       status='open', then=1), output_field=IntegerField())),
             n_unassigned     = Count(Case(When(assignee__isnull=True,    then=1), output_field=IntegerField())),
-            n_unsolved_notarea = Count(Case(
-                When(~Q(status__in=QUEUE_FINISHED_STATUSES) & ~Q(type='task'), then=1),
-                output_field=IntegerField()
-            )),
             n_no_resueltos   = Count('id', filter=~Q(status__in=QUEUE_FINISHED_STATUSES)),
             n_sla_breached   = Count(Case(
                 When(Q(sla_breached_at__isnull=False) & ~Q(status__in=SOLVED_STATUSES), then=1),
@@ -805,7 +801,7 @@ def filter_tickets(request):
             "telefonica_mes":     n_telefonica,
             "unsolved_no_tareas": _agg['n_mine_unsolved'],
             "unassigned":         _agg['n_unassigned'],
-            "all_unsolved_no_tareas": _agg['n_unsolved_notarea'],
+            "all_unsolved_no_tareas": _agg['n_no_resueltos'],
             "recently_updated":   _time_agg['recently_updated'],
             "recently_solved":    _agg['n_resolved'],
             "pendientes":         _agg['n_pending'],

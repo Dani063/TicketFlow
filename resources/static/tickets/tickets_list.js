@@ -717,6 +717,7 @@
         let activeView = getUrlParam("view");
         if (activeView === 'open' && [...viewFilters].some(filter => filter.dataset.view === 'abiertos')) activeView = 'abiertos';
         if (activeView === 'ultimos_cerrados' && [...viewFilters].some(filter => filter.dataset.view === 'closed')) activeView = 'closed';
+        if (activeView === 'no_resueltos' && [...viewFilters].some(filter => filter.dataset.view === 'all_unsolved_no_tareas')) activeView = 'all_unsolved_no_tareas';
         let activePage = parseInt(getUrlParam("page") || "1", 10) || 1;
         let savedSize  = parseInt(getUrlParam("page_size") || "50", 10);
         if ([10,20,50,100,150].includes(savedSize)) {
